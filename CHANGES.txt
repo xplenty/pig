@@ -1,0 +1,42 @@
+Pig Change Log
+
+
+Trunk (unreleased changes)
+
+  INCOMPATIBLE CHANGES
+
+  NEW FEATURES
+
+  OPTIMIZATIONS
+
+  BUG FIXES
+  	PIG-24 Files that were incorrectly placed under test/reports have been
+	removed.  ant clean now cleans test/reports.  (milindb via gates)
+
+	PIG-25 com.yahoo.pig dir left under pig/test by mistake. removed it (olgan@)
+
+	PIG-23 Made pig work with java 1.5. (milindb via gates)
+
+	PIG-8 added binary comparator (olgan)
+
+	PIG-17 integrated with Hadoop 0.15 (olgan@)
+
+    PIG-11 Add capability to search for jar file to register. (antmagna via
+	olgan)
+
+	PIG-20 Added custom comparator functions for order by (phunt via gates)
+
+	PIG-33 Help was commented out - uncommented (olgan)
+
+	PIG-31: second half of concurrent mode problem addressed (olgan)
+
+	PIG-14: added heartbeat functionality (olgan)
+
+	PIG-17: updated hadoop15.jar to match hadoop 0.15.1 release
+
+	PIG-7: Added use of combiner in some restricted cases. (gates)
+	
+	PIG-29: fixed bag factory to be properly initialized (utkarsh)
+
+	PIG-32: incremental changes to split logical and physical plans (antmagna
+	via olgan)
