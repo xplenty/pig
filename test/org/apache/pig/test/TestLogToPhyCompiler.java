@@ -23,13 +23,16 @@ import static org.junit.Assert.fail;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.Random;
 
+import org.apache.commons.lang.CharSet;
 import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.SortColInfo;
@@ -49,15 +52,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 /**
- * All new tests should be included at the end of the existing test cases. This is to ensure that 
- * nodeIdGenerator produces the same sequence as in the golden files for the previously existing test cases 
  * 
- * To generate golden files, use the following code :
- * ByteArrayOutputStream baos = new ByteArrayOutputStream();
- * pp.explain(baos);
- * FileOutputStream fos = new FileOutputStream("test/org/apache/pig/test/data/GoldenFiles/Union.gld");
- * fos.write(baos.toByteArray());
- *
+ * To generate golden files, update generate to true
+ * 
  */
 
 @RunWith(OrderedJUnit4Runner.class)
@@ -91,6 +88,7 @@ public class TestLogToPhyCompiler {
     private boolean generate = false;
     
     PigServer pigServer = null;
+    private static final int MAX_SIZE = 100000;;
    
     
     @Before
@@ -99,27 +97,18 @@ public class TestLogToPhyCompiler {
         pc.connect();
     }
     
-    @Test // Commented out due to PIG-2020
-    public void testComplexForeach() throws Exception {
-    	String query = "C = foreach (load 'a' as  (a:bag{} ) ) {" +
-        "B = FILTER $0 BY ($1 == $2);" +
-        "generate B;" +
-        "};" + "store C into 'output';";
-        LogicalPlan plan = buildPlan(query);
-    	PhysicalPlan pp = buildPhysicalPlan(plan); 
-    	int MAX_SIZE = 100000;
-    	ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        pp.explain(baos);
-        baos.write((int)'\n');
-        String compiledPlan = baos.toString();
-        compiledPlan = compiledPlan.replaceAll("Load(.*)","Load()").replaceAll("Store(.*)","Store()");
+    private String compilePlan(String query, String goldenFile, boolean checkOneLeaf)
+            throws Exception, FrontendException, FileNotFoundException,
+            IOException {
+        LogicalPlan lp = buildPlan(query);
+        PhysicalPlan pp = buildPhysicalPlan(lp);
         
-        if(generate){
-            FileOutputStream fos = new FileOutputStream("test/org/apache/pig/test/data/GoldenFiles/ComplexForeach.gld");
-            fos.write(baos.toByteArray());
-            return;
+        if (checkOneLeaf) {
+          //Ensure that there is only 1 leaf node
+            assertEquals(1, pp.getLeaves().size());
         }
         
+<<<<<<< HEAD
     	FileInputStream fis = new FileInputStream("test/org/apache/pig/test/data/GoldenFiles/ComplexForeach.gld");
         byte[] b = new byte[MAX_SIZE];
         int len = fis.read(b);
@@ -141,11 +130,15 @@ public class TestLogToPhyCompiler {
 
     	int MAX_SIZE = 100000;
     	ByteArrayOutputStream baos = new ByteArrayOutputStream();
+=======
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
         pp.explain(baos);
         baos.write((int)'\n');
         String compiledPlan = baos.toString();
-        compiledPlan = compiledPlan.replaceAll("Load(.*)","Load()").replaceAll("Store(.*)","Store()");
+        compiledPlan = removedUnaffectingChanges(compiledPlan);
 
+<<<<<<< HEAD
         if(generate){
             FileOutputStream fos = new FileOutputStream("test/org/apache/pig/test/data/GoldenFiles/Sort.gld");
             fos.write(baos.toByteArray());
@@ -213,11 +206,20 @@ public class TestLogToPhyCompiler {
         String compiledPlan = baos.toString();
         compiledPlan = compiledPlan.replaceAll("Load(.*)","Load()").replaceAll("Store(.*)","Store()");
         
+=======
+        generateGolden(goldenFile, compiledPlan);
+        return compiledPlan;
+    }
+
+    private void generateGolden(String goldenFile, String data)
+            throws FileNotFoundException, IOException {
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
         if(generate){
-            FileOutputStream fos = new FileOutputStream("test/org/apache/pig/test/data/GoldenFiles/Cogroup.gld");
-            fos.write(baos.toByteArray());
-            return;
+            FileOutputStream fos = new FileOutputStream(goldenFile);
+            fos.write(data.getBytes("UTF-8"));
+            fos.close();
         }
+<<<<<<< HEAD
         
     	FileInputStream fis = new FileInputStream("test/org/apache/pig/test/data/GoldenFiles/Cogroup.gld");
         byte[] b = new byte[MAX_SIZE];
@@ -251,21 +253,38 @@ public class TestLogToPhyCompiler {
         baos.write((int)'\n');
         String compiledPlan = baos.toString();
         compiledPlan = compiledPlan.replaceAll("Load(.*)","Load()").replaceAll("Store(.*)","Store()");
+=======
+    }
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 
-        if(generate){
-            FileOutputStream fos = new FileOutputStream("test/org/apache/pig/test/data/GoldenFiles/Arithmetic.gld");
-            fos.write(baos.toByteArray());
-            return;
-        }
-        
-    	FileInputStream fis = new FileInputStream("test/org/apache/pig/test/data/GoldenFiles/Arithmetic.gld");
+    private String readGolden(int MAX_SIZE, String goldenFile)
+            throws FileNotFoundException, IOException {
+        FileInputStream fis = new FileInputStream(goldenFile);
         byte[] b = new byte[MAX_SIZE];
         int len = fis.read(b);
+        fis.close();
         String goldenPlan = new String(b, 0, len);
-        goldenPlan = goldenPlan.replaceAll("Load(.*)","Load()");
+        goldenPlan = removedUnaffectingChanges(goldenPlan);
+        return goldenPlan;
+    }
 
+    private String removedUnaffectingChanges(String compiledPlan) {
+        return compiledPlan
+                .replaceAll("test-[0-9]*: ","test-: ")
+                .replaceAll("Load(.*)","Load()")
+                .replaceAll("Store(.*)","Store()")
+                .replaceAll("scope-[0-9]*\\n", "\n");
+    }
+    
+    private void checkAgainstGolden(String query, String goldenFile,
+            boolean checkOneLeaf, String testName) throws Exception, FrontendException,
+            FileNotFoundException, IOException {
+        goldenFile = "test/org/apache/pig/test/data/GoldenFiles/" + goldenFile;
+        String compiledPlan = compilePlan(query, goldenFile, checkOneLeaf);
+        String goldenPlan = readGolden(MAX_SIZE, goldenFile);
         System.out.println();
         System.out.println(compiledPlan);
+<<<<<<< HEAD
         System.out.println("-------------");
         //System.out.println(compiledPlan.compareTo(goldenPlan)==0);
         assertEquals(goldenPlan, compiledPlan);
@@ -305,46 +324,94 @@ public class TestLogToPhyCompiler {
         System.out.println("-------------testComparison");
         //System.out.println(compiledPlan.compareTo(goldenPlan)==0);
         assertEquals(goldenPlan, compiledPlan);
+=======
+        System.out.println("-------------" + testName);
+        assertEquals(compiledPlan, goldenPlan);
+    }
+    
+    @Test // Commented out due to PIG-2020
+    public void testComplexForeach() throws Exception {
+        checkAgainstGolden(
+                "C = foreach (load 'a' as  (a:bag{} ) ) {" +
+                "B = FILTER $0 BY ($1 == $2);" +
+                "generate B;" +
+                "};" + 
+                "store C into 'output';", 
+                "ComplexForeach.gld", 
+                false, 
+                "testComplexForeach");
+    }
+ 
+    @Test
+    public void testSort() throws Exception {
+        checkAgainstGolden(
+                "store (order (load 'a') by $0) into 'output';", 
+                "Sort.gld", 
+                false, 
+                "testSort");
+    }
+
+    @Test        
+    public void testDistinct() throws Exception {
+        checkAgainstGolden(
+                "store( distinct (load 'a') ) into 'output';", 
+                "Distinct.gld", 
+                false, 
+                "testDistinct");
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     }
 
     @Test
-    public void testBinCond() throws Exception {
-        String query = "A = foreach (load 'a') generate ($1 == '3'? $2 + $3 : $2 - $3) ;" +
-    	"store A into 'output';";
-        LogicalPlan lp = buildPlan(query);
+    public void testCogroup() throws Exception {
+        checkAgainstGolden(
+              "A = cogroup (load 'a') by ($0 + $1, $0 - $1), (load 'b') by ($0 + $1, $0 - $1);" +
+              "store A into 'output';", 
+              "Cogroup.gld", 
+              false, 
+              "testCogroup");
+    }
 
-        PhysicalPlan pp = buildPhysicalPlan(lp);
+    @Test
+    public void testArithmetic() throws Exception {
+        checkAgainstGolden(
+                "A = foreach (load 'A') generate $0 + $1 + 5, $0 - 5 - $1, 'hello';" +
+                "store A into 'output';", 
+                "Arithmetic.gld", 
+                true, 
+                "testArithmetic");
+    }
 
-        
-        int MAX_SIZE = 100000;
-    	ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        pp.explain(baos);
-        baos.write((int)'\n');
-        String compiledPlan = baos.toString();
-        compiledPlan = compiledPlan.replaceAll("Load(.*)","Load()").replaceAll("Store(.*)","Store()");
+    @Test
+    public void testComparison() throws Exception {
+        checkAgainstGolden(
+                "A = filter (load 'a' using " + PigStorage.class.getName() + "(':')) by $0 + $1 > ($0 - $1) * (4 / 2);" +
+                "store A into 'output';", 
+                "Comparison.gld", 
+                true, 
+                "testComparison");
+    }
 
-        if(generate){
-            FileOutputStream fos = new FileOutputStream("test/org/apache/pig/test/data/GoldenFiles/BinCond.gld");
-            fos.write(baos.toByteArray());
-            return;
-        }
-        
-    	FileInputStream fis = new FileInputStream("test/org/apache/pig/test/data/GoldenFiles/BinCond.gld");
-        byte[] b = new byte[MAX_SIZE];
-        int len = fis.read(b);
-        String goldenPlan = new String(b, 0, len);
-        goldenPlan = goldenPlan.replaceAll("Load(.*)","Load()");
-
+<<<<<<< HEAD
         System.out.println();
         System.out.println(compiledPlan);
         System.out.println("-------------testBinCond");
         //System.out.println(compiledPlan.compareTo(goldenPlan)==0);
         assertEquals(goldenPlan, compiledPlan);
+=======
+    @Test
+    public void testBinCond() throws Exception {
+        checkAgainstGolden(
+                "A = foreach (load 'a') generate ($1 == '3'? $2 + $3 : $2 - $3) ;" +
+                "store A into 'output';", 
+                "BinCond.gld", 
+                false, 
+                "testBinCond");
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     }
-    
-    
+
     @Test
     public void testGenerate() throws Exception {
+<<<<<<< HEAD
         String query = "A = foreach (load 'a') generate ($1+$2), ($1-$2), ($1*$2), ($1/$2), ((int)$1%(int)$2), -($1) ;" +
     	"store A into 'output';";
         LogicalPlan lp = buildPlan(query);
@@ -376,10 +443,19 @@ public class TestLogToPhyCompiler {
         System.out.println("-------------testGenerate");
         
         assertEquals(goldenPlan, compiledPlan);
+=======
+        checkAgainstGolden(
+                "A = foreach (load 'a') generate ($1+$2), ($1-$2), ($1*$2), ($1/$2), ((int)$1%(int)$2), -($1) ;" +
+                "store A into 'output';", 
+                "Generate.gld", 
+                false, 
+                "testGenerate");
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     }
 
     @Test
     public void testUnion() throws Exception {
+<<<<<<< HEAD
     	String query = "A = union (load 'a'), (load 'b'), (load 'c');" +
     	"store A into 'output';";
     	LogicalPlan lp = buildPlan(query);
@@ -409,30 +485,25 @@ public class TestLogToPhyCompiler {
         System.out.println("-------------testUnion");
         
         assertEquals(goldenPlan, compiledPlan);
+=======
+        checkAgainstGolden(
+                "A = union (load 'a'), (load 'b'), (load 'c');" +
+                        "store A into 'output';", 
+                        "Union.gld", 
+                        false, 
+                "testUnion");
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     }
     
     @Test
     public void testSplit() throws Exception {
     	String query = "split (load 'a') into x if $0 < '7', y if $0 > '7';"  +
     	"store x into 'output';";
-    	LogicalPlan plan = buildPlan(query);
+    	String goldenFile = "test/org/apache/pig/test/data/GoldenFiles/Split1.gld";
     	
-    	PhysicalPlan pp = buildPhysicalPlan(plan);
-    	
-    	int MAX_SIZE = 100000;
-    	ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        pp.explain(baos);
-        baos.write((int)'\n');
-        String compiledPlan = baos.toString();
-        compiledPlan = compiledPlan.replaceAll("Load(.*)","Load()").replaceAll("Store(.*)","Store()");
-
-        if(generate){
-            FileOutputStream fos = new FileOutputStream("test/org/apache/pig/test/data/GoldenFiles/Split1.gld");
-            fos.write(baos.toByteArray());
-            return;
-        }
+    	String compiledPlan = compilePlan(query, goldenFile, false);
         
-    	FileInputStream fis1 = new FileInputStream("test/org/apache/pig/test/data/GoldenFiles/Split1.gld");
+    	FileInputStream fis1 = new FileInputStream(goldenFile);
     	FileInputStream fis2 = new FileInputStream("test/org/apache/pig/test/data/GoldenFiles/Split2.gld");
         byte[] b1 = new byte[MAX_SIZE];
         byte[] b2 = new byte[MAX_SIZE];
@@ -441,8 +512,8 @@ public class TestLogToPhyCompiler {
         //System.out.println("Length of first plan = " + len + " of second = " + test);
         String goldenPlan1 = new String(b1, 0, len);
         String goldenPlan2 = new String(b2, 0, len);
-        goldenPlan1 = goldenPlan1.replaceAll("Load(.*)","Load()");
-        goldenPlan2 = goldenPlan2.replaceAll("Load(.*)","Load()");
+        goldenPlan1 = removedUnaffectingChanges(goldenPlan1);
+        goldenPlan2 = removedUnaffectingChanges(goldenPlan2);
 
         System.out.println();
         System.out.println(compiledPlan);
@@ -475,17 +546,15 @@ public class TestLogToPhyCompiler {
     	
     	PhysicalPlan pp = buildPhysicalPlan(plan);
     	
-    	int MAX_SIZE = 100000;
     	ByteArrayOutputStream baos = new ByteArrayOutputStream();
         pp.explain(baos);
         baos.write((int)'\n');
         String compiledPlan = baos.toString();
-        compiledPlan = compiledPlan.replaceAll("Load(.*)","Load()").replaceAll("Store(.*)","Store()");
+        compiledPlan = removedUnaffectingChanges(compiledPlan);
 
         if(generate){
             FileOutputStream fos = new FileOutputStream("test/org/apache/pig/test/data/GoldenFiles/IsNull1.gld");
             fos.write(baos.toByteArray());
-            return;
         }
         
     	FileInputStream fis1 = new FileInputStream("test/org/apache/pig/test/data/GoldenFiles/IsNull1.gld");
@@ -497,8 +566,8 @@ public class TestLogToPhyCompiler {
         //System.out.println("Length of first plan = " + len + " of second = " + test + " Length of compiled plan = " + compiledPlan.length());
         String goldenPlan1 = new String(b1, 0, len);
         String goldenPlan2 = new String(b2, 0, len);
-        goldenPlan1 = goldenPlan1.replaceAll("Load(.*)","Load()");
-        goldenPlan2 = goldenPlan2.replaceAll("Load(.*)","Load()");
+        goldenPlan1 = removedUnaffectingChanges(goldenPlan1);
+        goldenPlan2 = removedUnaffectingChanges(goldenPlan2);
 
         System.out.println();
         System.out.println(compiledPlan);
@@ -522,6 +591,7 @@ public class TestLogToPhyCompiler {
 
     @Test
     public void testLimit() throws Exception {
+<<<<<<< HEAD
         String query = "store( limit (load 'a') 5 ) into 'output';";
         LogicalPlan plan = buildPlan(query);
         PhysicalPlan pp = buildPhysicalPlan(plan);
@@ -551,6 +621,13 @@ public class TestLogToPhyCompiler {
 
         //System.out.println(compiledPlan.compareTo(goldenPlan)==0);
         assertEquals(goldenPlan, compiledPlan);
+=======
+        checkAgainstGolden(
+                "store( limit (load 'a') 5 ) into 'output';", 
+                "Limit.gld", 
+                false, 
+                "testLimit");
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     }
 
     /**

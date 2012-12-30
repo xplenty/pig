@@ -59,27 +59,33 @@ public abstract class PigScriptParser
         mConsoleReader = c;
         token_source.consoleReader = c;
     }
-    
+
 	abstract public void prompt();
-	
+
 	abstract protected void quit();
-	
+
 	abstract protected void printAliases() throws IOException;
+
+	abstract protected void printClear();
 
 	abstract protected void processFsCommand(String[] cmdTokens) throws IOException;
 
 	abstract protected void processShCommand(String[] cmdTokens) throws IOException;
-	
+
+	abstract protected void processSQLCommand(String cmdTokens) throws IOException;
+
 	abstract protected void processDescribe(String alias) throws IOException;
 
 	abstract protected void processExplain(String alias, String script, boolean isVerbose, String format, String target, List<String> params, List<String> files) throws IOException, ParseException;
-	
+
 	abstract protected void processRegister(String jar) throws IOException;
-	
+
 	abstract protected void processRegister(String path, String scriptingEngine, String namespace) throws IOException, ParseException;
 
 	abstract protected void processSet(String key, String value) throws IOException, ParseException;
-		
+
+    abstract protected void processHistory(boolean withNumbers);
+
 	abstract protected void processCat(String path) throws IOException;
 
 	abstract protected void processCD(String path) throws IOException;
@@ -137,6 +143,7 @@ SKIP : {
 
 // commands
 TOKEN: {<CAT: "cat">}
+TOKEN: {<CLEAR: "clear">}
 TOKEN: {<FS: "fs">}
 TOKEN: {<SH:"sh">}
 TOKEN: {<CD: "cd">}
@@ -148,6 +155,7 @@ TOKEN: {<DESCRIBE: "describe">}
 TOKEN: {<ALIASES: "aliases">}
 TOKEN: {<EXPLAIN: "explain">}
 TOKEN: {<HELP: "help">}
+TOKEN: {<HISTORY: "history">}
 TOKEN: {<KILL: "kill">}
 TOKEN: {<LS: "ls">}
 TOKEN: {<MOVE: "mv">}
@@ -169,6 +177,7 @@ TOKEN: {<SCRIPT: "-script">}
 TOKEN: {<DOT: "-dot">}
 TOKEN: {<OUT: "-out">}
 TOKEN: {<BRIEF: "-brief">}
+TOKEN: {<N: "-n">}
 
 // internal use commands
 TOKEN: {<SCRIPT_DONE: "scriptDone">}
@@ -207,6 +216,23 @@ TOKEN_MGR_DECLS : {
         stack.push(state);
     }
 
+}
+
+<DEFAULT> MORE :
+{
+    <"sql"> : SQL_START
+}
+
+<SQL_START> MORE :
+{
+    <";"> : SQL_END
+|   <("\n" | "\r" | "\r\n")> {secondary_prompt();}
+|   <(~[])> 
+}
+
+<SQL_END> TOKEN : {
+        <SQL: ""> {    matchedToken.image = image.toString();
+        }: DEFAULT
 }
 
 <DEFAULT> MORE :
@@ -427,8 +453,10 @@ void parse() throws IOException:
 	<CAT>
 	(
 	t1 = GetPath()
-	{processCat(t1.image);}		
+	{processCat(t1.image);}
 	)+
+	|
+	Clear()
 	|
 	<CD>
 	(
@@ -475,6 +503,8 @@ void parse() throws IOException:
 	<HELP>
 	{printHelp();}
 	|
+	History()
+	|
 	<KILL>
 	t1 = <IDENTIFIER>	
 	{processKill(t1.image);}
@@ -495,6 +525,9 @@ void parse() throws IOException:
 	<MKDIR>
 	t1 = GetPath()
 	{processMkdir(t1.image);}
+	|
+	t1 = <SQL>
+	{processSQLCommand(t1.image);}
 	|
 	t1 = <PIG>
 	{processPig(t1.image);}
@@ -553,6 +586,14 @@ void parse() throws IOException:
 	)
 }
 
+void Clear():
+{
+}
+{
+	<CLEAR>
+	{printClear();}
+}
+
 void Illustrate() throws IOException:
 {
 	Token t;
@@ -591,6 +632,19 @@ void Illustrate() throws IOException:
 		{alias = t.image;}
 	)?
 	{processIllustrate(alias, script, target, params, files);}
+}
+
+void History():
+{
+	boolean withNumbers = true;
+}
+{
+	<HISTORY>
+	(
+		<N>
+        {withNumbers = false;}
+	)?
+	{processHistory(withNumbers);}
 }
 
 void Explain() throws IOException:
@@ -725,6 +779,8 @@ Token GetReserved () :
 	|
 	t = <CD>
 	|
+	t = <CLEAR>
+	|
 	t = <COPY>
 	|
 	t = <COPYFROMLOCAL>
@@ -740,6 +796,8 @@ Token GetReserved () :
 	t = <EXPLAIN>
 	|
 	t = <HELP>
+	|
+	t = <HISTORY>
 	|
 	t = <KILL>
 	|
@@ -772,7 +830,6 @@ Token GetReserved () :
 
 	{return t;}
 }
-
 
 JAVACODE 
 void handle_invalid_command(int kind) 

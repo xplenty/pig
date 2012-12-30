@@ -33,9 +33,15 @@
   <property name="repo.jboss.org" value="http://repository.jboss.com/nexus/content/groups/public/" override="false"/>
   <property name="repo.apache.snapshots" value="http://repository.apache.org/content/groups/snapshots-group/" override="false"/>
   <property name="repo.dir" value="${user.home}/.m2/repository" override="false"/>
+<<<<<<< HEAD
   <property name="maven2.pattern"  value="[organisation]/[module]/[revision]/[module]-[revision](-[classifier])"/> 
   <property name="maven2.pattern.ext" value="${maven2.pattern}.[ext]"/>
   <property name="snapshot.pattern"  value="[organisation]/[module]/[revision]/[artifact]-[revision](-[classifier]).[ext]"/>
+=======
+  <property name="maven2.pattern" value="[organisation]/[module]/[revision]/[module]-[revision](-[classifier])"/>
+  <property name="maven2.pattern.ext" value="${maven2.pattern}.[ext]"/>
+  <property name="snapshot.pattern" value="[organisation]/[module]/[revision]/[artifact]-[revision](-[classifier]).[ext]"/>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
   <property name="resolvers" value="default" override="false"/>
   <property name="force-resolve" value="false" override="false"/>
   <!-- pull in the local repository -->
@@ -44,10 +50,19 @@
   <resolvers>
     <ibiblio name="maven2" root="${repo.maven.org}" pattern="${maven2.pattern.ext}" m2compatible="true"/>
     <ibiblio name="jboss-maven2" root="${repo.jboss.org}" pattern="${maven2.pattern.ext}" m2compatible="true"/>
+<<<<<<< HEAD
     <ibiblio name="apache-snapshots" root="${repo.apache.snapshots}" pattern="${snapshot.pattern}" checkmodified="true" m2compatible="true"/>
     <filesystem name="fs" m2compatible="true" checkconsistency="false" force="${force-resolve}">
        <artifact pattern="${repo.dir}/${maven2.pattern.ext}"/>
        <ivy pattern="${repo.dir}/[organisation]/[module]/[revision]/[module]-[revision].pom"/>
+=======
+    <ibiblio name="apache-snapshots" root="${repo.apache.snapshots}" pattern="${snapshot.pattern}"
+         checkmodified="true" changingPattern=".*SNAPSHOT" m2compatible="true"/>
+    <filesystem name="fs" m2compatible="true" checkconsistency="false" force="${force-resolve}"
+         checkmodified="true" changingPattern=".*SNAPSHOT">
+      <artifact pattern="${repo.dir}/${maven2.pattern.ext}"/>
+      <ivy pattern="${repo.dir}/[organisation]/[module]/[revision]/[module]-[revision].pom"/>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     </filesystem>
     <chain name="default" dual="true">
       <resolver ref="local"/>

@@ -98,6 +98,11 @@ public class DryRunGruntParser extends PigScriptParser {
         String cmds = LoadFunc.join((AbstractList<String>)Arrays.asList(cmdTokens), " ");
         sb.append("sh ").append(cmds).append("\n");
     }
+    
+    @Override
+    protected void processSQLCommand(String cmd) throws IOException {
+        sb.append("sql ").append(cmd).append("\n");
+    }
 
     @Override
     protected void processDescribe(String alias) throws IOException {
@@ -192,11 +197,16 @@ public class DryRunGruntParser extends PigScriptParser {
     protected void processPWD() throws IOException {
         sb.append("pwd\n");
     }
-
+    
     @Override
     protected void printHelp() {
 
     }
+    
+    @Override
+	protected void processHistory(boolean withNumbers) {
+		
+	}
 
     @Override
     protected void processMove(String src, String dst) throws IOException {
@@ -356,5 +366,9 @@ public class DryRunGruntParser extends PigScriptParser {
         }
         sb.append(script).append("\n");
     }
-    
+
+	@Override
+	protected void printClear() {
+	}
+
 }

@@ -79,6 +79,7 @@ import org.apache.pig.parser.ParserException;
 import org.apache.pig.parser.QueryParserDriver;
 import org.apache.pig.test.utils.GenRandomData;
 import org.apache.pig.test.utils.TestHelper;
+import org.joda.time.DateTimeZone;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -113,6 +114,11 @@ public class TestStore extends junit.framework.TestCase {
         pc = pig.getPigContext();
         inputFileName = TESTDIR + "/TestStore-" + new Random().nextLong() + ".txt";
         outputFileName = TESTDIR + "/TestStore-output-" + new Random().nextLong() + ".txt";
+<<<<<<< HEAD
+=======
+        
+        DateTimeZone.setDefault(DateTimeZone.forOffsetMillis(DateTimeZone.UTC.getOffset(null)));
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     }
 
     @Override
@@ -125,7 +131,11 @@ public class TestStore extends junit.framework.TestCase {
     private void storeAndCopyLocally(DataBag inpDB) throws Exception {
         setUpInputFileOnCluster(inpDB);
         String script = "a = load '" + inputFileName + "'; " +
+<<<<<<< HEAD
                 "store a into '" + outputFileName + "' using PigStorage(':');" +
+=======
+                "store a into '" + outputFileName + "' using PigStorage('\t');" +
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
                 "fs -ls " + TESTDIR;
         pig.setBatchOn();
         Util.registerMultiLineQuery(pig, script);
@@ -189,7 +199,7 @@ public class TestStore extends junit.framework.TestCase {
         int size = 0;
         BufferedReader br = new BufferedReader(new FileReader(outputFileName));
         for(String line=br.readLine();line!=null;line=br.readLine()){
-            String[] flds = line.split(":",-1);
+            String[] flds = line.split("\t",-1);
             Tuple t = new DefaultTuple();
             t.append(flds[0].compareTo("")!=0 ? flds[0] : null);
             t.append(flds[1].compareTo("")!=0 ? Integer.parseInt(flds[1]) : null);
@@ -244,11 +254,11 @@ public class TestStore extends junit.framework.TestCase {
     public void testStoreComplexData() throws Exception {
         inpDB = GenRandomData.genRandFullTupTextDataBag(new Random(), 10, 100);
         storeAndCopyLocally(inpDB);
-        PigStorage ps = new PigStorage(":");
+        PigStorage ps = new PigStorage("\t");
         int size = 0;
         BufferedReader br = new BufferedReader(new FileReader(outputFileName));
         for(String line=br.readLine();line!=null;line=br.readLine()){
-            String[] flds = line.split(":",-1);
+            String[] flds = line.split("\t",-1);
             Tuple t = new DefaultTuple();
             
             ResourceFieldSchema bagfs = GenRandomData.getSmallTupDataBagFieldSchema();
@@ -264,6 +274,7 @@ public class TestStore extends junit.framework.TestCase {
             t.append(flds[7].compareTo("")!=0 ? ps.getLoadCaster().bytesToMap(flds[7].getBytes()) : null);
             t.append(flds[8].compareTo("")!=0 ? ps.getLoadCaster().bytesToTuple(flds[8].getBytes(), tuplefs) : null);
             t.append(flds[9].compareTo("")!=0 ? ps.getLoadCaster().bytesToBoolean(flds[9].getBytes()) : null);
+            t.append(flds[10].compareTo("")!=0 ? ps.getLoadCaster().bytesToDateTime(flds[10].getBytes()) : null);
             assertEquals(true, TestHelper.bagContains(inpDB, t));
             ++size;
         }
@@ -276,13 +287,13 @@ public class TestStore extends junit.framework.TestCase {
         inpDB = DefaultBagFactory.getInstance().newDefaultBag();
         inpDB.add(inputTuple);
         storeAndCopyLocally(inpDB);
-        PigStorage ps = new PigStorage(":");
+        PigStorage ps = new PigStorage("\t");
         int size = 0;
         BufferedReader br = new BufferedReader(new FileReader(outputFileName));
         for(String line=br.readLine();line!=null;line=br.readLine()){
             System.err.println("Complex data: ");
             System.err.println(line);
-            String[] flds = line.split(":",-1);
+            String[] flds = line.split("\t",-1);
             Tuple t = new DefaultTuple();
             
             ResourceFieldSchema stringfs = new ResourceFieldSchema();
@@ -312,7 +323,8 @@ public class TestStore extends junit.framework.TestCase {
             t.append(flds[7].compareTo("")!=0 ? ps.getLoadCaster().bytesToMap(flds[7].getBytes()) : null);
             t.append(flds[8].compareTo("")!=0 ? ps.getLoadCaster().bytesToTuple(flds[8].getBytes(), tuplefs) : null);
             t.append(flds[9].compareTo("")!=0 ? ps.getLoadCaster().bytesToBoolean(flds[9].getBytes()) : null);
-            t.append(flds[10].compareTo("")!=0 ? ps.getLoadCaster().bytesToCharArray(flds[10].getBytes()) : null);
+            t.append(flds[10].compareTo("")!=0 ? ps.getLoadCaster().bytesToDateTime(flds[10].getBytes()) : null);
+            t.append(flds[11].compareTo("")!=0 ? ps.getLoadCaster().bytesToCharArray(flds[10].getBytes()) : null);
             assertTrue(TestHelper.tupleEquals(inputTuple, t));
             ++size;
         }

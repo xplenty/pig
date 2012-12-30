@@ -32,6 +32,10 @@
   -->
   <tab label="Project" href="http://hadoop.apache.org/pig/" type="visible" /> 
   <tab label="Wiki" href="http://wiki.apache.org/pig/" type="visible" /> 
+<<<<<<< HEAD
   <tab label="Pig 0.10.1 Documentation" dir="" type="visible" /> 
+=======
+  <tab label="Pig 0.11.0 Documentation" dir="" type="visible" /> 
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 
 </tabs>

@@ -21,6 +21,7 @@ package org.apache.pig.scripting.jython;
 import java.io.IOException;
 
 import org.apache.pig.EvalFunc;
+import org.apache.pig.ResourceSchema;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
@@ -32,12 +33,14 @@ import org.python.core.PyBaseCode;
 import org.python.core.PyException;
 import org.python.core.PyFunction;
 import org.python.core.PyObject;
+import org.python.core.PyTableCode;
 
 /**
  * Python implementation of a Pig UDF Performs mappings between Python & Pig
  * data structures
  */
 public class JythonFunction extends EvalFunc<Object> {
+    private static  boolean logOnce=true;
     private PyFunction function;
     private Schema schema;
     private int num_parameters;
@@ -55,6 +58,7 @@ public class JythonFunction extends EvalFunc<Object> {
             PyObject outputSchemaDef = f.__findattr__("outputSchema".intern());
             if (outputSchemaDef != null) {
                 this.schema = Utils.getSchemaFromString(outputSchemaDef.toString());
+                logOnce("Schema '"+outputSchemaDef.toString()+"' defined for func "+functionName);
                 found = true;
             }
             PyObject outputSchemaFunctionDef = f.__findattr__("outputSchemaFunction".intern());
@@ -65,6 +69,7 @@ public class JythonFunction extends EvalFunc<Object> {
                 }
                 scriptFilePath = filename;
                 outputSchemaFunc = outputSchemaFunctionDef.toString();
+                logOnce("Schema Function '"+outputSchemaFunc+"' defined for func "+functionName);
                 this.schema = null;
                 found = true;
             }
@@ -78,6 +83,8 @@ public class JythonFunction extends EvalFunc<Object> {
                 // BUG
                 throw new ExecException(
                         "unregistered " + functionName);
+            }else if (!found && outputSchemaFunctionDef == null){
+                logOnce("No schema defined for function '"+functionName+ "' in "+filename);
             }
         } catch (ParserException pe) {
             throw new ExecException("Could not parse schema for script function " + pe, pe);
@@ -88,10 +95,17 @@ public class JythonFunction extends EvalFunc<Object> {
         }
     }
 
+    private void logOnce (String msg)
+    {
+        if(logOnce)
+            getLogger().info(msg);
+        logOnce = false;
+    }
+    
     @Override
     public Object exec(Tuple tuple) throws IOException {
         try {
-            if (tuple == null || num_parameters == 0) {
+            if (tuple == null || (num_parameters == 0 && !((PyTableCode)function.func_code).varargs)) {
                 // ignore input tuple
                 PyObject out = function.__call__();
                 return JythonUtils.pythonToPig(out);
@@ -124,7 +138,16 @@ public class JythonFunction extends EvalFunc<Object> {
                         throw new IllegalStateException("Function: "
                                 + outputSchemaFunc + " is not a schema function");
                     }
-                    return (Schema)((pf.__call__(Py.java2py(input))).__tojava__(Object.class));
+                    Object newSchema = ((pf.__call__(Py.java2py(input))).__tojava__(Object.class));
+                    if (newSchema instanceof ResourceSchema) {
+                        return(Schema.getPigSchema((ResourceSchema) newSchema));
+                    }
+                    else if (newSchema instanceof Schema) {
+                        return (Schema) newSchema;
+                    }
+                    else {
+                        return Utils.getSchemaFromString(newSchema.toString());
+                    }
                 } catch (IOException ioe) {
                     throw new IllegalStateException("Could not find function: "
                         + outputSchemaFunc + "()", ioe);

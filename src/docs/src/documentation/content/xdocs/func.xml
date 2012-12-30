@@ -97,7 +97,7 @@ decoded_strings = FOREACH encoded_strings GENERATE UrlDecode(encoded, 'UTF-8');
    <title>Usage</title>
    <p>Use the AVG function to compute the average of the numeric values in a single-column bag. 
    AVG requires a preceding GROUP ALL statement for global averages and a GROUP BY statement for group averages.</p>
-   <p>The AVG function now ignores NULL values. </p>      
+   <p>The AVG function ignores NULL values. </p>      
    </section>
    
    <section>
@@ -215,6 +215,7 @@ DUMP C;
    <section>
    <title>Usage</title>
    <p>Use the CONCAT function to concatenate two expressions. The result values of the two expressions must have identical types.</p>
+   <p>If either subexpression is null, the resulting expression is null.</p>
    </section>
 
    
@@ -560,7 +561,9 @@ Y = filter X by IsEmpty(SSN_NAME);
    
    <section>
    <title>Usage</title>
-   <p>Use the MAX function to compute the maximum of the numeric values or chararrays in a single-column bag.</p></section>
+   <p>Use the MAX function to compute the maximum of the numeric values or chararrays in a single-column bag.</p>
+   <p>The MAX function ignores NULL values.</p>
+   </section>
    
    <section>
    <title>Example</title>
@@ -676,7 +679,9 @@ DUMP X;
    <section>
    
    <title>Usage</title>
-   <p>Use the MIN function to compute the minimum of a set of numeric values or chararrays in a single-column bag.</p></section>
+   <p>Use the MIN function to compute the minimum of a set of numeric values or chararrays in a single-column bag.</p>
+   <p>The MIN function ignores NULL values.</p> 
+   </section>
    
    <section>
    <title>Example</title>
@@ -793,6 +798,7 @@ DUMP X;
    <title>Usage</title>
    <p>Use the SIZE function to compute the number of elements based on the data type (see the Types Tables below). 
    SIZE includes NULL values in the size computation. SIZE is not algebraic.</p>
+   <p>If the tested object is null, the SIZE function returns null.</p>
    </section>
    
    <section>
@@ -921,7 +927,9 @@ DUMP X;
    
    <section>
    <title>Usage</title>
-   <p>Use the SUM function to compute the sum of a set of numeric values in a single-column bag.</p></section>
+   <p>Use the SUM function to compute the sum of a set of numeric values in a single-column bag.</p>
+   <p>The SUM function ignores NULL values.</p> 
+   </section>
    
    <section>
    <title>Example</title>
@@ -1501,8 +1509,137 @@ a = load '1.txt' as (a0:{t:(m:map[int],d:double)});
 <source>
 A = LOAD 'data' USING TextLoader();
 </source>
-   </section></section></section>
-   
+   </section></section>
+
+  <!-- ++++++++++++++++++++++++++++++++++++++++++++++ -->
+   <section id="HBaseStorage">
+   <title>HBaseStorage</title>
+   <p>Loads and stores data from an HBase table.</p>
+
+   <section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>HBaseStorage('columns', ['options'])</p>
+            </td>
+         </tr>
+   </table>
+   </section>
+
+   <section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>columns</p>
+            </td>
+            <td>
+               <p>A list of qualified HBase columns to read data from or store data to. 
+                  The column family name and column qualifier are seperated by a colon (:). 
+                  Only the columns used in the Pig script need to be specified. Columns are specified
+                  in one of three different ways as described below.</p>
+               <ul>
+               <li>Explicitly specify a column family and column qualifier (e.g., user_info:id). This
+                   will produce a scalar in the resultant tuple.</li>
+               <li>Specify a column family and a portion of column qualifier name as a prefix followed
+                   by an asterisk (i.e., user_info:address_*). This approach is used to read one or
+                   more columns from the same column family with a matching descriptor prefix.
+                   The datatype for this field will be a map of column descriptor name to field value. 
+                   Note that combining this style of prefix with a long list of fully qualified
+                   column descriptor names could cause perfomance degredation on the HBase scan.
+                   This will produce a Pig map in the resultant tuple with column descriptors as keys.</li>
+               <li>Specify all the columns of a column family using the column family name followed
+                   by an asterisk (i.e., user_info:*). This will produce a Pig map in the resultant
+                   tuple with column descriptors as keys.</li>
+               </ul>
+            </td>
+         </tr>
+       <tr>
+            <td>
+               <p>'options'</p>
+            </td>
+            <td>
+               <p>A string that contains space-separated options (&lsquo;-optionA=valueA -optionB=valueB -optionC=valueC&rsquo;)</p>
+               <p>Currently supported options are:</p>
+               <ul>
+                <li>-loadKey=(true|false) Load the row key as the first value in every tuple
+                    returned from HBase (default=false)</li>
+                <li>-gt=minKeyVal Return rows with a rowKey greater than minKeyVal</li>
+                <li>-lt=maxKeyVal Return rows with a rowKey less than maxKeyVal</li>
+                <li>-gte=minKeyVal Return rows with a rowKey greater than or equal to minKeyVal</li>
+                <li>-lte=maxKeyVal Return rows with a rowKey less than or equal to maxKeyVal</li>
+                <li>-limit=numRowsPerRegion Max number of rows to retrieve per region</li>
+                <li>-caching=numRows Number of rows to cache (faster scans, more memory)</li>
+                <li>-delim=delimiter Column delimiter in columns list (default is whitespace)</li>
+                <li>-ignoreWhitespace=(true|false) When delim is set to something other than
+                    whitespace, ignore spaces when parsing column list (default=true)</li>
+                <li>-caster=(HBaseBinaryConverter|Utf8StorageConverter) Class name of Caster to use
+                    to convert values (default=Utf8StorageConverter). The default caster can be
+                    overridden with the pig.hbase.caster config param. Casters must implement LoadStoreCaster.</li>
+                <li>-noWAL=(true|false) During storage, sets the write ahead to false for faster
+                    loading into HBase (default=false). To be used with extreme caution since this
+                    could result in data loss (see <a href="http://hbase.apache.org/book.html#perf.hbase.client.putwal">http://hbase.apache.org/book.html#perf.hbase.client.putwal</a>).</li>
+                <li>-minTimestamp=timestamp Return cell values that have a creation timestamp
+                    greater or equal to this value</li>
+                <li>-maxTimestamp=timestamp Return cell values that have a creation timestamp
+                    less than this value</li>
+                <li>-timestamp=timestamp Return cell values that have a creation timestamp equal to
+                    this value</li>
+               </ul>
+            </td>
+         </tr>
+   </table>
+   </section>
+
+   <section>
+   <title>Usage</title>
+   <p>HBaseStorage stores and loads data from HBase. The function takes two arguments. The first
+       argument is a space seperated list of columns. The second optional argument is a
+       space seperated list of options. Column syntax and available options are listed above.</p>
+   </section>
+
+   <section>
+   <title>Load Example</title>
+   <p>In this example HBaseStorage is used with the LOAD function with an explicit schema.</p>
+<source>
+raw = LOAD 'hbase://SomeTableName'
+      USING org.apache.pig.backend.hadoop.hbase.HBaseStorage(
+      'info:first_name info:last_name tags:work_* info:*', '-loadKey=true -limit=5') AS
+      (id:bytearray, first_name:chararray, last_name:chararray, tags_map:map[], info_map:map[]);
+</source>
+   <p>The datatypes of the columns are declared with the "AS" clause. The first_name and last_name
+       columns are specified as fully qualified column names with a chararray datatype. The third
+       specification of tags:work_* requests a set of columns in the tags column family that begin
+       with "work_". There can be zero, one or more columns of that type in the HBase table. The
+       type is specified as tags_map:map[]. This indicates that the set of column values returned
+       will be accessed as a map, where the key is the column name and the value is the cell value
+       of the column. The fourth column specification is also a map of column descriptors to cell
+       values.</p>
+   <p>When the type of the column is specified as a map in the "AS" clause, the map keys are the
+       column descriptor names and the data type is chararray. The datatype of the columns values can
+       be declared explicitly as shown in the examples below:</p>
+   <ul>
+   <li>tags_map[chararray] - In this case, the column values are all declared to be of type chararray</li>
+   <li>tags_map[int] - In this case, the column values are all declared to be of type int.</li>
+   </ul>
+   </section>
+
+   <section>
+   <title>Store Example</title>
+   <p>In this example HBaseStorage is used to store a relation into HBase.</p>
+<source>
+A = LOAD 'hdfs_users' AS (id:bytearray, first_name:chararray, last_name:chararray);
+STORE A INTO 'hbase://users_table' USING org.apache.pig.backend.hadoop.hbase.HBaseStorage(
+    'info:first_name info:last_name');
+</source>
+   <p>In the example above relation A is loaded from HDFS and stored in HBase. Note that the schema
+       of relation A is a tuple of size 3, but only two column descriptor names are passed to the
+       HBaseStorage constructor. This is because the first entry in the tuple is used as the HBase
+       rowKey.</p>
+   </section>
+   </section>
+</section>
 
 <!-- ======================================================== -->  
 <!-- ======================================================== -->  
@@ -2816,7 +2953,7 @@ The function returns a string that corresponds to the matched group in the posit
 This example will return the string '192.168.1.5'.
      </p>
  <source>
-REGEX_EXTRACT('192.168.1.5:8020', '(.*)\:(.*)', 1);
+REGEX_EXTRACT('192.168.1.5:8020', '(.*):(.*)', 1);
 </source>
      
  </section>
@@ -2896,7 +3033,7 @@ REGEX_EXTRACT_ALL('192.168.1.5:8020', '(.*)\:(.*)');
    <table>
        <tr>
             <td>
-               <p>REPLACE(string, 'oldChar', 'newChar');</p>
+               <p>REPLACE(string, 'regExp', 'newChar');</p>
             </td>
          </tr>  
    </table>
@@ -2915,10 +3052,10 @@ REGEX_EXTRACT_ALL('192.168.1.5:8020', '(.*)\:(.*)');
          </tr> 
                 <tr>
             <td>
-               <p>'oldChar'</p>
+               <p>'regExp'</p>
             </td>
             <td>
-               <p>The existing characters being replaced, in quotes. </p>
+               <p>The regular expression to which the string is to be matched, in quotes.</p>
             </td>
          </tr> 
                 <tr>
@@ -2941,6 +3078,16 @@ Use the REPLACE function to replace existing characters in a string with new cha
 For example, to change "open source software" to "open source wiki" use this statement: 
 REPLACE(string,'software','wiki');
      </p>
+     <p>
+Note that the REPLACE function is internally implemented using
+<a href="http://docs.oracle.com/javase/6/docs/api/java/lang/String.html#replaceAll(java.lang.String, java.lang.String)">
+java.string.replaceAll(String regex, String replacement)</a>
+where 'regExp' and 'newChar' are passed as the 1st and 2nd argument respectively.
+If you want to replace 
+<a href="http://docs.oracle.com/javase/6/docs/api/java/util/regex/Pattern.html#bs">
+special characters</a> such as '[' in the string literal, it is necessary to escape them in 'regExp'
+by prefixing them with double backslashes (e.g. '\\[').
+    </p>
 </section>
 </section> 
 
@@ -3176,9 +3323,8 @@ Use the UPPER function to convert all characters in a string to upper case.
 </section>
 <!-- End String Functions -->
 
-
 <!-- ======================================================== -->
-<!-- ======================================================== -->
+<<<<<<< HEAD
 <!-- Other Functions -->
 <section id="bag-tuple-functions">
 <title>Tuple, Bag, Map Functions</title>
@@ -3245,6 +3391,1130 @@ DUMP b;
 </source>
  </section>
 </section>
+=======
+<!-- ======================================================== -->   
+
+<!-- Datetime Functions -->
+<section id="datetime-functions">
+<title>Datetime Functions</title>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
+
+<p>
+For general information about datetime type operations, see the <a href="http://download.oracle.com/javase/6/docs/api/">Java API Specification</a>, 
+<a href="http://docs.oracle.com/javase/6/docs/api/java/util/Date.html">Java Date class</a>, and <a href="http://joda-time.sourceforge.net/apidocs/index.html">JODA DateTime class</a>.
+And for the information of ISO date and time formats, please refer to <a href="http://www.w3.org/TR/NOTE-datetime">Date and Time Formats</a>.
+</p>
+
+<!-- ++++++++++++++++++++++++++++++++++++++++++++++ -->
+ <section id="add-duration">
+   <title>AddDuration</title>
+   <p>Returns the result of a DateTime object plus a <a href="http://en.wikipedia.org/wiki/ISO_8601#Durations">Duration object</a>.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>AddDuration(datetime, duration)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+         </tr> 
+                <tr>
+            <td>
+               <p>duration</p>
+            </td>
+            <td>
+               <p>The duration string in <a href="http://en.wikipedia.org/wiki/ISO_8601#Durations">ISO 8601 format</a>.</p>
+            </td>
+         </tr> 
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+<<<<<<< HEAD
+     <p>Use the TOBAG function to convert one or more expressions to individual tuples which are then placed in a bag.</p>
+     <p>See also: <a href="basic.html#bag">Bag</a> data type and <a href="basic.html#type-construction">Type Construction Operators</a></p>
+ </section>
+ 
+ <section>
+     <title>Example</title>
+     <p>
+In this example, fields f1 and f3 are converted to tuples that are then placed in a bag.
+=======
+     <p>
+Use the AddDuration function to created a new datetime object by add some duration to a given datetime object.
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
+     </p>
+
+</section>
+</section> 
+
+<!-- ======================================================== -->  
+ <section id="current-time">
+   <title>CurrentTime</title>
+   <p>Returns the DateTime object of the current time.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>CurrentTime()</p>
+            </td>
+         </tr>
+   </table>
+   </section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the CurrentTime function to generate a datetime object of current timestamp with millisecond accuracy.
+     </p>
+</section>
+</section> 
+
+
+<<<<<<< HEAD
+<!-- ======================================================== -->
+ <section id="tomap">
+   <title>TOMAP</title>
+   <p>Converts key/value expression pairs into a map. </p>
+=======
+<!-- ======================================================== -->  
+ <section id="days-between">
+   <title>DaysBetween</title>
+   <p>Returns the number of days between two DateTime objects.</p>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+<<<<<<< HEAD
+               <p>TOMAP(key-expression, value-expression [, key-expression, value-expression ...])</p>
+=======
+               <p>DaysBetween(datetime1, datetime2)</p>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+<<<<<<< HEAD
+               <p>key-expression</p>
+            </td>
+            <td>
+               <p>An expression of type chararray.</p>
+=======
+               <p>datetime1</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
+            </td>
+        </tr> 
+        <tr>
+            <td>
+<<<<<<< HEAD
+               <p>value-expression</p>
+            </td>
+            <td>
+               <p>An expression of any type supported by a map.</p>
+            </td>
+         </tr>
+=======
+               <p>datetime2</p>
+            </td>
+            <td>
+               <p>Another datetime object.</p>
+            </td>
+        </tr>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+<<<<<<< HEAD
+     <p>Use the TOMAP function to convert pairs of expressions into a map. Note the following:</p>
+     <ul>
+<li>You must supply an even number of expressions as parameters</li>
+<li>The elements must comply with map type rules:
+<ul>
+<li>Every odd element (key-expression) must be a chararray since only chararrays can be keys into the map</li>
+<li>Every even element (value-expression) can be of any type supported by a map. </li>
+</ul>
+</li>
+     </ul>
+ <p></p>    
+ <p>See also: <a href="basic.html#map">Map</a> data type and  <a href="basic.html#type-construction">Type Construction Operators</a></p>  
+ </section>
+ 
+ <section>
+     <title>Example</title>
+     <p>
+In this example, student names (type chararray) and student GPAs (type float) are used to create three maps.
+     </p>
+ <source>
+A = load 'students' as (name:chararray, age:int, gpa:float);
+B = foreach A generate TOMAP(name, gpa);
+store B into ‘results’;
+
+Input (students)
+joe smith 20 3.5
+amy chen 22 3.2
+leo allen 18 2.1
+
+Output (results)
+[joe smith#3.5]
+[amy chen#3.2]
+[leo allen#2.1]
+</source>
+     
+ </section>
+
+</section>
+
+
+
+ <!-- ======================================================== -->  
+ <section id="topx">
+   <title>TOP</title>
+   <p>Returns the top-n tuples from a bag of tuples.</p>
+=======
+     <p>
+Use the DaysBetween function to get the number of days between the two given datetime objects. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="get-day">
+   <title>GetDay</title>
+   <p>Returns the day of a month from a DateTime object.</p>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+<<<<<<< HEAD
+               <p>TOP(topN,column,relation)</p>
+=======
+               <p>GetDay(datetime)</p>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+<<<<<<< HEAD
+               <p>topN</p>
+            </td>
+            <td>
+               <p>The number of top tuples to return (type integer).</p>
+            </td>
+         </tr> 
+                <tr>
+            <td>
+               <p>column</p>
+            </td>
+            <td>
+               <p>The tuple column whose values are being compared.</p>
+            </td>
+         </tr> 
+                <tr>
+            <td>
+               <p>relation</p>
+            </td>
+            <td>
+               <p>The relation (bag of tuples) containing the tuple column.</p>
+=======
+               <p>datetime</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+<<<<<<< HEAD
+TOP function returns a bag containing top N tuples from the input bag where N is controlled by the first parameter to the function. The tuple comparison is performed based on a single column from the tuple. The column position is determined by the second parameter to the function. The function assumes that all tuples in the bag contain an element of the same type in the compared column
+     </p>
+</section>
+ 
+ <section>
+     <title>Example</title>
+     <p>
+In this example the top 10 occurrences are returned.
+     </p>
+ <source>
+A = LOAD 'data' as (first: chararray, second: chararray);
+B = GROUP A BY (first, second);
+C = FOREACH B generate FLATTEN(group), COUNT(*) as count;
+D = GROUP C BY first; // again group by first
+topResults = FOREACH D {
+    result = TOP(10, 2, C); // and retain top 10 occurrences of 'second' in first
+    GENERATE FLATTEN(result);
+}
+=======
+Use the GetDay function to extract the day of a month from the given datetime object. 
+     </p>
+</section>
+</section> 
+
+<!-- ======================================================== -->  
+ <section id="get-hour">
+   <title>GetHour</title>
+   <p>Returns the hour of a day from a DateTime object.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>GetHour(datetime)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the GetHour function to extract the hour of a day from the given datetime object. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="get-milli-second">
+   <title>GetMilliSecond</title>
+   <p>Returns the millisecond of a second from a DateTime object.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>GetMilliSecond(datetime)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the GetMilliSecond function to extract the millsecond of a second from the given datetime object. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="get-minute">
+   <title>GetMinute</title>
+   <p>Returns the minute of a hour from a DateTime object.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>GetMinute(datetime)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the GetMinute function to extract the minute of a hour from the given datetime object. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="get-month">
+   <title>GetMonth</title>
+   <p>Returns the month of a year from a DateTime object.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>GetMonth(datetime)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the GetMonth function to extract the month of a year from the given datetime object. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="get-second">
+   <title>GetSecond</title>
+   <p>Returns the second of a minute from a DateTime object.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>GetSecond(datetime)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the GetSecond function to extract the second of a minute from the given datetime object. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="get-week">
+   <title>GetWeek</title>
+   <p>Returns the week of a week year from a DateTime object.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>GetWeek(datetime)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the GetWeek function to extract the week of a week year from the given datetime object.
+Note that week year may be different from year. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="get-week-year">
+   <title>GetWeekYear</title>
+   <p>Returns the week year from a DateTime object.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>GetWeekYear(datetime)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the GetWeekYear function to extract the week year from the given datetime object.
+Note that week year may be different from year.
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="get-year">
+   <title>GetYear</title>
+   <p>Returns the year from a DateTime object.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>GetYear(datetime)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the GetYear function to extract the year from the given datetime object. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="hours-between">
+   <title>HoursBetween</title>
+   <p>Returns the number of hours between two DateTime objects.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>HoursBetween(datetime1, datetime2)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime1</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr> 
+        <tr>
+            <td>
+               <p>datetime2</p>
+            </td>
+            <td>
+               <p>Another datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the HoursBetween function to get the number of hours between the two given datetime objects. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="milli-seconds-between">
+   <title>MilliSecondsBetween</title>
+   <p>Returns the number of milliseconds between two DateTime objects.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>MilliSecondsBetween(datetime1, datetime2)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime1</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr> 
+        <tr>
+            <td>
+               <p>datetime2</p>
+            </td>
+            <td>
+               <p>Another datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the MilliSecondsBetween function to get the number of millseconds between the two given datetime objects. 
+     </p>
+</section>
+</section> 
+
+<!-- ======================================================== -->  
+ <section id="minutes-between">
+   <title>MinutesBetween</title>
+   <p>Returns the number of minutes between two DateTime objects.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>MinutesBetween(datetime1, datetime2)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime1</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr> 
+        <tr>
+            <td>
+               <p>datetime2</p>
+            </td>
+            <td>
+               <p>Another datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the MinutsBetween function to get the number of minutes between the two given datetime objects. 
+     </p>
+</section>
+</section> 
+
+<!-- ======================================================== -->  
+<section id="months-between">
+   <title>MonthsBetween</title>
+   <p>Returns the number of months between two DateTime objects.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>MonthsBetween(datetime1, datetime2)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime1</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr> 
+        <tr>
+            <td>
+               <p>datetime2</p>
+            </td>
+            <td>
+               <p>Another datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the MonthsBetween function to get the number of months between the two given datetime objects. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="seconds-between">
+   <title>SecondsBetween</title>
+   <p>Returns the number of seconds between two DateTime objects.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>SecondsBetween(datetime1, datetime2)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime1</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr> 
+        <tr>
+            <td>
+               <p>datetime2</p>
+            </td>
+            <td>
+               <p>Another datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the SecondsBetween function to get the number of seconds between the two given datetime objects. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="subtract-duratioin">
+   <title>SubtractDuration</title>
+   <p>Returns the result of a DateTime object minus a <a href="http://en.wikipedia.org/wiki/ISO_8601#Durations">Duration object</a>.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>SubtractDuration(datetime, duration)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+         </tr> 
+                <tr>
+            <td>
+               <p>duration</p>
+            </td>
+            <td>
+               <p>The duration string in <a href="http://en.wikipedia.org/wiki/ISO_8601#Durations">ISO 8601 format</a>.</p>
+            </td>
+         </tr> 
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the AddDuration function to created a new datetime object by add some duration to a given datetime object.
+      </p>
+</section>
+</section> 
+
+<!-- ======================================================== -->  
+ <section id="to-date">
+   <title>ToDate</title>
+   <p>Returns a DateTime object according to parameters.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>ToDate(milliseconds)</p>
+               <p>ToDate(iosstring)</p>
+               <p>ToDate(userstring, format)</p>
+               <p>ToDate(userstring, format, timezone)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>millseconds</p>
+            </td>
+            <td>
+               <p>The offset from 1970-01-01T00:00:00.000Z in terms of the number milliseconds (either positive or negative).</p>
+            </td>
+        </tr> 
+        <tr>
+            <td>
+               <p>isostring</p>
+            </td>
+            <td>
+               <p>The datetime string in the <a href="http://www.w3.org/TR/NOTE-datetime">ISO 8601 format</a>.</p>
+            </td>
+        </tr>
+        <tr>
+            <td>
+               <p>userstring</p>
+            </td>
+            <td>
+               <p>The datetime string in the user defined format.</p>
+            </td>
+        </tr>
+        <tr>
+            <td>
+               <p>format</p>
+            </td>
+            <td>
+               <p>The date time format pattern string (see <a href="http://docs.oracle.com/javase/6/docs/api/java/text/SimpleDateFormat.html">Java SimpleDateFormat class</a>).</p>
+            </td>
+        </tr>
+        <tr>
+            <td>
+               <p>timezone</p>
+            </td>
+            <td>
+               <p>The timezone string. Either the UTC offset and the location based format can be used as a parameter, while internally the timezone will be converted to the UTC offset format.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the ToDate function to generate a DateTime object. Note that if the timezone is not specified with the ISO datetime string or by the timezone parameter, the default timezone will be used.
+      </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="weeks-between">
+   <title>WeeksBetween</title>
+   <p>Returns the number of weeks between two DateTime objects.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>WeeksBetween(datetime1, datetime2)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime1</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr> 
+        <tr>
+            <td>
+               <p>datetime2</p>
+            </td>
+            <td>
+               <p>Another datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the WeeksBetween function to get the number of weeks between the two given datetime objects. 
+     </p>
+</section>
+</section>
+
+<!-- ======================================================== -->  
+ <section id="years-between">
+   <title>YearsBetween</title>
+   <p>Returns the number of years between two DateTime objects.</p>
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>YearsBetween(datetime1, datetime2)</p>
+            </td>
+         </tr>
+   </table>
+ </section>
+   
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>datetime1</p>
+            </td>
+            <td>
+               <p>A datetime object.</p>
+            </td>
+        </tr> 
+        <tr>
+            <td>
+               <p>datetime2</p>
+            </td>
+            <td>
+               <p>Another datetime object.</p>
+            </td>
+        </tr>
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>
+Use the YearsBetween function to get the number of years between the two given datetime objects. 
+     </p>
+</section>
+</section>
+</section>
+<!-- End DateTime Functions -->
+
+<!-- ======================================================== -->
+<!-- ======================================================== -->
+<!-- Other Functions -->
+<section id="bag-tuple-functions">
+<title>Tuple, Bag, Map Functions</title>
+
+<!-- ======================================================== -->  
+ <section id="totuple">
+   <title>TOTUPLE</title>
+   <p>Converts one or more expressions to type tuple. </p>
+
+
+<section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>TOTUPLE(expression [, expression ...])</p>
+            </td>
+         </tr> 
+        
+   </table>
+ </section>
+
+<section>
+   <title>Terms</title>
+   <table>
+       <tr>
+            <td>
+               <p>expression</p>
+            </td>
+            <td>
+               <p>An expression of any datatype.</p>
+            </td>
+         </tr> 
+   </table>
+</section>
+
+<section>
+     <title>Usage</title>
+     <p>Use the TOTUPLE function to convert one or more expressions to a tuple.</p>
+        <p>See also: <a href="basic.html#tuple">Tuple</a> data type and <a href="basic.html#type-construction">Type Construction Operators</a></p>
+ </section>
+ 
+ <section>
+     <title>Example</title>
+     <p>
+In this example, fields f1, f2 and f3 are converted to a tuple.
+     </p>
+ <source>
+a = LOAD 'student' AS (f1:chararray, f2:int, f3:float);
+DUMP a;
+
+(John,18,4.0)
+(Mary,19,3.8)
+(Bill,20,3.9)
+(Joe,18,3.8)
+
+b = FOREACH a GENERATE TOTUPLE(f1,f2,f3);
+DUMP b;
+
+((John,18,4.0))
+((Mary,19,3.8))
+((Bill,20,3.9))
+((Joe,18,3.8))
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
+</source>
+     
+ </section>
+</section>
+<<<<<<< HEAD
+=======
 
 <!-- ======================================================== -->
  <section id="tobag">
@@ -3426,7 +4696,7 @@ Output (results)
                <p>column</p>
             </td>
             <td>
-               <p>The tuple column whose values are being compared.</p>
+               <p>The tuple column whose values are being compared, note 0 denotes the first column.</p>
             </td>
          </tr> 
                 <tr>
@@ -3465,6 +4735,7 @@ topResults = FOREACH D {
      
  </section>
 </section>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 </section>
 <!-- End Other Functions -->
 

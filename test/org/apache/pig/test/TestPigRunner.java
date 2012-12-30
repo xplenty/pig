@@ -19,6 +19,7 @@ package org.apache.pig.test;
 
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
@@ -40,6 +41,7 @@ import org.apache.pig.ExecType;
 import org.apache.pig.PigRunner;
 import org.apache.pig.PigRunner.ReturnCode;
 import org.apache.pig.backend.hadoop.datastorage.ConfigurationUtil;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.plans.MROperPlan;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.newplan.Operator;
@@ -217,7 +219,7 @@ public class TestPigRunner {
         try {
             PigStats stats = PigRunner.run(args, new TestNotificationListener());
             assertTrue(stats.isSuccessful());
-            assertTrue(stats.getJobGraph().size() == 3);
+            assertTrue(stats.getJobGraph().size() == 4);
             assertTrue(stats.getJobGraph().getSinks().size() == 1);
             assertTrue(stats.getJobGraph().getSources().size() == 1);
             JobStats js = (JobStats) stats.getJobGraph().getSinks().get(0);
@@ -861,6 +863,49 @@ public class TestPigRunner {
         }
     }
     
+    /**
+     * PIG-2780: In this test case, Pig submits three jobs at the same time and
+     * one of them will fail due to nonexistent input file. If users enable
+     * stop.on.failure, then Pig should immediately stop if anyone of the three
+     * jobs has failed.
+     */
+    @Test
+    public void testStopOnFailure() throws Exception {
+        
+        PrintWriter w1 = new PrintWriter(new FileWriter(PIG_FILE));
+        w1.println("A1 = load '" + INPUT_FILE + "';");
+        w1.println("B1 = load 'nonexist';");
+        w1.println("C1 = load '" + INPUT_FILE + "';");
+        w1.println("A2 = distinct A1;");
+        w1.println("B2 = distinct B1;");
+        w1.println("C2 = distinct C1;");
+        w1.println("ret = union A2,B2,C2;");
+        w1.println("store ret into 'tmp/output';");
+        w1.close();
+        
+        try {
+            String[] args = { "-F", PIG_FILE };
+            PigStats stats = PigRunner.run(args, new TestNotificationListener());
+     
+            assertTrue(!stats.isSuccessful());
+            
+            int successfulJobs = 0;
+            Iterator<Operator> it = stats.getJobGraph().getOperators();
+            while (it.hasNext()){
+                JobStats js = (JobStats)it.next();
+                if (js.isSuccessful())
+                    successfulJobs++;
+            }
+            
+            // we should have less than 2 successful jobs
+            assertTrue("Should have less than 2 successful jobs", successfulJobs < 2);
+            
+        } finally {
+            new File(PIG_FILE).delete();
+            Util.deleteFile(cluster, OUTPUT_FILE);
+            Util.deleteFile(cluster, "tmp/output");
+        }
+    }
     public static class TestNotificationListener implements PigProgressNotificationListener {
         
         private Map<String, int[]> numMap = new HashMap<String, int[]>();
@@ -869,7 +914,13 @@ public class TestPigRunner {
         private static final int JobsSubmitted = 1;
         private static final int JobStarted = 2;
         private static final int JobFinished = 3;
-        
+
+        @Override
+        public void initialPlanNotification(String id, MROperPlan plan) {
+            System.out.println("id: " + id + " planNodes: " + plan.getKeys().size());
+            assertNotNull(plan);
+        }
+
         @Override
         public void launchStartedNotification(String id, int numJobsToLaunch) {            
             System.out.println("id: " + id + " numJobsToLaunch: " + numJobsToLaunch);  

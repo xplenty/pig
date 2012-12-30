@@ -171,6 +171,10 @@ public class JrubyScriptEngine extends ScriptEngine {
                 case DataType.FLOAT: canonicalName += "Float"; break;
                 case DataType.INTEGER: canonicalName += "Integer"; break;
                 case DataType.LONG: canonicalName += "Long"; break;
+<<<<<<< HEAD
+=======
+                case DataType.DATETIME: canonicalName += "DateTime"; break;
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
                 case DataType.MAP: canonicalName += "Map"; break;
                 case DataType.BYTEARRAY: canonicalName += "DataByteArray"; break;
                 default: throw new ExecException("Unable to instantiate Algebraic EvalFunc " + method + " as schema type is invalid");

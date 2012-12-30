@@ -17,10 +17,8 @@
  */
 package org.apache.pig.data;
 
-import java.lang.Class;
 import java.util.List;
 
-import org.apache.hadoop.io.RawComparator;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.classification.InterfaceAudience;
 
@@ -29,25 +27,30 @@ import org.apache.pig.classification.InterfaceAudience;
  */
 @InterfaceAudience.Private
 public class BinSedesTupleFactory extends TupleFactory {
+    @Override
     public Tuple newTuple() {
         return new BinSedesTuple();
     
     }
 
+    @Override
     public Tuple newTuple(int size) {
         return new BinSedesTuple(size);
     }
     
+    @Override
     @SuppressWarnings("unchecked")
     public Tuple newTuple(List c) {
         return new BinSedesTuple(c);
     }
 
+    @Override
     @SuppressWarnings("unchecked")
     public Tuple newTupleNoCopy(List list) {
         return new BinSedesTuple(list, 1);
     }
 
+    @Override
     public Tuple newTuple(Object datum) {
         Tuple t = new BinSedesTuple(1);
         try {
@@ -61,13 +64,19 @@ public class BinSedesTupleFactory extends TupleFactory {
         return t;
     }
 
+    @Override
     public Class<? extends Tuple> tupleClass() {
         return BinSedesTuple.class;
     }
 
+    @Override
     public Class<? extends TupleRawComparator> tupleRawComparatorClass() {
         return BinSedesTuple.getComparatorClass();
     }
 
+    @Override
+    public boolean isFixedSize() {
+        return false;
+    }
 }
 

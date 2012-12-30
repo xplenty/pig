@@ -186,7 +186,7 @@ implements StoreFuncInterface, LoadMetadata {
     @Override
     public ResourceStatistics getStatistics(String location, Job job)
             throws IOException {
-        throw new UnsupportedOperationException();
+        return null;
     }
 
     @Override
@@ -203,4 +203,8 @@ implements StoreFuncInterface, LoadMetadata {
         StoreFunc.cleanupOnFailureImpl(location, job);
     }
 
+    @Override
+    public void cleanupOnSuccess(String location, Job job) throws IOException {
+        // DEFAULT: do nothing
+    }
 }

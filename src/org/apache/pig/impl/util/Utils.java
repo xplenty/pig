@@ -18,12 +18,21 @@
 package org.apache.pig.impl.util;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.SequenceInputStream;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Properties;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapreduce.Job;
@@ -53,7 +62,7 @@ import com.google.common.collect.Lists;
  * Class with utility static methods
  */
 public class Utils {
-
+	private static final Log log = LogFactory.getLog(Utils.class);
     /**
      * This method is a helper for classes to implement {@link java.lang.Object#equals(java.lang.Object)}
      * checks if two objects are equals - two levels of checks are
@@ -102,27 +111,32 @@ public class Utils {
         }
     }
 
-	/**
-	 * A helper function for retrieving the script schema set by the LOLoad
-	 * function.
-	 * 
-	 * @param loadFuncSignature
-	 * @param conf
-	 * @return Schema
-	 * @throws IOException
-	 */
-	public static Schema getScriptSchema(String loadFuncSignature,
-			Configuration conf) throws IOException {
-		Schema scriptSchema = null;
-		String scriptField = conf.get(loadFuncSignature + ".scriptSchema");
+    /**
+     * A helper function for retrieving the script schema set by the LOLoad
+     * function.
+     * 
+     * @param loadFuncSignature
+     * @param conf
+     * @return Schema
+     * @throws IOException
+     */
+    public static Schema getScriptSchema(
+            String loadFuncSignature,
+            Configuration conf) throws IOException {
+        Schema scriptSchema = null;
+        String scriptField = conf.get(getScriptSchemaKey(loadFuncSignature));
 
-		if (scriptField != null) {
-			scriptSchema = (Schema) ObjectSerializer.deserialize(scriptField);
-		}
+        if (scriptField != null) {
+            scriptSchema = (Schema) ObjectSerializer.deserialize(scriptField);
+        }
 
-		return scriptSchema;
-	}
-    
+        return scriptSchema;
+    }
+
+    public static String getScriptSchemaKey(String loadFuncSignature) {
+      return loadFuncSignature + ".scriptSchema";
+    }
+
     public static ResourceSchema getSchema(LoadFunc wrappedLoadFunc, String location, boolean checkExistence, Job job)
     throws IOException {
         Configuration conf = job.getConfiguration();
@@ -288,6 +302,34 @@ public class Utils {
         }
         
         return result;
+    }
+    
+   public static InputStream getCompositeStream(InputStream in, Properties properties) {
+	   //Load default ~/.pigbootup if not specified by user
+    	final String bootupFile = properties.getProperty("pig.load.default.statements", System.getProperty("user.home") + "/.pigbootup");
+    	try {
+    	final InputStream inputSteam = new FileInputStream(new File(bootupFile));
+    	return new SequenceInputStream(inputSteam, in);
+    	} catch(FileNotFoundException fe) {
+    		log.info("Default bootup file " +bootupFile+ " not found");
+    		return in;
+    	}
+    }
+
+    /**
+     * Returns the total number of bytes for this file, or if a file all files in the directory.
+     */
+    public static long getPathLength(FileSystem fs, FileStatus status) throws IOException {
+        if (!status.isDir()) {
+            return status.getLen();
+        } else {
+            FileStatus[] children = fs.listStatus(status.getPath());
+            long size = 0;
+            for (FileStatus child : children) {
+                size += getPathLength(fs, child);
+            }
+            return size;
+        }
     }
 
 }

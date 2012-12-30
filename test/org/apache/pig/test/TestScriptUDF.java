@@ -23,7 +23,6 @@ import java.util.Map;
 import java.util.Random;
 
 import junit.framework.Assert;
-import junit.framework.TestCase;
 
 import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
@@ -56,64 +55,6 @@ public class TestScriptUDF{
     }
     
     // See PIG-928
-    @Test
-    public void testPythonStandardScript() throws Exception{
-        String[] script = {
-                "#!/usr/bin/python",
-                "@outputSchema(\"x:{t:(num:long)}\")",
-                "def square(number):" ,
-                "\treturn (number * number)"
-        };
-        String[] input = {
-                "1\t3",
-                "2\t4",
-                "3\t5"
-        };
-
-        Util.createInputFile(cluster, "table_testPythonStandardScript", input);
-        Util.createLocalInputFile( "testPythonStandardScript.py", script);
-
-        // Test the namespace
-        pigServer.registerCode("testPythonStandardScript.py", "jython", "pig");
-        pigServer.registerQuery("A = LOAD 'table_testPythonStandardScript' as (a0:long, a1:long);");
-        pigServer.registerQuery("B = foreach A generate pig.square(a0);");
-
-        pigServer.registerCode("testPythonStandardScript.py", "jython", null);
-        pigServer.registerQuery("C = foreach A generate square(a0);");
-
-        Iterator<Tuple> iter = pigServer.openIterator("B");
-        Assert.assertTrue(iter.hasNext());
-        Tuple t = iter.next();
-
-        Assert.assertTrue(t.toString().equals("(1)"));
-
-        Assert.assertTrue(iter.hasNext());
-        t = iter.next();
-
-        Assert.assertTrue(t.toString().equals("(4)"));
-
-        Assert.assertTrue(iter.hasNext());
-        t = iter.next();
-
-        Assert.assertTrue(t.toString().equals("(9)"));
-
-        iter = pigServer.openIterator("C");
-        Assert.assertTrue(iter.hasNext());
-        t = iter.next();
-
-        Assert.assertTrue(t.toString().equals("(1)"));
-
-        Assert.assertTrue(iter.hasNext());
-        t = iter.next();
-
-        Assert.assertTrue(t.toString().equals("(4)"));
-
-        Assert.assertTrue(iter.hasNext());
-        t = iter.next();
-
-        Assert.assertTrue(t.toString().equals("(9)"));
-    }
-    
     @Test
     public void testJavascriptExampleScript() throws Exception{
         String[] script = {
@@ -158,6 +99,7 @@ public class TestScriptUDF{
 
     }
 
+<<<<<<< HEAD
     // See PIG-928
     @Test
     public void testPythonScriptWithSchemaFunction() throws Exception{
@@ -440,6 +382,9 @@ public class TestScriptUDF{
     }
     
     // See Pig-1653
+=======
+    // See Pig-1653 -- left here because we can't force absolute paths in e2e harness
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     @Test
     public void testPythonAbsolutePath() throws Exception{
         String[] script = {
@@ -482,49 +427,6 @@ public class TestScriptUDF{
     }
 
     /** See Pig-1824
-     * test import of wildcarded java classes, this will not work unless
-     * jython is configured with a valid cachedir, which is what this tests.
-     * @throws Exception
-     */
-    @Test
-    public void testPythonWilcardImport() throws Exception {
-        // hadoop.fs.Path is in the classpath (always)
-        String[] script = {
-                "#!/usr/bin/python",
-                "from org.apache.hadoop.fs import *",
-                "p = Path('foo')",
-                "@outputSchema(\"word:chararray\")",
-                "def first(content):",
-                " return content.split(' ')[0]"
-        };
-        String[] input = {
-                "words words words",
-                "talk talk talk"
-        };
-
-        Util.createInputFile(cluster, "table_testPythonWildcardImport", input);
-        File scriptFile = Util.createLocalInputFile( "script.py", script);
-
-        // Test the namespace
-        pigServer.registerCode(scriptFile.getAbsolutePath(), "jython", "pig");
-        pigServer.registerQuery("A = LOAD 'table_testPythonWildcardImport' as (a:chararray);");
-        pigServer.registerQuery("B = foreach A generate pig.first(a);");
-
-        Iterator<Tuple> iter = pigServer.openIterator("B");
-        Assert.assertTrue(iter.hasNext());
-        Tuple t = iter.next();
-
-        Assert.assertTrue(t.toString().equals("(words)"));
-
-        Assert.assertTrue(iter.hasNext());
-        t = iter.next();
-
-        Assert.assertTrue(t.toString().equals("(talk)"));
-
-        Assert.assertFalse(iter.hasNext());
-    }
-
-    /** See Pig-1824
      * test importing a second module/file from the local fs from within
      * the first module.
      *
@@ -533,6 +435,9 @@ public class TestScriptUDF{
      * for "import re".
      * to use a jython install, the Lib dir must be in the jython search path
      * via env variable JYTHON_HOME=jy_home or JYTHON_PATH=jy_home/Lib:...
+     * 
+     * Left in for now as we don't have paths to include other scripts in a
+     * script in the e2e harness.
      *
      * @throws Exception
      */

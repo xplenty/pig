@@ -81,6 +81,18 @@ FOREACH : 'FOREACH'
 ORDER   :  'ORDER'
 ;
 
+RANK   :  'RANK'
+;
+
+DENSE   :  'DENSE'
+;
+
+CUBE    : 'CUBE'
+;
+
+ROLLUP	: 'ROLLUP'
+;
+
 DISTINCT : 'DISTINCT'
 ;
 
@@ -172,6 +184,9 @@ FLOAT : 'FLOAT'
 ;
 
 DOUBLE : 'DOUBLE'
+;
+
+DATETIME : 'DATETIME'
 ;
 
 CHARARRAY : 'CHARARRAY'

@@ -102,9 +102,14 @@ import org.apache.pig.parser.ParserException;
  * <p>
  * <h3>Source tagging</h3>
  * If<code>-tagsource</code> is specified, PigStorage will prepend input split path to each Tuple/row.
+<<<<<<< HEAD
  * User needs to ensure <code>pig.splitCombination</code> is set to false. 
  * Usage: A = LOAD 'input' using PigStorage(',','-tagsource'); B = foreach A generate $0;
  * The first field (0th index) in each Tuple will contain input path
+=======
+ * Usage: A = LOAD 'input' using PigStorage(',','-tagsource'); B = foreach A generate $0;
+ * The first field (0th index) in each Tuple will contain input path 
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
  * <p>
  * Note that regardless of whether or not you store the schema, you <b>always</b> need to specify
  * the correct delimiter to read your data. If you store reading delimiter "#" and then load using
@@ -407,10 +412,17 @@ LoadPushDown, LoadMetadata, StoreMetadata {
     private void setCompression(Path path, Job job) {
      	String location=path.getName();
         if (location.endsWith(".bz2") || location.endsWith(".bz")) {
+<<<<<<< HEAD
             FileOutputFormat.setCompressOutput(job, true);
             FileOutputFormat.setOutputCompressorClass(job,  BZip2Codec.class);
         }  else if (location.endsWith(".gz")) {
             FileOutputFormat.setCompressOutput(job, true);
+=======
+            FileOutputFormat.setCompressOutput(job, true);
+            FileOutputFormat.setOutputCompressorClass(job,  BZip2Codec.class);
+        }  else if (location.endsWith(".gz")) {
+            FileOutputFormat.setCompressOutput(job, true);
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
             FileOutputFormat.setOutputCompressorClass(job, GzipCodec.class);
         } else {
             FileOutputFormat.setCompressOutput( job, false);
@@ -453,6 +465,13 @@ LoadPushDown, LoadMetadata, StoreMetadata {
     throws IOException {
         StoreFunc.cleanupOnFailureImpl(location, job);
     }
+
+    @Override
+    public void cleanupOnSuccess(String location, Job job)
+    throws IOException {
+        // DEFAULT: do nothing
+    }
+
 
 
     //------------------------------------------------------------------------

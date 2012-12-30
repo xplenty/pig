@@ -18,12 +18,15 @@
 package org.apache.pig.test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -46,19 +49,37 @@ import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.datastorage.ConfigurationUtil;
 import org.apache.pig.builtin.ARITY;
+import org.apache.pig.builtin.AddDuration;
 import org.apache.pig.builtin.BagSize;
 import org.apache.pig.builtin.CONCAT;
 import org.apache.pig.builtin.COR;
 import org.apache.pig.builtin.COUNT;
 import org.apache.pig.builtin.COUNT_STAR;
 import org.apache.pig.builtin.COV;
+import org.apache.pig.builtin.CurrentTime;
 import org.apache.pig.builtin.DIFF;
+import org.apache.pig.builtin.DaysBetween;
 import org.apache.pig.builtin.Distinct;
+import org.apache.pig.builtin.GetDay;
+import org.apache.pig.builtin.GetHour;
+import org.apache.pig.builtin.GetMilliSecond;
+import org.apache.pig.builtin.GetMinute;
+import org.apache.pig.builtin.GetMonth;
+import org.apache.pig.builtin.GetSecond;
+import org.apache.pig.builtin.GetWeek;
+import org.apache.pig.builtin.GetWeekYear;
+import org.apache.pig.builtin.GetYear;
+import org.apache.pig.builtin.HoursBetween;
 import org.apache.pig.builtin.INDEXOF;
+import org.apache.pig.builtin.INVERSEMAP;
+import org.apache.pig.builtin.KEYSET;
 import org.apache.pig.builtin.LAST_INDEX_OF;
 import org.apache.pig.builtin.LCFIRST;
 import org.apache.pig.builtin.LOWER;
 import org.apache.pig.builtin.MapSize;
+import org.apache.pig.builtin.MilliSecondsBetween;
+import org.apache.pig.builtin.MinutesBetween;
+import org.apache.pig.builtin.MonthsBetween;
 import org.apache.pig.builtin.PigStorage;
 import org.apache.pig.builtin.REGEX_EXTRACT;
 import org.apache.pig.builtin.REGEX_EXTRACT_ALL;
@@ -66,18 +87,30 @@ import org.apache.pig.builtin.REPLACE;
 import org.apache.pig.builtin.SIZE;
 import org.apache.pig.builtin.STRSPLIT;
 import org.apache.pig.builtin.SUBSTRING;
+import org.apache.pig.builtin.SecondsBetween;
 import org.apache.pig.builtin.StringConcat;
 import org.apache.pig.builtin.StringSize;
+import org.apache.pig.builtin.SubtractDuration;
 import org.apache.pig.builtin.TOBAG;
 import org.apache.pig.builtin.TOKENIZE;
 import org.apache.pig.builtin.TOMAP;
-import org.apache.pig.builtin.TOP;
 import org.apache.pig.builtin.TOTUPLE;
 import org.apache.pig.builtin.TRIM;
 import org.apache.pig.builtin.TextLoader;
+import org.apache.pig.builtin.ToDate;
+import org.apache.pig.builtin.ToDate2ARGS;
+import org.apache.pig.builtin.ToDate3ARGS;
+import org.apache.pig.builtin.ToDateISO;
+import org.apache.pig.builtin.ToMilliSeconds;
+import org.apache.pig.builtin.ToString;
+import org.apache.pig.builtin.ToUnixTime;
 import org.apache.pig.builtin.TupleSize;
 import org.apache.pig.builtin.UCFIRST;
 import org.apache.pig.builtin.UPPER;
+import org.apache.pig.builtin.VALUELIST;
+import org.apache.pig.builtin.VALUESET;
+import org.apache.pig.builtin.WeeksBetween;
+import org.apache.pig.builtin.YearsBetween;
 import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.DataByteArray;
@@ -91,6 +124,8 @@ import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
 import org.apache.pig.impl.logicalLayer.validators.TypeCheckerException;
+import org.joda.time.DateTime;
+import org.joda.time.DateTimeZone;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
@@ -98,8 +133,11 @@ import org.junit.Test;
 
 public class TestBuiltin {
 
+<<<<<<< HEAD
     private String initString = "local";
 
+=======
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     PigServer pigServer;
 
     // This should only be used when absolutely necessary -- eg, when using ReadToEndLoader.
@@ -273,7 +311,6 @@ public class TestBuiltin {
         expectedMap.put("FloatAvgIntermediate", expectedMap.get("FloatSum"));
 
         // set up input hash
-        try{
             inputMap.put("Integer", Util.loadNestTuple(TupleFactory.getInstance().newTuple(1), intInput));
             inputMap.put("IntegerAsLong", Util.loadNestTuple(TupleFactory.getInstance().newTuple(1), intAsLong));
             inputMap.put("Long", Util.loadNestTuple(TupleFactory.getInstance().newTuple(1), longInput));
@@ -284,9 +321,13 @@ public class TestBuiltin {
             inputMap.put("ByteArrayAsDouble", Util.loadNestTuple(TupleFactory.getInstance().newTuple(1), baAsDouble));
             inputMap.put("String", Util.loadNestTuple(TupleFactory.getInstance().newTuple(1), stringInput));
 
+<<<<<<< HEAD
         }catch(ExecException e) {
             e.printStackTrace();
         }
+=======
+        DateTimeZone.setDefault(DateTimeZone.forOffsetMillis(DateTimeZone.UTC.getOffset(null)));
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     }
 
     @AfterClass
@@ -312,6 +353,120 @@ public class TestBuiltin {
         }
     }
 
+<<<<<<< HEAD
+=======
+    @Test
+    public void testAddSubtractDuration() throws Exception {
+        AddDuration func1 = new AddDuration();
+        SubtractDuration func2 = new SubtractDuration();
+
+        Tuple t1 = TupleFactory.getInstance().newTuple(2);
+        t1.set(0, new DateTime("2009-01-07T01:07:01.000Z"));
+        t1.set(1, "PT1S");
+        Tuple t2 = TupleFactory.getInstance().newTuple(2);
+        t2.set(0, new DateTime("2008-02-06T02:06:02.000Z"));
+        t2.set(1, "PT1M");
+        Tuple t3 = TupleFactory.getInstance().newTuple(2);
+        t3.set(0, new DateTime("2007-03-05T03:05:03.000Z"));
+        t3.set(1, "P1D");
+        
+        assertEquals(func1.exec(t1), new DateTime("2009-01-07T01:07:02.000Z"));
+        assertEquals(func1.exec(t2), new DateTime("2008-02-06T02:07:02.000Z"));
+        assertEquals(func1.exec(t3), new DateTime("2007-03-06T03:05:03.000Z"));
+        assertEquals(func2.exec(t1), new DateTime("2009-01-07T01:07:00.000Z"));
+        assertEquals(func2.exec(t2), new DateTime("2008-02-06T02:05:02.000Z"));
+        assertEquals(func2.exec(t3), new DateTime("2007-03-04T03:05:03.000Z"));
+    }
+
+    @Test
+    public void testConversionBetweenDateTimeAndString() throws Exception {
+        ToDate func1 = new ToDate();
+        Tuple t1 = TupleFactory.getInstance().newTuple(1);
+        t1.set(0, 1231290421000L);
+        DateTime dt1 = func1.exec(t1);
+        assertEquals(dt1, new DateTime("2009-01-07T01:07:01.000Z"));
+
+        ToDateISO func2 = new ToDateISO();
+        Tuple t2 = TupleFactory.getInstance().newTuple(1);
+        t2.set(0, "2009-01-07T01:07:01.000Z");
+        DateTime dt2 = func2.exec(t2);
+        assertEquals(dt2, new DateTime("2009-01-07T01:07:01.000Z"));
+
+        Tuple t3 = TupleFactory.getInstance().newTuple(1);
+        t3.set(0, "2009-01-07T01:07:01.000+08:00");
+        DateTime dt3 = func2.exec(t3);
+        assertEquals(dt3, new DateTime("2009-01-07T01:07:01.000+08:00", DateTimeZone.forID("+08:00")));
+
+        ToDate2ARGS func3 = new ToDate2ARGS();        
+        Tuple t4 = TupleFactory.getInstance().newTuple(2);
+        t4.set(0, "2009.01.07 AD at 01:07:01");
+        t4.set(1, "yyyy.MM.dd G 'at' HH:mm:ss");
+        DateTime dt4 = func3.exec(t4);
+        assertEquals(dt4, new DateTime("2009-01-07T01:07:01.000Z"));
+
+        Tuple t5 = TupleFactory.getInstance().newTuple(2);
+        t5.set(0, "2009.01.07 AD at 01:07:01 +0800");
+        t5.set(1, "yyyy.MM.dd G 'at' HH:mm:ss Z");
+        DateTime dt5 = func3.exec(t5);
+        assertEquals(dt5, new DateTime("2009-01-07T01:07:01.000+08:00"));
+        
+        ToDate3ARGS func4 = new ToDate3ARGS();        
+        Tuple t6 = TupleFactory.getInstance().newTuple(3);
+        t6.set(0, "2009.01.07 AD at 01:07:01");
+        t6.set(1, "yyyy.MM.dd G 'at' HH:mm:ss");
+        t6.set(2, "+00:00");
+        DateTime dt6 = func4.exec(t6);
+        assertEquals(dt6, new DateTime("2009-01-07T01:07:01.000Z", DateTimeZone.forID("+00:00")));
+
+        Tuple t7 = TupleFactory.getInstance().newTuple(3);
+        t7.set(0, "2009.01.07 AD at 01:07:01 +0800");
+        t7.set(1, "yyyy.MM.dd G 'at' HH:mm:ss Z");
+        t7.set(2, "asia/singapore");
+        DateTime dt7 = func4.exec(t7);
+        assertEquals(dt7, new DateTime("2009-01-07T01:07:01.000+08:00", DateTimeZone.forID("+08:00")));
+
+        ToUnixTime func5 = new ToUnixTime();
+        Tuple t8 = TupleFactory.getInstance().newTuple(1);
+        t8.set(0, new DateTime(1231290421000L));
+        Long ut1 = func5.exec(t8);
+        assertEquals(ut1.longValue(), 1231290421L);
+
+        ToString func6 = new ToString();
+
+        Tuple t9 = TupleFactory.getInstance().newTuple(1);
+        t9.set(0, new DateTime("2009-01-07T01:07:01.000Z"));
+        String dtStr1 = func6.exec(t9);
+        assertEquals(dtStr1, "2009-01-07T01:07:01.000Z");
+
+        Tuple t10 = TupleFactory.getInstance().newTuple(1);
+        t10.set(0, new DateTime("2009-01-07T09:07:01.000+08:00"));
+        String dtStr2 = func6.exec(t10);
+        assertEquals(dtStr2, "2009-01-07T01:07:01.000Z");
+
+        Tuple t11 = TupleFactory.getInstance().newTuple(2);
+        t11.set(0, new DateTime("2009-01-07T01:07:01.000Z"));
+        t11.set(1, "yyyy.MM.dd G 'at' HH:mm:ss");
+        String dtStr3 = func6.exec(t11);
+        assertEquals(dtStr3, "2009.01.07 AD at 01:07:01");
+
+        Tuple t12 = TupleFactory.getInstance().newTuple(2);
+        t12.set(0, new DateTime("2009-01-07T01:07:01.000+08:00", DateTimeZone.forID("+08:00")));
+        t12.set(1, "yyyy.MM.dd G 'at' HH:mm:ss Z");
+        String dtStr4 = func6.exec(t12);
+        assertEquals(dtStr4, "2009.01.07 AD at 01:07:01 +0800");
+        
+        ToMilliSeconds func7 = new ToMilliSeconds();
+        Tuple t13 = TupleFactory.getInstance().newTuple(1);
+        t13.set(0, new DateTime(1231290421000L));
+        Long ut2 = func7.exec(t11);
+        assertEquals(ut2.longValue(), 1231290421000L);
+        
+        CurrentTime func8 = new CurrentTime();
+        DateTime dt11 = func8.exec(null);
+        Assert.assertNotNull(dt11);
+    }
+
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     /**
      * Test the case where the combiner is not called - so initial is called
      * and then final is called
@@ -862,6 +1017,17 @@ public class TestBuiltin {
 
         assertEquals("Expected count to be 100", 100, output.longValue());
     }
+
+    @Test
+    public void testCOUNTBagNullCheck() throws Exception{
+
+        DataBag b = null;
+        Tuple t = tupleFactory.getInstance().newTuple(b);
+
+        EvalFunc<Long> count = new COUNT();
+        assertNull(count.exec(t));
+       }
+
 
     @Test
     public void testCount_ValidNumberOfArguments_WithoutInputSchema_One() throws Exception {
@@ -1520,6 +1686,14 @@ public class TestBuiltin {
         t3.set(0, null);
         t3.set(1, "^\\/search\\/iy\\/(.*?)\\/.*");
         t3.set(2, 2);
+<<<<<<< HEAD
+=======
+        
+        Tuple t4 = tupleFactory.newTuple(3);
+        t4.set(0,"this is a match");
+        t4.set(1, "this is a (.+?)");
+        t4.set(2, 1);
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 
         REGEX_EXTRACT func = new REGEX_EXTRACT();
         String r = func.exec(t1);
@@ -1528,6 +1702,15 @@ public class TestBuiltin {
         assertTrue(r==null);
         r = func.exec(t3);
         assertTrue(r==null);
+<<<<<<< HEAD
+=======
+        r = func.exec(t4);
+        assertEquals("m", r);
+
+        func = new REGEX_EXTRACT(true);
+        r = func.exec(t4);
+        assertEquals("match", r);
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 
         String matchRegex = "^(.+)\\b\\s+is a\\s+\\b(.+)$";
         TupleFactory tupleFactory = TupleFactory.getInstance();
@@ -1552,6 +1735,33 @@ public class TestBuiltin {
         re = funce.exec(te2);
         assertTrue(re==null);
 
+<<<<<<< HEAD
+=======
+        re = funce.exec(te3);
+        assertTrue(re==null);
+
+        matchRegex = "(.+?)(.+?)";
+        tupleFactory = TupleFactory.getInstance();
+        te1 = tupleFactory.newTuple(2);
+        te1.set(0,"this is a match");
+        te1.set(1, matchRegex);
+
+        funce = new REGEX_EXTRACT_ALL();
+        re = funce.exec(te1);
+        assertEquals(re.size(), 2);
+        assertEquals("t", re.get(0));
+        assertEquals("his is a match", re.get(1));
+
+        funce = new REGEX_EXTRACT_ALL(false);
+        re = funce.exec(te1);
+        assertEquals(re.size(), 2);
+        assertEquals("t", re.get(0));
+        assertEquals("h", re.get(1));
+
+        re = funce.exec(te2);
+        assertTrue(re==null);
+
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
         re = funce.exec(te3);
         assertTrue(re==null);
     }
@@ -1796,6 +2006,7 @@ public class TestBuiltin {
 	assertEquals("", m.get("k2"), 2.0);
 	assertEquals("", m.get("k3"), "foo");
 
+<<<<<<< HEAD
 
         TOP top = new TOP();
         TupleFactory tupleFactory = TupleFactory.getInstance();
@@ -1843,6 +2054,9 @@ public class TestBuiltin {
         outBag = (new TOP.Final()).exec(finalInput);
         assertEquals(outBag.size(), 10L);
         checkItemsGT(outBag, 1, 96);
+=======
+        // TOP - tests migrated to org.apache.pig.builtin.TestTop
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     }
 
     @Test
@@ -2382,6 +2596,231 @@ public class TestBuiltin {
         return expectedMap.get(expectedFor);
     }
 
+    @Test
+    public void testKeySet() throws Exception {
+        Map<String, Object> m = new HashMap<String, Object>();
+        m.put("open", "apache");
+        m.put("1", "hadoop");
+        m.put("source", "code");
+        Tuple input = TupleFactory.getInstance().newTuple(m);
 
+        KEYSET keySet = new KEYSET();
+        DataBag result = keySet.exec(input);
+        Iterator<Tuple> i = result.iterator();
+        assertEquals(result.size(), m.size());
+
+        while(i.hasNext()) {
+            Tuple t = i.next();
+            assertTrue(m.containsKey((String)t.get(0)));
+        }
+
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testValueSet() throws Exception {
+        Map<String, Object> m = new HashMap<String, Object>();
+        m.put("open", "apache");
+        m.put("1", "hadoop");
+        m.put("source", "apache");
+        Tuple input = TupleFactory.getInstance().newTuple(m);
+
+        VALUESET valueSet = new VALUESET();
+        DataBag result = valueSet.exec(input);
+
+        //Value set should only contain 2 elements
+        assertEquals(result.size(), 2);
+        Iterator<Tuple> i = result.iterator();
+        List resultList = new ArrayList<String>();
+        while(i.hasNext()) {
+            resultList.add(i.next().get(0));
+        }
+
+        //Value set should only contain "apache" and "hadoop"
+        Collections.sort(resultList);
+        assertEquals(resultList.get(0), "apache");
+        assertEquals(resultList.get(1), "hadoop");
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testValueList() throws Exception {
+        Map<String, Object> m = new HashMap<String, Object>();
+        m.put("open", "apache");
+        m.put("1", "hadoop");
+        m.put("source", "apache");
+        Tuple input = TupleFactory.getInstance().newTuple(m);
+
+        VALUELIST valueList = new VALUELIST();
+        DataBag result = valueList.exec(input);
+        //Bag must contain all values, not just unique ones
+        assertEquals(result.size(), 3);
+        Iterator<Tuple> i = result.iterator();
+        List resultList = new ArrayList();
+        while(i.hasNext()) {
+            Tuple t = i.next();
+            resultList.add(t.get(0));
+        }
+        Collections.sort(resultList);
+        assertEquals((String)resultList.get(0), "apache");
+        assertEquals((String)resultList.get(1), "apache");
+        assertEquals((String)resultList.get(2), "hadoop");
+    }
+
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testInverseMap() throws Exception {
+        Map<String, Object> m = new HashMap<String, Object>();
+        m.put("open", "apache");
+        m.put("1", "hadoop");
+        m.put("source", "pig");
+        m.put("integer", new Integer(100));
+        m.put("floating", new Float(100.012));
+        m.put("long", new Long(10000000000000l));
+        m.put("boolean", true);
+        Tuple input = TupleFactory.getInstance().newTuple(m);
+
+        INVERSEMAP inverseMap = new INVERSEMAP();
+        Map inverse  = inverseMap.exec(input);
+        assertEquals(inverse.size(), 7);
+        assertTrue(inverse.containsKey("apache"));
+        assertTrue(inverse.containsKey("hadoop"));
+        assertTrue(inverse.containsKey("pig"));
+        assertTrue(inverse.containsKey("100"));
+        assertTrue(inverse.containsKey("true"));
+        assertTrue(inverse.containsKey("100.012"));
+
+        //Test when values are non-unique
+        m.clear();
+        m.put("open", "apache");
+        m.put("1", "hadoop");
+        m.put("source", "apache");
+        input.set(0, m);
+        inverse = inverseMap.exec(input);
+        assertEquals(inverse.size(), 2);
+        assertTrue(inverse.containsKey("apache"));
+        assertTrue(inverse.containsKey("hadoop"));
+
+        DataBag bag = (DataBag)inverse.get("apache");
+        List resultList = new ArrayList<String>();
+        Iterator<Tuple> i = bag.iterator();
+        while(i.hasNext()) {
+          Tuple t = i.next();
+          resultList.add(t.get(0));
+        }
+        Collections.sort(resultList);
+        assertEquals((String)resultList.get(0), "open");
+        assertEquals((String)resultList.get(1), "source");
+    }
+
+    @Test
+    public void testDiffDateTime() throws Exception {
+        Tuple t = TupleFactory.getInstance().newTuple(2);
+        t.set(0, new DateTime("2009-01-07T00:00:00.000Z"));
+        t.set(1, new DateTime("2002-01-01T00:00:00.000Z"));
+
+        YearsBetween func1 = new YearsBetween();
+        Long years = func1.exec(t);
+        System.out.println("Years: " + years.toString());
+        Assert.assertEquals(years.longValue(), 7L);
+        
+        MonthsBetween func2 = new MonthsBetween();
+        Long months = func2.exec(t);
+        System.out.println("Months: " + months.toString());
+        Assert.assertEquals(months.longValue(),84L);
+        
+        WeeksBetween func3 = new WeeksBetween();
+        Long weeks = func3.exec(t);
+        System.out.println("Weeks: " + weeks.toString());
+        Assert.assertEquals(weeks.longValue(), 366L);
+
+        DaysBetween func4 = new DaysBetween();
+        Long days = func4.exec(t);
+        System.out.println("Days: " + days.toString());
+        Assert.assertEquals(days.longValue(), 2563L);
+
+        HoursBetween func5 = new HoursBetween();
+        Long hours = func5.exec(t);
+        System.out.println("Hours: " + hours.toString());
+        Assert.assertEquals(hours.longValue(), 61512L);
+
+        MinutesBetween func6 = new MinutesBetween();
+        Long mins = func6.exec(t);
+        System.out.println("Minutes: " + mins.toString());
+        Assert.assertEquals(mins.longValue(), 3690720L);
+
+        SecondsBetween func7 = new SecondsBetween();
+        Long secs = func7.exec(t);
+        System.out.println("Seconds: " + secs.toString());
+        Assert.assertEquals(secs.longValue(), 221443200L);
+
+        MilliSecondsBetween func8 = new MilliSecondsBetween();
+        Long millis = func8.exec(t);
+        System.out.println("MilliSeconds: " + millis.toString());
+        Assert.assertEquals(millis.longValue(), 221443200000L);
+    }
+
+    @Test
+    public void testGetDateTimeField() throws Exception {
+        Tuple t1 = TupleFactory.getInstance().newTuple(1);
+        t1.set(0, new DateTime("2010-04-15T08:11:33.020Z"));
+        Tuple t2 = TupleFactory.getInstance().newTuple(1);
+        t2.set(0, new DateTime("2010-04-15T08:11:33.020+08:00"));
+        
+        GetYear func1 = new GetYear();
+        Integer year = func1.exec(t1);
+        assertEquals(year.intValue(), 2010);
+        year = func1.exec(t2);
+        assertEquals(year.intValue(), 2010);
+
+        GetMonth func2 = new GetMonth();
+        Integer month = func2.exec(t1);
+        assertEquals(month.intValue(), 4);
+        month = func2.exec(t2);
+        assertEquals(month.intValue(), 4);
+        
+        GetDay func3 = new GetDay();
+        Integer day = func3.exec(t1);
+        assertEquals(day.intValue(), 15);
+        day = func3.exec(t2);
+        assertEquals(day.intValue(), 15);
+        
+        GetHour func4 = new GetHour();
+        Integer hour = func4.exec(t1);
+        assertEquals(hour.intValue(), 8);
+        hour = func4.exec(t2);
+        assertEquals(hour.intValue(), 0);
+        
+        GetMinute func5 = new GetMinute();
+        Integer minute = func5.exec(t1);
+        assertEquals(minute.intValue(), 11);
+        minute = func5.exec(t2);
+        assertEquals(minute.intValue(), 11);
+        
+        GetSecond func6 = new GetSecond();
+        Integer second = func6.exec(t1);
+        assertEquals(second.intValue(), 33);
+        second = func6.exec(t2);
+        assertEquals(second.intValue(), 33);
+        
+        GetMilliSecond func7 = new GetMilliSecond();
+        Integer milli = func7.exec(t1);
+        assertEquals(milli.intValue(), 20);
+        milli = func7.exec(t2);
+        assertEquals(milli.intValue(), 20);
+
+        GetWeekYear func8 = new GetWeekYear();
+        Integer weekyear = func8.exec(t1);
+        assertEquals(weekyear.intValue(), 2010);
+        weekyear = func8.exec(t2);
+        assertEquals(weekyear.intValue(), 2010);
+        
+        GetWeek func9 = new GetWeek();
+        Integer week = func9.exec(t1);
+        assertEquals(week.intValue(), 15);
+        week = func9.exec(t2);
+        assertEquals(week.intValue(), 15);
+    }
 
 }

@@ -46,6 +46,10 @@
           <li> <strong>Python 2.5</strong> - <a href="http://jython.org/downloads.html">http://jython.org/downloads.html</a> (when using Python UDFs or embedding Pig in Python) </li>
           <li> <strong>JavaScript 1.7</strong> - <a href="https://developer.mozilla.org/en/Rhino_downloads_archive">https://developer.mozilla.org/en/Rhino_downloads_archive</a> and <a href="http://mirrors.ibiblio.org/pub/mirrors/maven2/rhino/js/">http://mirrors.ibiblio.org/pub/mirrors/maven2/rhino/js/</a>  (when using JavaScript UDFs or embedding Pig in JavaScript) </li>		  
           <li> <strong>JRuby 1.6.7</strong> - <a href="http://www.jruby.org/download">http://www.jruby.org/download</a> (when using JRuby UDFs) </li>
+<<<<<<< HEAD
+=======
+          <li> <strong>Groovy (<em>groovy-all</em>) 1.8.6</strong> - <a href="http://groovy.codehaus.org/Download">http://groovy.codehaus.org/Download</a> or directly on a maven repo <a href="http://mirrors.ibiblio.org/pub/mirrors/maven2/org/codehaus/groovy/groovy-all/1.8.6/">http://mirrors.ibiblio.org/pub/mirrors/maven2/org/codehaus/groovy/groovy-all/1.8.6/</a> (when using Groovy UDFs or embedding Pig in Groovy) </li>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 		  <li> <strong>Ant 1.7</strong> - <a href="http://ant.apache.org/">http://ant.apache.org/</a> (for builds) </li>
 		  <li> <strong>JUnit 4.5</strong> - <a href="http://junit.sourceforge.net/">http://junit.sourceforge.net/</a> (for unit tests) </li>
 		</ul>
@@ -409,17 +413,25 @@ However, in a production environment you always want to use the STORE operator t
 	<li>The <a href="cmds.html#set">set</a> command (set pig.exec.nocombiner true)</li>
 </ul>
 <p><strong>Note:</strong> The properties file uses standard Java property file format.</p>
+<<<<<<< HEAD
 <p>The following precedence order is supported: pig.properties &lt; -D Pig property &lt; -P properties file &lt; set command. This means that if the same property is provided using the –D command line option as well as the –P command line option and a properties file, the value of the property in the properties file will take precedence.</p>
+=======
+<p>The following precedence order is supported: pig.properties &lt; -D Pig property &lt; -P properties file &lt; set command. This means that if the same property is provided using the –D command line option as well as the –P command line option (properties file), the value of the property in the properties file will take precedence.</p>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 
 <p id="hadoop-properties">To specify Hadoop properties you can use the same mechanisms:</p>
 <ul>
-	<li>The hadoop-site.xml file (add the directory that contains the hadoop-site.xml file to the classpath)</li>
+	<li>Hadoop configuration files (include pig-cluster-hadoop-site.xml)</li>
 	<li>The -D command line option and a Hadoop property (pig –Dmapreduce.task.profile=true) </li>
 	<li>The -P command line option and a property file (pig -P property_file)</li>
 	<li>The <a href="cmds.html#set">set</a> command (set mapred.map.tasks.speculative.execution false)</li>
 </ul>
 <p></p>
+<<<<<<< HEAD
 <p>The same precedence holds: hadoop-site.xml &lt; -D Hadoop property &lt; -P properties_file &lt; set command.</p>
+=======
+<p>The same precedence holds: Hadoop configuration files &lt; -D Hadoop property &lt; -P properties_file &lt; set command.</p>
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 <p>Hadoop properties are not interpreted by Pig but are passed directly to Hadoop. Any Hadoop property can be passed this way. </p>
 <p>All properties that Pig collects, including Hadoop properties, are available to any UDF via the UDFContext object. To get access to the properties, you can call the getJobConf method.</p>
 </section>  
@@ -747,7 +759,7 @@ ngramed2 = DISTINCT ngramed1;
 hour_frequency1 = GROUP ngramed2 BY (ngram, hour);
 </source>
 <ul>
-<li><p> Use the COUNTfunction to get the count (occurrences) of each n-gram.  </p>
+<li><p> Use the COUNT function to get the count (occurrences) of each n-gram.  </p>
 </li>
 </ul>
 
@@ -779,7 +791,7 @@ uniq_frequency2 = FOREACH uniq_frequency1 GENERATE flatten($0), flatten(org.apac
 uniq_frequency3 = FOREACH uniq_frequency2 GENERATE $1 as hour, $0 as ngram, $2 as score, $3 as count, $4 as mean;
 </source>
 <ul>
-<li><p> Use the FILTER operator to move all records with a score less than or equal to 2.0. </p>
+<li><p> Use the FILTER operator to remove all records with a score less than or equal to 2.0. </p>
 </li>
 </ul>
 
@@ -922,7 +934,7 @@ same = JOIN hour00 BY $0, hour12 BY $0;
 same1 = FOREACH same GENERATE hour_frequency2::hour00::group::ngram as ngram, $2 as count00, $5 as count12;
 </source>
 <ul>
-<li><p> Use the PigStorage function to store the results. The output file contains a list of n-grams with the following fields: <strong>hour</strong>, <strong>count00</strong>, <strong>count12</strong>. </p>
+<li><p> Use the PigStorage function to store the results. The output file contains a list of n-grams with the following fields: <strong>ngram</strong>, <strong>count00</strong>, <strong>count12</strong>. </p>
 </li>
 </ul>
 

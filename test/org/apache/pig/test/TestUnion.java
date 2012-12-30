@@ -17,11 +17,10 @@
  */
 package org.apache.pig.test;
 
-import static org.junit.Assert.assertEquals;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.Properties;
 
 import org.apache.pig.ExecType;
 import org.apache.pig.FuncSpec;
@@ -36,9 +35,13 @@ import org.apache.pig.data.DefaultTuple;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.io.FileSpec;
+<<<<<<< HEAD
 import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
+=======
+import org.apache.pig.impl.logicalLayer.schema.Schema;
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
@@ -69,7 +72,7 @@ import org.junit.runners.JUnit4;
  *      |---For Each - -7192652407897311774
  *          |
  *          |---Load - --3816247505117325386
- *          
+ *
  *  Tests the Start Plan operator with the above plan.
  *  The verification is done as follows:
  *  Both loads load the same file(/etc/passwd).
@@ -86,10 +89,14 @@ import org.junit.runners.JUnit4;
 public class TestUnion extends junit.framework.TestCase {
     POUnion sp;
     DataBag expBag;
-    static MiniCluster cluster = MiniCluster.buildCluster();
-    PigContext pc = new PigContext();
+    PigContext pc;
+    PigServer pigServer;
+
+    @Override
     @Before
     public void setUp() throws Exception {
+        pigServer = new PigServer(ExecType.LOCAL, new Properties());
+        pc = pigServer.getPigContext();
         pc.connect();
         GenPhyOp.setPc(pc);
         POLoad ld1 = GenPhyOp.topLoadOp();
@@ -97,14 +104,14 @@ public class TestUnion extends junit.framework.TestCase {
         String inpDir = curDir + File.separatorChar + "test/org/apache/pig/test/data/InputFiles/";
         FileSpec fSpec = new FileSpec(Util.generateURI(Util.encodeEscape(inpDir + "passwd"), pc), new FuncSpec(PigStorage.class.getName() , new String[]{":"}));
         ld1.setLFile(fSpec);
-        
+
         POLoad ld2 = GenPhyOp.topLoadOp();
         ld2.setLFile(fSpec);
-        
+
         POFilter fl1 = GenPhyOp.topFilterOpWithProj(1, 50, GenPhyOp.LTE);
-        
+
         POFilter fl2 = GenPhyOp.topFilterOpWithProj(1, 50, GenPhyOp.GT);
-        
+
         int[] flds = {0,2};
         Tuple sample = new DefaultTuple();
         sample.append(new String("S"));
@@ -117,13 +124,13 @@ public class TestUnion extends junit.framework.TestCase {
         sample.append(new String("x"));
 
         POForEach fe1 = GenPhyOp.topForEachOPWithPlan(flds , sample);
-        
+
         POForEach fe2 = GenPhyOp.topForEachOPWithPlan(flds , sample);
-        
+
         sp = GenPhyOp.topUnionOp();
-        
+
         PhysicalPlan plan = new PhysicalPlan();
-        
+
         plan.add(ld1);
         plan.add(ld2);
         plan.add(fl1);
@@ -131,18 +138,18 @@ public class TestUnion extends junit.framework.TestCase {
         plan.add(fe1);
         plan.add(fe2);
         plan.add(sp);
-        
+
         plan.connect(ld1, fe1);
         plan.connect(fe1, fl1);
         plan.connect(ld2, fe2);
         plan.connect(fe2, fl2);
         plan.connect(fl1, sp);
         plan.connect(fl2, sp);
-        
+
         /*PlanPrinter ppp = new PlanPrinter(plan);
         ppp.visit();*/
-        
-        
+
+
         POLoad ld3 = GenPhyOp.topLoadOp();
         ld3.setLFile(fSpec);
         DataBag fullBag = DefaultBagFactory.getInstance().newDefaultBag();
@@ -155,15 +162,15 @@ public class TestUnion extends junit.framework.TestCase {
         expBag = TestHelper.projectBag(fullBag, fields);
     }
 
+    @Override
     @After
     public void tearDown() throws Exception {
     }
-    
+
     @AfterClass
     public static void oneTimeTearDown() throws Exception {
-        cluster.shutDown();
     }
-    
+
     private Tuple castToDBA(Tuple in) throws ExecException{
         Tuple res = new DefaultTuple();
         for (int i=0;i<in.size();i++) {
@@ -194,7 +201,7 @@ public class TestUnion extends junit.framework.TestCase {
     // |    |-POUnion (root 2)--> This union's getNext() can lead the code here
     // |
     // |--POLocalRearrange (root 1)
-    
+
     // The inner POUnion above is a root in the plan which has 2 roots.
     // So these 2 roots would have input coming from different input
     // sources (dfs files). So certain maps would be working on input only
@@ -203,18 +210,17 @@ public class TestUnion extends junit.framework.TestCase {
     // neither get input attached to it nor does it have predecessors
     @Test
     public void testGetNextNullInput() throws Exception {
-        Util.createInputFile(cluster, "a.txt", new String[] {"1\t2\t3", "4\t5\t6"});
-        Util.createInputFile(cluster, "b.txt", new String[] {"7\t8\t9", "1\t200\t300"});
-        Util.createInputFile(cluster, "c.txt", new String[] {"1\t20\t30"});
-        FileLocalizer.deleteTempFiles();
-        PigServer pig = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
-        pig.registerQuery("a = load 'a.txt' ;");
-        pig.registerQuery("b = load 'b.txt';");
-        pig.registerQuery("c = union a, b;");
-        pig.registerQuery("d = load 'c.txt' ;");
-        pig.registerQuery("e = cogroup c by $0 inner, d by $0 inner;");
-        pig.explain("e", System.err);
-        // output should be 
+        File f1 = Util.createInputFile("tmp", "a.txt", new String[] {"1\t2\t3", "4\t5\t6"});
+        File f2 = Util.createInputFile("tmp", "b.txt", new String[] {"7\t8\t9", "1\t200\t300"});
+        File f3 = Util.createInputFile("tmp", "c.txt", new String[] {"1\t20\t30"});
+        //FileLocalizer.deleteTempFiles();
+        pigServer.registerQuery("a = load '" + f1.getAbsolutePath() + "' ;");
+        pigServer.registerQuery("b = load '" + f2.getAbsolutePath() + "';");
+        pigServer.registerQuery("c = union a, b;");
+        pigServer.registerQuery("d = load '" + f3.getAbsolutePath() + "' ;");
+        pigServer.registerQuery("e = cogroup c by $0 inner, d by $0 inner;");
+        pigServer.explain("e", System.err);
+        // output should be
         // (1,{(1,2,3),(1,200,300)},{(1,20,30)})
         Tuple expectedResult = new DefaultTuple();
         expectedResult.append(new DataByteArray("1"));
@@ -225,24 +231,23 @@ public class TestUnion extends junit.framework.TestCase {
         expectedResult.append(secondField);
         DataBag thirdField = Util.createBag(new Tuple[]{Util.createTuple(Util.toDataByteArrays(new String[]{"1", "20", "30"}))});
         expectedResult.append(thirdField);
-        Iterator<Tuple> it = pig.openIterator("e");
+        Iterator<Tuple> it = pigServer.openIterator("e");
         assertEquals(expectedResult, it.next());
         assertFalse(it.hasNext());
     }
-    
+
     // Test schema merge in union when one of the fields is a bag
     @Test
     public void testSchemaMergeWithBag() throws Exception {
-        Util.createInputFile(cluster, "input1.txt", new String[] {"dummy"});
-        Util.createInputFile(cluster, "input2.txt", new String[] {"dummy"});
-        PigServer pig = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
-        Util.registerMultiLineQuery(pig, "a = load 'input1.txt';" +
-        		"b = load 'input2.txt';" +
+        File f1 = Util.createInputFile("tmp", "input1.txt", new String[] {"dummy"});
+        File f2 = Util.createInputFile("tmp", "input2.txt", new String[] {"dummy"});
+        Util.registerMultiLineQuery(pigServer, "a = load '" + f1.getAbsolutePath() + "';" +
+        		"b = load '" + f2.getAbsolutePath() + "';" +
         		"c = foreach a generate 1, {(1, 'str1')};" +
         		"d = foreach b generate 2, {(2, 'str2')};" +
         		"e = union c,d;" +
         		"");
-        Iterator<Tuple> it = pig.openIterator("e");
+        Iterator<Tuple> it = pigServer.openIterator("e");
         Object[] expected = new Object[] { Util.getPigConstant("(1, {(1, 'str1')})"),
                 Util.getPigConstant("(2, {(2, 'str2')})")};
         Object[] results = new Object[2];
@@ -268,6 +273,7 @@ public class TestUnion extends junit.framework.TestCase {
     @Test
     public void testCastingAfterUnion() throws Exception {
 
+<<<<<<< HEAD
         Util.createInputFile(cluster, "i1.txt", new String[] {"aaa\t111"});
         Util.createInputFile(cluster, "i2.txt", new String[] {"bbb\t222"});
         
@@ -278,12 +284,27 @@ public class TestUnion extends junit.framework.TestCase {
         ps.registerQuery("C = union A,B;");
         ps.registerQuery("D = foreach C generate (chararray)a as a,(int)b as b;");
         
+=======
+        File f1 = Util.createInputFile("tmp", "i1.txt", new String[] {"aaa\t111"});
+        File f2 = Util.createInputFile("tmp", "i2.txt", new String[] {"bbb\t222"});
+
+        PigServer ps = new PigServer(ExecType.LOCAL, new Properties());
+        ps.registerQuery("A = load '" + f1.getAbsolutePath() + "' as (a,b);");
+        ps.registerQuery("B = load '" + f2.getAbsolutePath() + "' as (a,b);");
+        ps.registerQuery("C = union A,B;");
+        ps.registerQuery("D = foreach C generate (chararray)a as a,(int)b as b;");
+
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
         Schema dumpSchema = ps.dumpSchema("D");
         Schema expected = new Schema ();
         expected.add(new Schema.FieldSchema("a", DataType.CHARARRAY));
         expected.add(new Schema.FieldSchema("b", DataType.INTEGER));
         assertEquals(expected, dumpSchema);
+<<<<<<< HEAD
         
+=======
+
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
         Iterator<Tuple> itr = ps.openIterator("D");
         int recordCount = 0;
         while(itr.next() != null)
@@ -291,5 +312,10 @@ public class TestUnion extends junit.framework.TestCase {
         assertEquals(2, recordCount);
 
     }
+<<<<<<< HEAD
     
+=======
+
+
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 }

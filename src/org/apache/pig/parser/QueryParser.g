@@ -47,6 +47,7 @@ tokens {
     BAG_VAL;
     KEY_VAL_PAIR;
     FIELD_DEF;
+    FIELD_DEF_WITHOUT_IDENTIFIER;
     NESTED_CMD_ASSI;
     NESTED_CMD;
     NESTED_PROJ;
@@ -214,12 +215,14 @@ content : LEFT_CURLY ( content | ~(LEFT_CURLY | RIGHT_CURLY) )* RIGHT_CURLY
 op_clause : define_clause 
           | load_clause
           | group_clause
+          | cube_clause
           | store_clause
           | filter_clause
           | distinct_clause
           | limit_clause
           | sample_clause
           | order_clause
+          | rank_clause
           | cross_clause
           | join_clause
           | union_clause
@@ -299,11 +302,13 @@ load_clause : LOAD^ filename ( USING! func_clause )? as_clause?
 filename : QUOTEDSTRING
 ;
 
-as_clause: AS^ ( field_def | ( LEFT_PAREN! field_def_list RIGHT_PAREN! ) )
+as_clause: AS^ ( ( LEFT_PAREN! field_def_list RIGHT_PAREN! ) | field_def )
 ;
 
 field_def : identifier ( COLON type )?
          -> ^( FIELD_DEF identifier type? )
+          | type
+         -> ^( FIELD_DEF_WITHOUT_IDENTIFIER type )
 ;
 
 field_def_list : field_def ( COMMA field_def )*
@@ -313,7 +318,7 @@ field_def_list : field_def ( COMMA field_def )*
 type : simple_type | tuple_type | bag_type | map_type
 ;
 
-simple_type : BOOLEAN | INT | LONG | FLOAT | DOUBLE | CHARARRAY | BYTEARRAY
+simple_type : BOOLEAN | INT | LONG | FLOAT | DOUBLE | DATETIME | CHARARRAY | BYTEARRAY
 ;
 
 tuple_type : TUPLE? LEFT_PAREN field_def_list? RIGHT_PAREN
@@ -363,10 +368,10 @@ rel : alias
     | LEFT_PAREN! ( foreach_clause_complex | ( ( op_clause | foreach_clause_simple ) parallel_clause? ) ) RIGHT_PAREN!
 ;
 
-flatten_generated_item : flatten_clause ( AS! ( field_def | ( LEFT_PAREN! field_def_list RIGHT_PAREN! ) ) )?
-                       | col_range ( AS! ( field_def | ( LEFT_PAREN! field_def_list RIGHT_PAREN! ) ) )?
+flatten_generated_item : flatten_clause ( AS! ( ( LEFT_PAREN! field_def_list RIGHT_PAREN! ) | field_def ) )?
+                       | col_range ( AS! ( ( LEFT_PAREN! field_def_list RIGHT_PAREN! ) | field_def ) )?
                        | expr ( AS! field_def )?
-                       | STAR ( AS! ( field_def | ( LEFT_PAREN! field_def_list RIGHT_PAREN! ) ) )?
+                       | STAR ( AS! ( ( LEFT_PAREN! field_def_list RIGHT_PAREN! ) | field_def ) )?
 ;
 	
 flatten_clause : FLATTEN^ LEFT_PAREN! expr RIGHT_PAREN!
@@ -387,11 +392,15 @@ or_cond : and_cond  ( OR^ and_cond )*
 and_cond : unary_cond ( AND^ unary_cond )*
 ;
 
-unary_cond : LEFT_PAREN! cond RIGHT_PAREN!
+unary_cond : expr rel_op^ expr
+           | LEFT_PAREN! cond RIGHT_PAREN!
            | not_cond
-           | expr rel_op^ expr
            | func_eval
            | null_check_cond
+           | bool_cond
+;
+
+bool_cond : expr -> ^(BOOL_COND expr)
 ;
 
 not_cond : NOT^ unary_cond
@@ -467,7 +476,7 @@ dot_proj : PERIOD ( col_alias_or_index
 col_alias_or_index : col_alias | col_index
 ;
 
-col_alias : GROUP | identifier
+col_alias : GROUP | CUBE | identifier
 ;
 
 col_index : DOLLARVAR
@@ -495,6 +504,24 @@ limit_clause : LIMIT^ rel ( (INTEGER SEMI_COLON) => INTEGER | (LONGINTEGER SEMI_
 ;
 
 sample_clause : SAMPLE^ rel ( (DOUBLENUMBER SEMI_COLON) => DOUBLENUMBER | expr )
+;
+
+rank_clause : RANK^ rel ( rank_by_statement )?
+;
+
+rank_by_statement : BY^ rank_by_clause ( DENSE )?
+;
+
+rank_by_clause : STAR ( ASC | DESC )?
+			   | rank_list
+;
+
+rank_list : rank_col ( COMMA rank_col )*
+         -> rank_col+
+;
+
+rank_col : col_range ( ASC | DESC )?
+         | col_ref ( ASC | DESC )?
 ;
 
 order_clause : ORDER^ rel BY! order_by_clause ( USING! func_clause )?
@@ -569,6 +596,29 @@ foreach_clause_complex : FOREACH^ rel foreach_plan_complex
 
 foreach_plan_complex : nested_blk
                     -> ^( FOREACH_PLAN_COMPLEX nested_blk )
+;
+
+cube_clause : CUBE^ cube_item 
+;
+
+cube_item : rel ( cube_by_clause )
+;
+
+cube_by_clause : BY^ cube_or_rollup
+;
+
+cube_or_rollup : cube_rollup_list ( COMMA cube_rollup_list )*
+                -> cube_rollup_list+
+;
+
+cube_rollup_list : ( CUBE | ROLLUP )^ cube_by_expr_list
+;
+
+cube_by_expr_list : LEFT_PAREN cube_by_expr ( COMMA cube_by_expr )* RIGHT_PAREN
+                   -> cube_by_expr+
+;
+
+cube_by_expr : col_range  | expr | STAR
 ;
 
 nested_blk : LEFT_CURLY! nested_command_list ( generate_clause SEMI_COLON! ) RIGHT_CURLY!
@@ -653,7 +703,7 @@ split_otherwise : alias OTHERWISE
 col_ref : alias_col_ref | dollar_col_ref
 ;
 
-alias_col_ref : GROUP | identifier
+alias_col_ref : GROUP | CUBE | identifier
 ;
 
 dollar_col_ref : DOLLARVAR
@@ -705,6 +755,8 @@ eid : rel_str_op
     | LOAD
     | FILTER
     | FOREACH
+    | CUBE
+    | ROLLUP
     | ORDER
     | DISTINCT
     | COGROUP
@@ -735,6 +787,7 @@ eid : rel_str_op
     | LONG
     | FLOAT
     | DOUBLE
+    | DATETIME
     | CHARARRAY
     | BYTEARRAY
     | BAG
@@ -762,6 +815,10 @@ eid : rel_str_op
     | TRUE
     | FALSE
     | REALIAS
+<<<<<<< HEAD
+=======
+    | BOOL_COND
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 ;
 
 // relational operator

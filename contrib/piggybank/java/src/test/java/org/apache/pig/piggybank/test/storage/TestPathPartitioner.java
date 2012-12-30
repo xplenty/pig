@@ -54,8 +54,13 @@ public class TestPathPartitioner extends TestCase {
 
     @Override
     protected void setUp() throws Exception {
+<<<<<<< HEAD
     conf = new Configuration(false);
     conf.addResource("core-default.xml");
+=======
+	conf = new Configuration(false);
+	conf.addResource("core-default.xml");
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 
 	baseDir = createDir(null,
 		"testPathPartitioner-testGetKeys-" + System.currentTimeMillis());

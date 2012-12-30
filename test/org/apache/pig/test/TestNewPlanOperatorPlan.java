@@ -18,15 +18,20 @@
 
 package org.apache.pig.test;
 
+import static org.apache.pig.newplan.logical.relational.LOTestHelper.newLOLoad;
+
 import java.util.Collection;
 import java.util.List;
 import java.util.Properties;
+
+import junit.framework.TestCase;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.pig.ExecType;
 import org.apache.pig.FuncSpec;
 import org.apache.pig.backend.hadoop.datastorage.ConfigurationUtil;
 import org.apache.pig.builtin.PigStorage;
+import org.apache.pig.builtin.mock.Storage;
 import org.apache.pig.data.DataType;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.io.FileSpec;
@@ -50,20 +55,22 @@ import org.apache.pig.newplan.logical.expression.LogicalExpressionVisitor;
 import org.apache.pig.newplan.logical.expression.ProjectExpression;
 import org.apache.pig.newplan.logical.relational.LOFilter;
 import org.apache.pig.newplan.logical.relational.LOJoin;
+import org.apache.pig.newplan.logical.relational.LOJoin.JOINTYPE;
 import org.apache.pig.newplan.logical.relational.LOLoad;
-import org.apache.pig.newplan.logical.relational.LOSplit;
 import org.apache.pig.newplan.logical.relational.LogicalPlan;
 import org.apache.pig.newplan.logical.relational.LogicalRelationalNodesVisitor;
 import org.apache.pig.newplan.logical.relational.LogicalSchema;
-import org.apache.pig.newplan.logical.relational.LOJoin.JOINTYPE;
-import org.apache.pig.newplan.logical.relational.LogicalSchema.LogicalFieldSchema;
 import org.junit.Before;
 import org.junit.Test;
 
-import junit.framework.TestCase;
-
 public class TestNewPlanOperatorPlan extends TestCase {
     
+    public static class FooLoad extends PigStorage {
+        public FooLoad(String[] params) {
+        }
+
+    }
+
     private static class SillyPlan extends BaseOperatorPlan {
         
         SillyPlan() {
@@ -706,7 +713,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
     @Test
     public void testLogicalPlanVisitor() throws FrontendException {
         LogicalPlan lp = new LogicalPlan();
-        LOLoad load = new LOLoad(null, null, lp, conf);
+        LOLoad load = newLOLoad(null, null, lp, conf);
         /*lp.add((LogicalRelationalOperator)null, load,
             (LogicalRelationalOperator)null);*/
         lp.add(load);
@@ -834,7 +841,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
             LogicalSchema aschema = new LogicalSchema();
             aschema.addField(new LogicalSchema.LogicalFieldSchema(
                 "x", null, DataType.INTEGER));
-            LOLoad A = new LOLoad(new FileSpec("/abc",
+            LOLoad A = newLOLoad(new FileSpec("/abc",
                 new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), aschema, lp, conf);
             lp.add(A);
         
@@ -842,7 +849,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
             LogicalSchema bschema = new LogicalSchema();
             bschema.addField(new LogicalSchema.LogicalFieldSchema(
                 "y", null, DataType.INTEGER));
-            LOLoad B = new LOLoad(new FileSpec("/def",
+            LOLoad B = newLOLoad(new FileSpec("/def",
                 new FuncSpec("PigStorage", "\t")), bschema, lp, conf);
             lp.add(B);
         
@@ -884,7 +891,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
             LogicalSchema aschema = new LogicalSchema();
             aschema.addField(new LogicalSchema.LogicalFieldSchema(
                 "x", null, DataType.INTEGER));
-            LOLoad A = new LOLoad(new FileSpec("/abc",
+            LOLoad A = newLOLoad(new FileSpec("/abc",
                 new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), aschema, lp1, conf);
             lp1.add(A);
             
@@ -892,7 +899,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
             LogicalSchema bschema = new LogicalSchema();
             bschema.addField(new LogicalSchema.LogicalFieldSchema(
                 "y", null, DataType.INTEGER));
-            LOLoad B = new LOLoad(new FileSpec("/def",
+            LOLoad B = newLOLoad(new FileSpec("/def",
                 new FuncSpec("PigStorage", "\t")), bschema, lp1, conf);
             lp1.add(B);
             
@@ -939,11 +946,11 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema aschema1 = new LogicalSchema();
         aschema1.addField(new LogicalSchema.LogicalFieldSchema(
             "x", null, DataType.INTEGER));
-        LOLoad load1 = new LOLoad(new FileSpec("/abc",
+        LOLoad load1 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), aschema1, lp, conf);
         lp.add(load1);
         
-        LOLoad load2 = new LOLoad(new FileSpec("/abc",
+        LOLoad load2 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "z"})), aschema1, lp, conf);
         lp.add(load2);
         
@@ -957,11 +964,11 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema aschema1 = new LogicalSchema();
         aschema1.addField(new LogicalSchema.LogicalFieldSchema(
             "x", null, DataType.INTEGER));
-        LOLoad load1 = new LOLoad(new FileSpec("/abc",
+        LOLoad load1 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), aschema1, lp, conf);
         lp.add(load1);
         
-        LOLoad load3 = new LOLoad(new FileSpec("/abc",
+        LOLoad load3 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), "x")), aschema1, lp, conf);
         lp.add(load3);
         
@@ -975,12 +982,12 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema aschema1 = new LogicalSchema();
         aschema1.addField(new LogicalSchema.LogicalFieldSchema(
             "x", null, DataType.INTEGER));
-        LOLoad load1 = new LOLoad(new FileSpec("/abc",
+        LOLoad load1 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), aschema1, lp, conf);
         lp.add(load1);
         
          // Different function names in FuncSpec
-        LOLoad load4 = new LOLoad(new FileSpec("/abc",
+        LOLoad load4 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "z"})), aschema1, lp, conf);
         lp.add(load4);
         
@@ -993,12 +1000,12 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema aschema1 = new LogicalSchema();
         aschema1.addField(new LogicalSchema.LogicalFieldSchema(
             "x", null, DataType.INTEGER));
-        LOLoad load1 = new LOLoad(new FileSpec("/abc",
+        LOLoad load1 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), aschema1, lp, conf);
         lp.add(load1);
     
         // Different file name
-        LOLoad load5 = new LOLoad(new FileSpec("/def",
+        LOLoad load5 = newLOLoad(new FileSpec("/def",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "z"})), aschema1, lp, conf);
         lp.add(load5);
         
@@ -1011,7 +1018,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema aschema1 = new LogicalSchema();
         aschema1.addField(new LogicalSchema.LogicalFieldSchema(
             "x", null, DataType.INTEGER));
-        LOLoad load1 = new LOLoad(new FileSpec("/abc",
+        LOLoad load1 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), aschema1, lp, conf);
         lp.add(load1);
         
@@ -1020,7 +1027,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
         aschema2.addField(new LogicalSchema.LogicalFieldSchema(
             "x", null, DataType.CHARARRAY));
         
-        LOLoad load6 = new LOLoad(new FileSpec("/abc",
+        LOLoad load6 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "z"})), aschema2, lp, conf);
         lp.add(load6);
             
@@ -1031,11 +1038,11 @@ public class TestNewPlanOperatorPlan extends TestCase {
     public void testRelationalEqualityNullSchemas() throws FrontendException {
         LogicalPlan lp = new LogicalPlan();
         // Test that two loads with no schema are still equal
-        LOLoad load7 = new LOLoad(new FileSpec("/abc",
+        LOLoad load7 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), null, lp, conf);
         lp.add(load7);
         
-        LOLoad load8 = new LOLoad(new FileSpec("/abc",
+        LOLoad load8 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), null, lp, conf);
         lp.add(load8);
         
@@ -1048,12 +1055,12 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema aschema1 = new LogicalSchema();
         aschema1.addField(new LogicalSchema.LogicalFieldSchema(
             "x", null, DataType.INTEGER));
-        LOLoad load1 = new LOLoad(new FileSpec("/abc",
+        LOLoad load1 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), aschema1, lp, conf);
         lp.add(load1);
         
         // Test that one with schema and one without breaks equality
-        LOLoad load9 = new LOLoad(new FileSpec("/abc",
+        LOLoad load9 = newLOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "z"})), null, lp, conf);
         lp.add(load9);
         
@@ -1099,15 +1106,15 @@ public class TestNewPlanOperatorPlan extends TestCase {
        LogicalSchema jaschema1 = new LogicalSchema();
        jaschema1.addField(new LogicalSchema.LogicalFieldSchema(
            "x", null, DataType.INTEGER));
-       LOLoad A1 = new LOLoad(new FileSpec("/abc",
-           new FuncSpec("/fooload", new String[] {"x", "y"})), jaschema1, lp, conf);
+       LOLoad A1 = newLOLoad(new FileSpec("/abc",
+           new FuncSpec("org.apache.pig.test.TestNewPlanOperatorPlan$FooLoad", new String[] {"x", "y"})), jaschema1, lp, conf);
        lp.add(A1);
         
         // B = load
         LogicalSchema jbschema1 = new LogicalSchema();
         jbschema1.addField(new LogicalSchema.LogicalFieldSchema(
             "y", null, DataType.INTEGER));
-        LOLoad B1 = new LOLoad(new FileSpec("/def",
+        LOLoad B1 = newLOLoad(new FileSpec("/def",
             new FuncSpec("PigStorage", "\t")), jbschema1, lp, conf);
         lp.add(B1);
         
@@ -1135,15 +1142,15 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema jaschema2 = new LogicalSchema();
         jaschema2.addField(new LogicalSchema.LogicalFieldSchema(
            "x", null, DataType.INTEGER));
-        LOLoad A2 = new LOLoad(new FileSpec("/abc",
-           new FuncSpec("/fooload", new String[] {"x", "y"})), jaschema2, lp, conf);
+        LOLoad A2 = newLOLoad(new FileSpec("/abc",
+           new FuncSpec("org.apache.pig.test.TestNewPlanOperatorPlan$FooLoad", new String[] {"x", "y"})), jaschema2, lp, conf);
         lp.add(A2);
         
         // B = load
         LogicalSchema jbschema2 = new LogicalSchema();
         jbschema2.addField(new LogicalSchema.LogicalFieldSchema(
             "y", null, DataType.INTEGER));
-        LOLoad B2 = new LOLoad(new FileSpec("/def",
+        LOLoad B2 = newLOLoad(new FileSpec("/def",
             new FuncSpec("PigStorage", "\t")), jbschema2, lp, conf);
         lp.add(B2);
         
@@ -1176,15 +1183,15 @@ public class TestNewPlanOperatorPlan extends TestCase {
                LogicalSchema jaschema1 = new LogicalSchema();
        jaschema1.addField(new LogicalSchema.LogicalFieldSchema(
            "x", null, DataType.INTEGER));
-       LOLoad A1 = new LOLoad(new FileSpec("/abc",
-           new FuncSpec("/fooload", new String[] {"x", "y"})), jaschema1, lp, conf);
+       LOLoad A1 = newLOLoad(new FileSpec("/abc",
+           new FuncSpec("org.apache.pig.test.TestNewPlanOperatorPlan$FooLoad", new String[] {"x", "y"})), jaschema1, lp, conf);
        lp.add(A1);
         
         // B = load
         LogicalSchema jbschema1 = new LogicalSchema();
         jbschema1.addField(new LogicalSchema.LogicalFieldSchema(
             "y", null, DataType.INTEGER));
-        LOLoad B1 = new LOLoad(new FileSpec("/def",
+        LOLoad B1 = newLOLoad(new FileSpec("/def",
             new FuncSpec("PigStorage", "\t")), jbschema1, lp, conf);
         lp.add(B1);
         
@@ -1214,15 +1221,15 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema jaschema3 = new LogicalSchema();
         jaschema3.addField(new LogicalSchema.LogicalFieldSchema(
            "x", null, DataType.INTEGER));
-        LOLoad A3 = new LOLoad(new FileSpec("/abc",
-           new FuncSpec("/fooload", new String[] {"x", "y"})), jaschema3, lp, conf);
+        LOLoad A3 = newLOLoad(new FileSpec("/abc",
+           new FuncSpec("org.apache.pig.test.TestNewPlanOperatorPlan$FooLoad", new String[] {"x", "y"})), jaschema3, lp, conf);
         lp.add(A3);
         
         // B = load
         LogicalSchema jbschema3 = new LogicalSchema();
         jbschema3.addField(new LogicalSchema.LogicalFieldSchema(
             "y", null, DataType.INTEGER));
-        LOLoad B3 = new LOLoad(new FileSpec("/def",
+        LOLoad B3 = newLOLoad(new FileSpec("/def",
             new FuncSpec("PigStorage", "\t")), jbschema3, lp, conf);
         lp.add(B3);
         
@@ -1256,15 +1263,15 @@ public class TestNewPlanOperatorPlan extends TestCase {
                LogicalSchema jaschema1 = new LogicalSchema();
        jaschema1.addField(new LogicalSchema.LogicalFieldSchema(
            "x", null, DataType.INTEGER));
-       LOLoad A1 = new LOLoad(new FileSpec("/abc",
-           new FuncSpec("/fooload", new String[] {"x", "y"})), jaschema1, lp, conf);
+       LOLoad A1 = newLOLoad(new FileSpec("/abc",
+           new FuncSpec("org.apache.pig.test.TestNewPlanOperatorPlan$FooLoad", new String[] {"x", "y"})), jaschema1, lp, conf);
        lp.add(A1);
         
         // B = load
         LogicalSchema jbschema1 = new LogicalSchema();
         jbschema1.addField(new LogicalSchema.LogicalFieldSchema(
             "y", null, DataType.INTEGER));
-        LOLoad B1 = new LOLoad(new FileSpec("/def",
+        LOLoad B1 = newLOLoad(new FileSpec("/def",
             new FuncSpec("PigStorage", "\t")), jbschema1, lp, conf);
         lp.add(B1);
         
@@ -1292,15 +1299,15 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema jaschema5 = new LogicalSchema();
         jaschema5.addField(new LogicalSchema.LogicalFieldSchema(
            "x", null, DataType.INTEGER));
-        LOLoad A5 = new LOLoad(new FileSpec("/abc",
-           new FuncSpec("/fooload", new String[] {"x", "y"})), jaschema5, lp, conf);
+        LOLoad A5 = newLOLoad(new FileSpec("/abc",
+           new FuncSpec("org.apache.pig.test.TestNewPlanOperatorPlan$FooLoad", new String[] {"x", "y"})), jaschema5, lp, conf);
         lp.add(A5);
         
         // B = load
         LogicalSchema jbschema5 = new LogicalSchema();
         jbschema5.addField(new LogicalSchema.LogicalFieldSchema(
             "y", null, DataType.INTEGER));
-        LOLoad B5 = new LOLoad(new FileSpec("/def",
+        LOLoad B5 = newLOLoad(new FileSpec("/def",
             new FuncSpec("PigStorage", "\t")), jbschema5, lp, conf);
         lp.add(B5);
         
@@ -1308,7 +1315,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema jbetaschema5 = new LogicalSchema();
         jbetaschema5.addField(new LogicalSchema.LogicalFieldSchema(
             "y", null, DataType.INTEGER));
-        LOLoad Beta5 = new LOLoad(new FileSpec("/ghi",
+        LOLoad Beta5 = newLOLoad(new FileSpec("/ghi",
             new FuncSpec("PigStorage", "\t")), jbetaschema5, lp, conf);
         lp.add(Beta5);
         
@@ -1347,8 +1354,8 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema jaschema6 = new LogicalSchema();
         jaschema6.addField(new LogicalSchema.LogicalFieldSchema(
            "x", null, DataType.INTEGER));
-        LOLoad A6 = new LOLoad(new FileSpec("/abc",
-           new FuncSpec("/fooload", new String[] {"x", "y"})), jaschema6, lp, conf);
+        LOLoad A6 = newLOLoad(new FileSpec("/abc",
+           new FuncSpec("org.apache.pig.test.TestNewPlanOperatorPlan$FooLoad", new String[] {"x", "y"})), jaschema6, lp, conf);
         lp.add(A6);
         
         // B = load
@@ -1357,7 +1364,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
             "y", null, DataType.INTEGER));
         jbschema6.addField(new LogicalSchema.LogicalFieldSchema(
             "z", null, DataType.LONG));
-        LOLoad B6 = new LOLoad(new FileSpec("/def",
+        LOLoad B6 = newLOLoad(new FileSpec("/def",
             new FuncSpec("PigStorage", "\t")), jbschema6, lp, conf);
         lp.add(B6);
         
@@ -1388,8 +1395,8 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema jaschema7 = new LogicalSchema();
         jaschema7.addField(new LogicalSchema.LogicalFieldSchema(
            "x", null, DataType.INTEGER));
-        LOLoad A7 = new LOLoad(new FileSpec("/abc",
-           new FuncSpec("/fooload", new String[] {"x", "y"})), jaschema7, lp, conf);
+        LOLoad A7 = newLOLoad(new FileSpec("/abc",
+           new FuncSpec("org.apache.pig.test.TestNewPlanOperatorPlan$FooLoad", new String[] {"x", "y"})), jaschema7, lp, conf);
         lp.add(A7);
         
         // B = load
@@ -1398,7 +1405,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
             "y", null, DataType.INTEGER));
         jbschema7.addField(new LogicalSchema.LogicalFieldSchema(
             "z", null, DataType.LONG));
-        LOLoad B7 = new LOLoad(new FileSpec("/def",
+        LOLoad B7 = newLOLoad(new FileSpec("/def",
             new FuncSpec("PigStorage", "\t")), jbschema7, lp, conf);
         lp.add(B7);
         
@@ -1436,8 +1443,8 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema jaschema6 = new LogicalSchema();
         jaschema6.addField(new LogicalSchema.LogicalFieldSchema(
            "x", null, DataType.INTEGER));
-        LOLoad A6 = new LOLoad(new FileSpec("/abc",
-           new FuncSpec("/fooload", new String[] {"x", "y"})), jaschema6, lp, conf);
+        LOLoad A6 = newLOLoad(new FileSpec("/abc",
+           new FuncSpec("org.apache.pig.test.TestNewPlanOperatorPlan$FooLoad", new String[] {"x", "y"})), jaschema6, lp, conf);
         lp.add(A6);
         
         // B = load
@@ -1446,7 +1453,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
             "y", null, DataType.INTEGER));
         jbschema6.addField(new LogicalSchema.LogicalFieldSchema(
             "z", null, DataType.LONG));
-        LOLoad B6 = new LOLoad(new FileSpec("/def",
+        LOLoad B6 = newLOLoad(new FileSpec("/def",
             new FuncSpec("PigStorage", "\t")), jbschema6, lp, conf);
         lp.add(B6);
         
@@ -1477,8 +1484,8 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema jaschema8 = new LogicalSchema();
         jaschema8.addField(new LogicalSchema.LogicalFieldSchema(
            "x", null, DataType.INTEGER));
-        LOLoad A8 = new LOLoad(new FileSpec("/abc",
-           new FuncSpec("/fooload", new String[] {"x", "y"})), jaschema8, lp, conf);
+        LOLoad A8 = newLOLoad(new FileSpec("/abc",
+           new FuncSpec("org.apache.pig.test.TestNewPlanOperatorPlan$FooLoad", new String[] {"x", "y"})), jaschema8, lp, conf);
         lp.add(A8);
         
         // B = load
@@ -1487,7 +1494,7 @@ public class TestNewPlanOperatorPlan extends TestCase {
             "y", null, DataType.INTEGER));
         jbschema8.addField(new LogicalSchema.LogicalFieldSchema(
             "z", null, DataType.LONG));
-        LOLoad B8 = new LOLoad(new FileSpec("/def",
+        LOLoad B8 = newLOLoad(new FileSpec("/def",
             new FuncSpec("PigStorage", "\t")), jbschema8, lp, conf);
         lp.add(B8);
         
@@ -1520,8 +1527,13 @@ public class TestNewPlanOperatorPlan extends TestCase {
         LogicalSchema aschema1 = new LogicalSchema();
         aschema1.addField(new LogicalSchema.LogicalFieldSchema(
             "x", null, DataType.INTEGER));
+<<<<<<< HEAD
         LOLoad A1 = new LOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), aschema1, lp1, new Configuration());
+=======
+        LOLoad A1 = newLOLoad(new FileSpec("/abc",
+            new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "y"})), aschema1, lp1, conf);
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
         lp1.add(A1);
         
         LogicalExpressionPlan fp1 = new LogicalExpressionPlan();
@@ -1538,8 +1550,13 @@ public class TestNewPlanOperatorPlan extends TestCase {
         lp1.connect(A1, D1);
         
         LogicalPlan lp2 = new LogicalPlan();
+<<<<<<< HEAD
         LOLoad A2 = new LOLoad(new FileSpec("/abc",
             new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "z"})), null, lp2, new Configuration());
+=======
+        LOLoad A2 = newLOLoad(new FileSpec("/abc",
+            new FuncSpec(DummyLoad.class.getName(), new String[] {"x", "z"})), null, lp2, conf);
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
         lp2.add(A2);
         
         LogicalExpressionPlan fp2 = new LogicalExpressionPlan();

@@ -133,7 +133,11 @@ public class RubyDataBag extends RubyObject implements Iterable<Tuple> {
      *
      * @param ruby an instance of the ruby runtime
      * @param rc   an instance of the class object with meatadata
+<<<<<<< HEAD
      * @Param db   a DataBag to encapsulate
+=======
+     * @param db   a DataBag to encapsulate
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
      */
     protected RubyDataBag(final Ruby ruby, RubyClass rc, DataBag db) {
         super(ruby,rc);
@@ -224,7 +228,10 @@ public class RubyDataBag extends RubyObject implements Iterable<Tuple> {
                       contents will be copied; a RubyArray, which will be treated as a
                       Tuple, or another object which will be converted over per
                       {@link PigJrubyLibrary#rubyToPig}.
+<<<<<<< HEAD
      * @return        true if it the encapsulated is sorted, false otherwise
+=======
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
      */
     @JRubyMethod(required = 1, rest = true)
     public void add(ThreadContext context, IRubyObject[] args) throws ExecException {

@@ -36,10 +36,15 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.Enumeration;
+<<<<<<< HEAD
+=======
+import java.util.HashSet;
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 import jline.ConsoleReader;
 import jline.ConsoleReaderInputStream;
@@ -74,11 +79,13 @@ import org.apache.pig.tools.pigscript.parser.PigScriptParserTokenManager;
 import org.apache.pig.tools.pigstats.JobStats;
 import org.apache.pig.tools.pigstats.PigStats;
 import org.apache.pig.tools.pigstats.PigStats.JobGraph;
+import org.fusesource.jansi.Ansi;
+import org.fusesource.jansi.AnsiConsole;
 
 @SuppressWarnings("deprecation")
 public class GruntParser extends PigScriptParser {
 
-    private final Log log = LogFactory.getLog(getClass());
+    private static final Log log = LogFactory.getLog(GruntParser.class);
 
     public GruntParser(Reader stream) {
         super(stream);
@@ -405,12 +412,21 @@ public class GruntParser extends PigScriptParser {
             log.warn("'aliases' statement is ignored while processing 'explain -script' or '-check'");
         }
     }
-    
+
+    @Override
+	protected void printClear() {
+        AnsiConsole.systemInstall();
+        Ansi ansi = Ansi.ansi();
+        System.out.println( ansi.eraseScreen() );
+        System.out.println( ansi.cursor(0, 0) );
+        AnsiConsole.systemUninstall();
+    }
+
     @Override
     protected void processRegister(String jar) throws IOException {
         mPigServer.registerJar(jar);
     }
-    
+
     @Override
     protected void processRegister(String path, String scriptingLang, String namespace) throws IOException, ParseException {
         if(path.endsWith(".jar")) {
@@ -812,7 +828,12 @@ public class GruntParser extends PigScriptParser {
             log.warn("'pwd' statement is ignored while processing 'explain -script' or '-check'");
         }
     }
-
+    
+    @Override
+	protected void processHistory(boolean withNumbers) {
+    	mPigServer.printHistory(withNumbers);
+    }
+    
     @Override
     protected void printHelp() 
     {
@@ -854,6 +875,8 @@ public class GruntParser extends PigScriptParser {
         System.out.println("        stream.skippath - String that contains the path. This is used by streaming.");
         System.out.println("        any hadoop property.");
         System.out.println("    help - Display this message.");
+        System.out.println("    history [-n] - Display the list statements in cache.");
+        System.out.println("        -n Hide line numbers. ");
         System.out.println("    quit - Quit the grunt shell.");
     }
 
@@ -1070,9 +1093,75 @@ public class GruntParser extends PigScriptParser {
                 }
             } catch (Exception e) {
                 throw new IOException(e);
+<<<<<<< HEAD
             }
         } else {
             log.warn("'sh' statement is ignored while processing 'explain -script' or '-check'");
+=======
+            }
+        } else {
+            log.warn("'sh' statement is ignored while processing 'explain -script' or '-check'");
+        }
+    }
+    
+    public static int runSQLCommand(String hcatBin, String cmd, boolean mInteractive) throws IOException {
+        String[] tokens = new String[3];
+        tokens[0] = hcatBin;
+        tokens[1] = "-e";
+        tokens[2] = cmd.substring(cmd.indexOf("sql")).substring(4);
+        
+        // create new environment = environment - HADOOP_CLASSPATH
+        // This is because of antlr version conflict between Pig and Hive
+        Map<String, String> envs = System.getenv();
+        Set<String> envSet = new HashSet<String>();
+        for (Map.Entry<String, String> entry : envs.entrySet()) {
+            if (!entry.getKey().equals("HADOOP_CLASSPATH")) {
+                envSet.add(entry.getKey() + "=" + entry.getValue());
+            }
+        }
+        
+        log.info("Going to run hcat command: " + tokens[2]);
+        Process executor = Runtime.getRuntime().exec(tokens, envSet.toArray(new String[0]));
+        StreamPrinter outPrinter = new StreamPrinter(executor.getInputStream(), null, System.out);
+        StreamPrinter errPrinter = new StreamPrinter(executor.getErrorStream(), null, System.err);
+
+        outPrinter.start();
+        errPrinter.start();
+        
+        int ret;
+        try {
+            ret = executor.waitFor();
+            
+            outPrinter.join();
+            errPrinter.join();
+            if (ret != 0 && !mInteractive) {
+                throw new IOException("sql command '" + cmd
+                        + "' failed. ");
+            }
+        } catch (InterruptedException e) {
+            log.warn("Exception raised from sql command " + e.getLocalizedMessage());
+        }
+        return 0;
+    }
+    
+    @Override
+    protected void processSQLCommand(String cmd) throws IOException{
+        if(mExplain == null) { // process only if not in "explain" mode
+            if (!mPigServer.getPigContext().getProperties().get("pig.sql.type").equals("hcat")) {
+                throw new IOException("sql command only support hcat currently");
+            }
+            if (mPigServer.getPigContext().getProperties().get("hcat.bin")==null) {
+                throw new IOException("hcat.bin is not defined. Define it to be your hcat script (Usually $HCAT_HOME/bin/hcat");
+            }
+            String hcatBin = (String)mPigServer.getPigContext().getProperties().get("hcat.bin");
+            if (new File("hcat.bin").exists()) {
+                throw new IOException(hcatBin + " does not exist. Please check your 'hcat.bin' setting in pig.properties.");
+            }
+            executeBatch();
+            runSQLCommand(hcatBin, cmd, mInteractive);
+        } else {
+            log.warn("'sql' statement is ignored while processing 'explain -script' or '-check'");
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
         }
     }
     
@@ -1147,4 +1236,5 @@ public class GruntParser extends PigScriptParser {
     private int mNumSucceededJobs;
     private FsShell shell;
     private boolean mScriptIllustrate;
+    
 }

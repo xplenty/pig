@@ -17,13 +17,10 @@
  */
 package org.apache.pig.data;
 
-import java.lang.Class;
-import java.lang.ClassLoader;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.List;
 
-import org.apache.hadoop.io.RawComparator;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigTupleDefaultRawComparator;
 import org.apache.pig.classification.InterfaceAudience;
 import org.apache.pig.classification.InterfaceStability;
@@ -40,7 +37,7 @@ import org.apache.pig.classification.InterfaceStability;
  */
 @InterfaceAudience.Public
 @InterfaceStability.Stable
-public abstract class TupleFactory {
+public abstract class TupleFactory implements TupleMaker<Tuple> {
     private static TupleFactory gSelf = null;
 
     /**
@@ -172,6 +169,14 @@ public abstract class TupleFactory {
     public Class<? extends TupleRawComparator> tupleRawComparatorClass() {
         return PigTupleDefaultRawComparator.class;
     }
+
+    /**
+     * This method is used to inspect whether the Tuples created by this factory
+     * will be of a fixed size when they are created. In practical terms, this means
+     * whether they support append or not.
+     * @return where the Tuple is fixed or not
+     */
+    public abstract boolean isFixedSize();
 
 }
 

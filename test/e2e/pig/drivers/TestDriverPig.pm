@@ -93,19 +93,24 @@ sub replaceParameters
       $cmd =~ s/:REMOTECLUSTER:/$testCmd->{'remoteNotSecureCluster'}/g;
     }
 
+    if ( defined($testCmd->{'hcatbin'}) && $testCmd->{'hcatbin'} ne "" && defined($testCmd->{'java_params'})) {
+      foreach my $param (@{$testCmd->{'java_params'}}) {
+          $param =~ s/:HCATBIN:/$testCmd->{'hcatbin'}/g;
+      }
+    }
     return $cmd;
 }
 
 sub globalSetup
 {
     my ($self, $globalHash, $log) = @_;
-    my $subName = (caller(0))[3];
-
 
     # Setup the output path
     my $me = `whoami`;
     chomp $me;
-    $globalHash->{'runid'} = $me . "." . time;
+    my $jobId = $globalHash->{'job-id'};
+    my $timeId = time;
+    $globalHash->{'runid'} = $me . "-" . $timeId . "-" . $jobId;
 
     # if "-ignore false" was provided on the command line,
     # it means do run tests even when marked as 'ignore'
@@ -116,41 +121,61 @@ sub globalSetup
 
     $globalHash->{'outpath'} = $globalHash->{'outpathbase'} . "/" . $globalHash->{'runid'} . "/";
     $globalHash->{'localpath'} = $globalHash->{'localpathbase'} . "/" . $globalHash->{'runid'} . "/";
+    $globalHash->{'tmpPath'} = $globalHash->{'tmpPath'} . "/" . $globalHash->{'runid'} . "/";
+}
+
+sub globalSetupConditional() {
+    my ($self, $globalHash, $log) = @_;
 
     # add libexec location to the path
     if (defined($ENV{'PATH'})) {
         $ENV{'PATH'} = $globalHash->{'scriptPath'} . ":" . $ENV{'PATH'};
-    }
-    else {
+    } else {
         $ENV{'PATH'} = $globalHash->{'scriptPath'};
     }
 
     my @cmd = ($self->getPigCmd($globalHash, $log), '-e', 'mkdir', $globalHash->{'outpath'});
-
-
 	print $log "Going to run " . join(" ", @cmd) . "\n";
-    IPC::Run::run(\@cmd, \undef, $log, $log) or die "Cannot create HDFS directory " . $globalHash->{'outpath'} . ": $? - $!\n";
+    IPC::Run::run(\@cmd, \undef, $log, $log) or die "$0 at ".__LINE__.": Cannot create HDFS directory " . $globalHash->{'outpath'} . ": $? - $!\n";
 
     IPC::Run::run(['mkdir', '-p', $globalHash->{'localpath'}], \undef, $log, $log) or 
-        die "Cannot create localpath directory " . $globalHash->{'localpath'} .
-        " " . "$ERRNO\n";
+       die "$0 at ".__LINE__.": Cannot create localpath directory [" . $globalHash->{'localpath'} .
+         "]: " . "$ERRNO\n";
 
     # Create the temporary directory
     IPC::Run::run(['mkdir', '-p', $globalHash->{'tmpPath'}], \undef, $log, $log) or 
+<<<<<<< HEAD
         die "Cannot create temporary directory " . $globalHash->{'tmpPath'} .
         " " . "$ERRNO\n";
+=======
+       die "$0 at ".__LINE__.": Cannot create localpath directory [" . $globalHash->{'tmpPath'} .
+         "]: " . "$ERRNO\n";
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 
     # Create the HDFS temporary directory
     @cmd = ($self->getPigCmd($globalHash, $log), '-e', 'mkdir', "tmp/$globalHash->{'runid'}");
 	print $log "Going to run " . join(" ", @cmd) . "\n";
+<<<<<<< HEAD
     IPC::Run::run(\@cmd, \undef, $log, $log) or die "Cannot create HDFS directory " . $globalHash->{'outpath'} . ": $? - $!\n";
+=======
+    IPC::Run::run(\@cmd, \undef, $log, $log) or die "$0 at ".__LINE__.": Cannot create HDFS directory " . "tmp/$globalHash->{'runid'}" . ": $? - $!\n";
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 }
 
-sub globalCleanup
+sub globalCleanup()
 {
+    # noop there because the removal of temp directories, which are created in #globalSetupConditional(), is to be
+    # performed in method #globalCleanupConditional().
+}
+
+sub globalCleanupConditional() {
     my ($self, $globalHash, $log) = @_;
 
+    # NB: both local and HDFS output directories are not removed there, because these data may 
+    # be needed to investigate the tests failures.
+
     IPC::Run::run(['rm', '-rf', $globalHash->{'tmpPath'}], \undef, $log, $log) or 
+<<<<<<< HEAD
         warn "Cannot remove temporary directory " . $globalHash->{'tmpPath'} .
         " " . "$ERRNO\n";
 
@@ -158,8 +183,17 @@ sub globalCleanup
     my @cmd = ($self->getPigCmd($globalHash, $log), '-e', 'fs', '-rmr', "tmp/$globalHash->{'runid'}");
 	print $log "Going to run " . join(" ", @cmd) . "\n";
     IPC::Run::run(\@cmd, \undef, $log, $log) or die "Cannot create HDFS directory " . $globalHash->{'outpath'} . ": $? - $!\n";
-}
+=======
+       warn "Cannot remove temporary directory " . $globalHash->{'tmpPath'} .
+           " " . "$ERRNO\n";
 
+    # Cleanup the HDFS temporary directory
+    my @cmd = ($self->getPigCmd($globalHash, $log), '-e', 'fs', '-rmr', "tmp/$globalHash->{'runid'}");
+    print $log "Going to run: [" . join(" ", @cmd) . "]\n";
+    IPC::Run::run(\@cmd, \undef, $log, $log)
+       or die "$0 at ".__LINE__.": Cannot remove HDFS directory " . "tmp/$globalHash->{'runid'}" . ": $? - $!\n";
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
+}
 
 sub runTest
 {
@@ -332,6 +366,17 @@ sub runScript
     return \%result;
 }
 
+sub hadoopLocalTmpDir($$)
+{
+    my ($self, $testCmd) = @_;
+
+    if (defined($testCmd->{'hadoop.mapred.local.dir'}) 
+         && (int($ENV{'FORK_FACTOR_GROUP'})>1 || int($ENV{'FORK_FACTOR_FILE'})>1)) {
+        return $testCmd->{'hadoop.mapred.local.dir'} . "/" . $PID;
+    } else {
+        return undef;
+    }
+}
 
 sub getPigCmd($$$)
 {
@@ -354,13 +399,30 @@ sub getPigCmd($$$)
         push(@pigCmd, '-Dpig.additional.jars='.$testCmd->{'additionaljars'});
     }
 
+    my $additionalJavaParams = undef;
     if ($testCmd->{'exectype'} eq "local") {
-		push(@{$testCmd->{'java_params'}}, "-Xmx1024m");
+        $additionalJavaParams = "-Xmx1024m";
+        my $hadoopTmpDir = $self->hadoopLocalTmpDir($testCmd);
+        if (defined($hadoopTmpDir)) {
+           $additionalJavaParams .= " -Dmapred.local.dir=$hadoopTmpDir -Dmapreduce.cluster.local.dir=$hadoopTmpDir";
+        }
+        TestDriver::dbg("Additional java parameters: [$additionalJavaParams].\n");
+
         push(@pigCmd, ("-x", "local"));
     }
 
+<<<<<<< HEAD
     if (defined($testCmd->{'java_params'})) {
 		$ENV{'PIG_OPTS'} = join(" ", @{$testCmd->{'java_params'}});
+=======
+    if (defined($testCmd->{'java_params'}) || defined($additionalJavaParams)) {
+        if (defined($testCmd->{'java_params'})) {
+	   $ENV{'PIG_OPTS'} = join(" ", @{$testCmd->{'java_params'}}, $additionalJavaParams);
+        } else {
+           $ENV{'PIG_OPTS'} = $additionalJavaParams;
+        }
+        TestDriver::dbg("PIG_OPTS set to be: [$ENV{'PIG_OPTS'}].\n");
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     } else {
         $ENV{'PIG_OPTS'} = undef;
     }
@@ -581,6 +643,7 @@ sub generateBenchmark
 
                 if (defined($ENV{'OLD_HADOOP_HOME'}) && $ENV{'OLD_HADOOP_HOME'} ne "") {
                     $ENV{'HADOOP_HOME'} = $ENV{'OLD_HADOOP_HOME'};
+<<<<<<< HEAD
                 }
                 if (defined($ENV{'PH_OLD_CLUSTER_CONF'}) && $ENV{'PH_OLD_CLUSTER_CONF'} ne "") {
                     $ENV{'HADOOP_CONF_DIR'} = $ENV{'PH_OLD_CLUSTER_CONF'};
@@ -601,6 +664,14 @@ sub generateBenchmark
                     $ENV{'YARN_HOME'} = $ENV{'OLD_YARN_HOME'};
                 }
                 if (defined($ENV{'OLD_YARN_CONF_DIR'})) {
+=======
+                    $ENV{'HADOOP_CONF_DIR'} = $ENV{'PH_OLD_CLUSTER_CONF'};
+                    $ENV{'HADOOP_PREFIX'} = $ENV{'OLD_HADOOP_PREFIX'};
+                    $ENV{'HADOOP_COMMON_HOME'} = $ENV{'OLD_HADOOP_COMMON_HOME'};
+                    $ENV{'HADOOP_HDFS_HOME'} = $ENV{'OLD_HADOOP_HDFS_HOME'};
+                    $ENV{'HADOOP_MAPRED_HOME'} = $ENV{'OLD_HADOOP_MAPRED_HOME'};
+                    $ENV{'YARN_HOME'} = $ENV{'OLD_YARN_HOME'};
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
                     $ENV{'YARN_CONF_DIR'} = $ENV{'OLD_YARN_CONF_DIR'};
                 }
 	}
@@ -894,7 +965,7 @@ sub countStores($$)
     # also note that this won't work if you comment out a store
     my @q = split(/\n/, $testCmd->{'pig'});
         for (my $i = 0; $i < @q; $i++) {
-            $count += $q[$i] =~ /store\s+[a-zA-Z][a-zA-Z0-9_]*\s+into/i;
+            $count += $q[$i] =~ /store\s+(\$)?[a-zA-Z][a-zA-Z0-9_]*\s+into/i;
     }
 
     return $count;

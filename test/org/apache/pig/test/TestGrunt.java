@@ -17,18 +17,31 @@
  */
 package org.apache.pig.test;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.io.StringReader;
+import java.io.StringWriter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Properties;
 
 import junit.framework.Assert;
-import junit.framework.TestCase;
+
 import org.apache.log4j.Appender;
 import org.apache.log4j.FileAppender;
+import org.apache.log4j.Level;
 import org.apache.log4j.PatternLayout;
 import org.apache.pig.ExecType;
 import org.apache.pig.PigException;
@@ -37,10 +50,13 @@ import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.executionengine.ExecJob;
 import org.apache.pig.backend.executionengine.ExecJob.JOB_STATUS;
 import org.apache.pig.impl.PigContext;
+import org.apache.pig.impl.io.FileLocalizer;
+import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.test.Util.ProcessReturnInfo;
 import org.apache.pig.tools.grunt.Grunt;
 import org.apache.pig.tools.parameters.ParameterSubstitutionPreprocessor;
 import org.apache.pig.tools.pigscript.parser.ParseException;
+<<<<<<< HEAD
 import org.apache.pig.tools.pigstats.ScriptState;
 import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.logicalLayer.FrontendException;
@@ -59,6 +75,11 @@ import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+=======
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
+import org.junit.Test;
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 
 public class TestGrunt {
  
@@ -796,7 +817,7 @@ public class TestGrunt {
     public void testCD() throws Throwable {
         PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
         PigContext context = server.getPigContext();
-        
+
         String strCmd = 
             "mkdir /tmp;"
             +"mkdir /tmp/foo;"
@@ -989,38 +1010,30 @@ public class TestGrunt {
     }
     
     @Test
-    public void testFsCommand(){
-        
-        try {
-            PigServer server = new PigServer(ExecType.MAPREDUCE,cluster.getProperties());
-            PigContext context = server.getPigContext();
-            
-            String strCmd = 
-                "fs -ls /;"
-                +"fs -mkdir /fstmp;"
-                +"fs -mkdir /fstmp/foo;"
-                +"cd /fstmp;"                
-                +"fs -copyFromLocal test/org/apache/pig/test/data/passwd bar;"
-                +"a = load 'bar';"
-                +"cd foo;"
-                +"store a into 'baz';"
-                +"cd /;"
-                +"fs -ls .;"
-                +"fs -rmr /fstmp/foo/baz;";
-            
-            ByteArrayInputStream cmd = new ByteArrayInputStream(strCmd.getBytes());
-            InputStreamReader reader = new InputStreamReader(cmd);
-            
-            Grunt grunt = new Grunt(new BufferedReader(reader), context);
-            grunt.exec();
+    public void testFsCommand() throws Throwable {
 
-        } catch (ExecException e) {
-            e.printStackTrace();
-            fail();
-        } catch (Throwable e) {
-            e.printStackTrace(System.out);
-            fail();
-        }
+        PigServer server = new PigServer(ExecType.MAPREDUCE,cluster.getProperties());
+        PigContext context = server.getPigContext();
+
+        String strCmd = 
+                "fs -ls /;"
+                        +"fs -mkdir /fstmp;"
+                        +"fs -mkdir /fstmp/foo;"
+                        +"cd /fstmp;"                
+                        +"fs -copyFromLocal test/org/apache/pig/test/data/passwd bar;"
+                        +"a = load 'bar';"
+                        +"cd foo;"
+                        +"store a into 'baz';"
+                        +"cd /;"
+                        +"fs -ls .;"
+                        +"fs -rmr /fstmp/foo/baz;";
+
+        ByteArrayInputStream cmd = new ByteArrayInputStream(strCmd.getBytes());
+        InputStreamReader reader = new InputStreamReader(cmd);
+
+        Grunt grunt = new Grunt(new BufferedReader(reader), context);
+        grunt.exec();
+
     }
    
     @Test
@@ -1052,6 +1065,10 @@ public class TestGrunt {
             
             // Remove the temp directory via shell and make sure it is gone
             strCmd = "sh " + strRemoveDir + " test_shell_tmp;";
+<<<<<<< HEAD
+=======
+	    
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
             cmd = new ByteArrayInputStream(strCmd.getBytes());
             reader = new InputStreamReader(cmd);
             grunt = new Grunt(new BufferedReader(reader), context);
@@ -1060,13 +1077,18 @@ public class TestGrunt {
             
             // Verify pipes are usable in the command context by piping data to a file
             strCmd = "sh echo hello world > tempShFileToTestShCommand";
+<<<<<<< HEAD
+=======
+	    
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
             cmd = new ByteArrayInputStream(strCmd.getBytes());
             reader = new InputStreamReader(cmd);
             grunt = new Grunt(new BufferedReader(reader), context);
             grunt.exec();
             BufferedReader fileReader = null;
             fileReader = new BufferedReader(new FileReader("tempShFileToTestShCommand"));
-            assertTrue(fileReader.readLine().equalsIgnoreCase("hello world"));
+            assertTrue(fileReader.readLine().trim().equals("hello world"));
+
             fileReader.close();
 
             // Remove the file via cmd and make sure it is gone
@@ -1087,21 +1109,35 @@ public class TestGrunt {
             else {
                strCmd = "sh touch TouchedFileInsideGrunt_61 | xargs ls | grep TouchedFileInsideGrunt_61 > fileContainingTouchedFileInsideGruntShell_71";
             }
+<<<<<<< HEAD
+=======
+	    
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
             cmd = new ByteArrayInputStream(strCmd.getBytes());
             reader = new InputStreamReader(cmd);
             grunt = new Grunt(new BufferedReader(reader), context);
             grunt.exec();
             fileReader = new BufferedReader(new FileReader("fileContainingTouchedFileInsideGruntShell_71"));
             assertTrue(fileReader.readLine().trim().equals("TouchedFileInsideGrunt_61"));
+<<<<<<< HEAD
             fileReader.close();
 
             strCmd = "sh " + strRemoveFile+" fileContainingTouchedFileInsideGruntShell_71";
+=======
+	    
+            fileReader.close();
+            strCmd = "sh " + strRemoveFile+" fileContainingTouchedFileInsideGruntShell_71";
+	    
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
             cmd = new ByteArrayInputStream(strCmd.getBytes());
             reader = new InputStreamReader(cmd);
             grunt = new Grunt(new BufferedReader(reader), context);
             grunt.exec();
             assertFalse(new File("fileContainingTouchedFileInsideGruntShell_71").exists());
+<<<<<<< HEAD
 
+=======
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
             strCmd = "sh " + strRemoveFile + " TouchedFileInsideGrunt_61";
             cmd = new ByteArrayInputStream(strCmd.getBytes());
             reader = new InputStreamReader(cmd);
@@ -1190,7 +1226,8 @@ public class TestGrunt {
         Grunt grunt = new Grunt(new BufferedReader(reader), context);
 
         grunt.exec();
-        assertTrue(context.extraJars.contains(ClassLoader.getSystemResource("pig-withouthadoop.jar")));
+        assertEquals(context.extraJars+ " of size 1", 1, context.extraJars.size());
+        assertTrue(context.extraJars.get(0)+" ends with /pig-withouthadoop.jar", context.extraJars.get(0).toString().endsWith("/pig-withouthadoop.jar"));
     }
     
     @Test    
@@ -1206,7 +1243,8 @@ public class TestGrunt {
         Grunt grunt = new Grunt(new BufferedReader(reader), context);
 
         grunt.exec();
-        assertTrue(context.extraJars.contains(ClassLoader.getSystemResource("pig-withouthadoop.jar")));
+        assertEquals(context.extraJars+ " of size 1", 1, context.extraJars.size());
+        assertTrue(context.extraJars.get(0)+" ends with /pig-withouthadoop.jar", context.extraJars.get(0).toString().endsWith("/pig-withouthadoop.jar"));
     }
     
     @Test
@@ -1404,5 +1442,27 @@ public class TestGrunt {
         } catch (FrontendException e) { 
             Util.checkMessageInException(e, errMsg);
         }
+    }
+
+    @Test
+    public void testDebugOn() throws Throwable {
+
+        String strCmd = "set debug on\n";
+        PigContext pc = new PigServer(ExecType.LOCAL).getPigContext();
+        InputStreamReader reader = new InputStreamReader(new ByteArrayInputStream(strCmd.getBytes()));
+        new Grunt(new BufferedReader(reader), pc).exec();
+
+        assertEquals(Level.DEBUG.toString(),  pc.getLog4jProperties().getProperty("log4j.logger.org.apache.pig"));
+    }
+
+    @Test
+    public void testDebugOff() throws Throwable {
+
+        String strCmd = "set debug off\n";
+        PigContext pc = new PigServer(ExecType.LOCAL).getPigContext();
+        InputStreamReader reader = new InputStreamReader(new ByteArrayInputStream(strCmd.getBytes()));
+        new Grunt(new BufferedReader(reader), pc).exec();
+
+        assertEquals(Level.INFO.toString(),  pc.getLog4jProperties().getProperty("log4j.logger.org.apache.pig"));
     }
 }

@@ -26,7 +26,6 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
@@ -50,6 +49,8 @@ public class InternalCachedBag extends SelfSpillBag {
     // used to store number of tuples spilled until counter is incremented
     private transient int numTuplesSpilled = 0; 
  
+    private static final InterSedes SEDES = InterSedesFactory.getInterSedesInstance();
+
     public InternalCachedBag() {
         this(1, -1f);
     }
@@ -70,6 +71,7 @@ public class InternalCachedBag extends SelfSpillBag {
     }
 
 
+    @Override
     public void add(Tuple t) {
     	
         if(addDone) {
@@ -92,7 +94,7 @@ public class InternalCachedBag extends SelfSpillBag {
                     out = getSpillFile();
                     incSpillCount(PigCounters.PROACTIVE_SPILL_COUNT_BAGS);
                 }
-                t.write(out);
+                SEDES.writeDatum(out, t, DataType.TUPLE);
                 
                 //periodically update number of tuples spilled 
                 numTuplesSpilled++;
@@ -113,20 +115,6 @@ public class InternalCachedBag extends SelfSpillBag {
         numTuplesSpilled = 0;
     }
 
-    public void addAll(DataBag b) {
-    	Iterator<Tuple> iter = b.iterator();
-    	while(iter.hasNext()) {
-    		add(iter.next());
-    	}
-    }
-
-    public void addAll(Collection<Tuple> c) {
-    	Iterator<Tuple> iter = c.iterator();
-    	while(iter.hasNext()) {
-    		add(iter.next());
-    	}
-    }
-    
     private void addDone() {
         if(out != null) {
             try {
@@ -140,8 +128,10 @@ public class InternalCachedBag extends SelfSpillBag {
         if(numTuplesSpilled > 0)
             updateSpillRecCounter();
         addDone = true;
+        markSpillableIfNecessary();
     }
 
+    @Override
     public void clear() {
     	if (!addDone) {
     	    addDone();
@@ -151,14 +141,17 @@ public class InternalCachedBag extends SelfSpillBag {
         out = null;
     }
     
+    @Override
     public boolean isDistinct() {
         return false;
     }
 
+    @Override
     public boolean isSorted() {
         return false;
     }
 
+    @Override
     public Iterator<Tuple> iterator() {
     	if(!addDone) {
     		// close the spill file and mark adding is done
@@ -168,6 +161,7 @@ public class InternalCachedBag extends SelfSpillBag {
     	return new CachedBagIterator();
     }
 
+    @Override
     public long spill()
     {
         throw new RuntimeException("InternalCachedBag.spill() should not be called");
@@ -196,6 +190,7 @@ public class InternalCachedBag extends SelfSpillBag {
 
 
 
+        @Override
         public boolean hasNext() {
             if (next != null) {
                 return true;        		
@@ -211,8 +206,7 @@ public class InternalCachedBag extends SelfSpillBag {
             }
             
             try {
-            	Tuple t = factory.newTuple();
-            	t.readFields(in);
+            	Tuple t = (Tuple) SEDES.readDatum(in);
             	next = t;
             	return true;
             }catch(EOFException eof) {
@@ -229,6 +223,7 @@ public class InternalCachedBag extends SelfSpillBag {
             }
         }
 
+        @Override
         public Tuple next() {  
             if (next == null) {
                 if (!hasNext()) {
@@ -245,6 +240,7 @@ public class InternalCachedBag extends SelfSpillBag {
             return t;
         }
 
+        @Override
         public void remove() {
         	throw new UnsupportedOperationException("remove is not supported for CachedBagIterator");
         }

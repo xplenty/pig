@@ -38,8 +38,8 @@ import org.apache.hadoop.mapred.JobID;
 import org.apache.hadoop.mapred.RunningJob;
 import org.apache.hadoop.mapred.jobcontrol.Job;
 import org.apache.hadoop.mapred.jobcontrol.JobControl;
-import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.pig.ExecType;
+import org.apache.pig.PigConfiguration;
 import org.apache.pig.PigException;
 import org.apache.pig.PigWarning;
 import org.apache.pig.PigRunner.ReturnCode;
@@ -65,7 +65,10 @@ import org.apache.pig.impl.plan.CompilationMessageCollector.MessageType;
 import org.apache.pig.impl.util.ConfigurationValidator;
 import org.apache.pig.impl.util.LogUtils;
 import org.apache.pig.impl.util.UDFContext;
+<<<<<<< HEAD
 import org.apache.pig.impl.util.Utils;
+=======
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 import org.apache.pig.tools.pigstats.PigStats;
 import org.apache.pig.tools.pigstats.PigStatsUtil;
 import org.apache.pig.tools.pigstats.ScriptState;
@@ -82,9 +85,6 @@ public class MapReduceLauncher extends Launcher{
     public static final String SUCCESSFUL_JOB_OUTPUT_DIR_MARKER =
         "mapreduce.fileoutputcommitter.marksuccessfuljobs";
 
-    public static final String PROP_EXEC_MAP_PARTAGG = "pig.exec.mapPartAgg";
-
-    
     private static final Log log = LogFactory.getLog(MapReduceLauncher.class);
  
     //used to track the exception thrown by the job control which is run in a separate thread
@@ -167,6 +167,7 @@ public class MapReduceLauncher extends Launcher{
         int totalMRJobs = mrp.size();
         int numMRJobsCompl = 0;
         double lastProg = -1;
+        long scriptSubmittedTimestamp = System.currentTimeMillis();
         
         //create the exception handler for the job control thread
         //and register the handler with the job control thread
@@ -253,7 +254,11 @@ public class MapReduceLauncher extends Launcher{
 
             // Set the thread UDFContext so registered classes are available.
             final UDFContext udfContext = UDFContext.getUDFContext();
+<<<<<<< HEAD
             Thread jcThread = new Thread(jc) {
+=======
+            Thread jcThread = new Thread(jc, "JobControl") {
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
                 @Override
                 public void run() {
                     UDFContext.setUdfContext(udfContext.clone()); //PIG-2576
@@ -264,16 +269,27 @@ public class MapReduceLauncher extends Launcher{
             jcThread.setUncaughtExceptionHandler(jctExceptionHandler);
             
             jcThread.setContextClassLoader(PigContext.getClassLoader());
-            
+
+            // mark the times that the jobs were submitted so it's reflected in job history props
+            for (Job job : jc.getWaitingJobs()) {
+                job.getJobConf().set("pig.script.submitted.timestamp",
+                                Long.toString(scriptSubmittedTimestamp));
+                job.getJobConf().set("pig.job.submitted.timestamp",
+                                Long.toString(System.currentTimeMillis()));
+            }
+
             //All the setup done, now lets launch the jobs.
             jcThread.start();
+            
+            // a flag whether to warn failure during the loop below, so users can notice failure earlier.
+            boolean warn_failure = true;
             
             // Now wait, till we are finished.
             while(!jc.allFinished()){
 
-            	try { Thread.sleep(sleepTime); } 
+              try { jcThread.join(sleepTime); }
             	catch (InterruptedException e) {}
-            	
+
             	List<Job> jobsAssignedIdInThisRun = new ArrayList<Job>();
 
             	for(Job job : jobsWithoutIds){
@@ -281,11 +297,24 @@ public class MapReduceLauncher extends Launcher{
 
             			jobsAssignedIdInThisRun.add(job);
             			log.info("HadoopJobId: "+job.getAssignedJobID());
+            			
+                        // display the aliases being processed
+                        MapReduceOper mro = jcc.getJobMroMap().get(job);
+                        if (mro != null) {
+                            String alias = ScriptState.get().getAlias(mro);
+                            log.info("Processing aliases " + alias);
+                            String aliasLocation = ScriptState.get().getAliasLocation(mro);
+                            log.info("detailed locations: " + aliasLocation);
+                        }
+
+                        
             			if(jobTrackerLoc != null){
             				log.info("More information at: http://"+ jobTrackerLoc+
             						"/jobdetails.jsp?jobid="+job.getAssignedJobID());
             			}  
-            			
+
+                        // update statistics for this job so jobId is set
+                        PigStatsUtil.addJobStats(job);
             			ScriptState.get().emitJobStartedNotification(
                                 job.getAssignedJobID().toString());                        
             		}
@@ -301,7 +330,16 @@ public class MapReduceLauncher extends Launcher{
             	
             	// collect job stats by frequently polling of completed jobs (PIG-1829)
             	PigStatsUtil.accumulateStats(jc);
-            	       	
+            	
+                // if stop_on_failure is enabled, we need to stop immediately when any job has failed
+                checkStopOnFailure(stop_on_failure);
+                // otherwise, we just display a warning message if there's any failure
+                if (warn_failure && !jc.getFailedJobs().isEmpty()) {
+                    // we don't warn again for this group of jobs
+                    warn_failure = false;
+                    log.warn("Ooops! Some job has failed! Specify -stop_on_failure if you "
+                            + "want Pig to stop immediately on failure.");
+                }
             }
             
             //check for the jobControlException first
@@ -325,6 +363,7 @@ public class MapReduceLauncher extends Launcher{
             }
             
             if (!jc.getFailedJobs().isEmpty() ) {
+<<<<<<< HEAD
                 if (stop_on_failure){
                     int errCode = 6017;
                     StringBuilder msg = new StringBuilder();
@@ -340,6 +379,10 @@ public class MapReduceLauncher extends Launcher{
                     throw new ExecException(msg.toString(), errCode,
                             PigException.REMOTE_ENVIRONMENT);
                 }
+=======
+                // stop if stop_on_failure is enabled
+                checkStopOnFailure(stop_on_failure);
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
                 
                 // If we only have one store and that job fail, then we sure 
                 // that the job completely fail, and we shall stop dependent jobs
@@ -450,6 +493,32 @@ public class MapReduceLauncher extends Launcher{
         return PigStatsUtil.getPigStats(ret);
     }
 
+    /**
+     * If stop_on_failure is enabled and any job has failed, an ExecException is thrown.
+     * @param stop_on_failure whether it's enabled.
+     * @throws ExecException If stop_on_failure is enabled and any job is failed
+     */
+    private void checkStopOnFailure(boolean stop_on_failure) throws ExecException{
+    	if (jc.getFailedJobs().isEmpty())
+            return;
+    	
+    	if (stop_on_failure){
+            int errCode = 6017;
+            StringBuilder msg = new StringBuilder();
+            
+            for (int i=0; i<jc.getFailedJobs().size(); i++) {
+                Job j = jc.getFailedJobs().get(i);
+                msg.append(j.getMessage());
+                if (i!=jc.getFailedJobs().size()-1) {
+                    msg.append("\n");
+                }
+            }
+            
+            throw new ExecException(msg.toString(), errCode,
+                    PigException.REMOTE_ENVIRONMENT);
+        }
+    }
+    
     private String getStackStraceStr(Throwable e) {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         PrintStream ps = new PrintStream(baos);
@@ -516,11 +585,10 @@ public class MapReduceLauncher extends Launcher{
             pc.getProperties().getProperty(
                     "last.input.chunksize", POJoinPackage.DEFAULT_CHUNK_SIZE);
         
-        //String prop = System.getProperty("pig.exec.nocombiner");
-        String prop = pc.getProperties().getProperty("pig.exec.nocombiner");
+        String prop = pc.getProperties().getProperty(PigConfiguration.PROP_NO_COMBINER);
         if (!pc.inIllustrator && !("true".equals(prop)))  {
             boolean doMapAgg = 
-                    Boolean.valueOf(pc.getProperties().getProperty(PROP_EXEC_MAP_PARTAGG,"false"));
+                    Boolean.valueOf(pc.getProperties().getProperty(PigConfiguration.PROP_EXEC_MAP_PARTAGG,"false"));
             CombinerOptimizer co = new CombinerOptimizer(plan, doMapAgg);
             co.visit();
             //display the warning message(s) from the CombinerOptimizer
@@ -532,10 +600,12 @@ public class MapReduceLauncher extends Launcher{
         SampleOptimizer so = new SampleOptimizer(plan, pc);
         so.visit();
         
+        // We must ensure that there is only 1 reducer for a limit. Add a single-reducer job.
+        if (!pc.inIllustrator) {
         LimitAdjuster la = new LimitAdjuster(plan, pc);
         la.visit();
         la.adjust();
-        
+        }
         // Optimize to use secondary sort key if possible
         prop = pc.getProperties().getProperty("pig.exec.nosecondarykey");
         if (!pc.inIllustrator && !("true".equals(prop)))  {
@@ -621,6 +691,7 @@ public class MapReduceLauncher extends Launcher{
      */
     class JobControlThreadExceptionHandler implements Thread.UncaughtExceptionHandler {
         
+        @Override
         public void uncaughtException(Thread thread, Throwable throwable) {
             jobControlExceptionStackTrace = getStackStraceStr(throwable);
             try {	
@@ -628,7 +699,11 @@ public class MapReduceLauncher extends Launcher{
             } catch (Exception e) {
                 String errMsg = "Could not resolve error that occured when launching map reduce job: "
                         + jobControlExceptionStackTrace;
+<<<<<<< HEAD
                 jobControlException = new RuntimeException(errMsg);
+=======
+                jobControlException = new RuntimeException(errMsg, throwable);
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
             }
         }
     }

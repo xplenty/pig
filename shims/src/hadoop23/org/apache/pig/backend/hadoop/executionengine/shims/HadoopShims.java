@@ -22,8 +22,15 @@ import java.io.IOException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+<<<<<<< HEAD
 import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.jobcontrol.Job;
+=======
+import org.apache.hadoop.mapred.Counters;
+import org.apache.hadoop.mapred.JobConf;
+import org.apache.hadoop.mapred.jobcontrol.Job;
+import org.apache.hadoop.mapred.jobcontrol.JobControl;
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 import org.apache.hadoop.mapreduce.ContextFactory;
 import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.mapreduce.JobID;
@@ -34,6 +41,10 @@ import org.apache.hadoop.mapreduce.TaskType;
 import org.apache.hadoop.mapreduce.task.JobContextImpl;
 import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POStore;
+<<<<<<< HEAD
+=======
+import org.apache.pig.backend.hadoop23.PigJobControl;
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 
 public class HadoopShims {
     static public JobContext cloneJobContext(JobContext original) throws IOException, InterruptedException {
@@ -64,9 +75,10 @@ public class HadoopShims {
         TaskType type = taskAttemptID.getTaskType();
         if (type==TaskType.MAP)
             return true;
-        
+
         return false;
     }
+<<<<<<< HEAD
     
     static public TaskAttemptID getNewTaskAttemptID() {
         TaskAttemptID taskAttemptID = new TaskAttemptID("", 1, TaskType.MAP, 
@@ -74,6 +86,15 @@ public class HadoopShims {
         return taskAttemptID;
     }
     
+=======
+
+    static public TaskAttemptID getNewTaskAttemptID() {
+        TaskAttemptID taskAttemptID = new TaskAttemptID("", 1, TaskType.MAP,
+                1, 1);
+        return taskAttemptID;
+    }
+
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     static public TaskAttemptID createTaskAttemptID(String jtIdentifier, int jobId, boolean isMap,
             int taskId, int id) {
         if (isMap) {
@@ -82,6 +103,7 @@ public class HadoopShims {
             return new TaskAttemptID(jtIdentifier, jobId, TaskType.REDUCE, taskId, id);
         }
     }
+<<<<<<< HEAD
     
     static public void storeSchemaForLocal(Job job, POStore st) {
         // Doing nothing for hadoop 23
@@ -94,8 +116,33 @@ public class HadoopShims {
     static public void commitOrCleanup(OutputCommitter oc, JobContext jc) throws IOException {
         oc.commitJob(jc);
     }
+=======
+
+    static public void storeSchemaForLocal(Job job, POStore st) {
+        // Doing nothing for hadoop 23
+    }
+
+    static public String getFsCounterGroupName() {
+        return "org.apache.hadoop.mapreduce.FileSystemCounter";
+    }
+
+    static public void commitOrCleanup(OutputCommitter oc, JobContext jc) throws IOException {
+        oc.commitJob(jc);
+    }
+
+    public static JobControl newJobControl(String groupName, int timeToSleep) {
+      return new PigJobControl(groupName, timeToSleep);
+    }
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     
     public static long getDefaultBlockSize(FileSystem fs, Path path) {
         return fs.getDefaultBlockSize(path);
     }
+<<<<<<< HEAD
+=======
+
+    public static Counters getCounters(Job job) throws IOException, InterruptedException {
+        return new Counters(job.getJob().getCounters());
+    }
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
 }

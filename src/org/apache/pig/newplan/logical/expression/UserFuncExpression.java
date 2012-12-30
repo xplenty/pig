@@ -21,13 +21,18 @@ package org.apache.pig.newplan.logical.expression;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
+
 import org.apache.pig.EvalFunc;
 import org.apache.pig.FuncSpec;
 import org.apache.pig.builtin.Nondeterministic;
 import org.apache.pig.data.DataType;
+import org.apache.pig.data.SchemaTupleClassGenerator.GenContext;
+import org.apache.pig.data.SchemaTupleFrontend;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
+import org.apache.pig.impl.util.UDFContext;
 import org.apache.pig.newplan.Operator;
 import org.apache.pig.newplan.OperatorPlan;
 import org.apache.pig.newplan.PlanVisitor;
@@ -39,14 +44,23 @@ public class UserFuncExpression extends LogicalExpression {
 
     private FuncSpec mFuncSpec;
     private EvalFunc<?> ef = null;
+<<<<<<< HEAD
 
     //this represents whether the function was instantiate via a DEFINE statement or not
     private boolean viaDefine=false; 
+=======
+    private String signature;
+    private static int sigSeq=0;
+    private boolean viaDefine=false; //this represents whether the function was instantiate via a DEFINE statement or not
+>>>>>>> 9aee27cd3c9c25bfd03c57724ba7e957a1591fed
     
     public UserFuncExpression(OperatorPlan plan, FuncSpec funcSpec) {
         super("UserFunc", plan);
         mFuncSpec = funcSpec;
         plan.add(this);
+        if (signature==null) {
+            signature = Integer.toString(sigSeq++);
+        }
     }
     
     
@@ -183,7 +197,21 @@ public class UserFuncExpression extends LogicalExpression {
         // This significantly optimize the performance of frontend (PIG-1738)
         if (ef==null)
             ef = (EvalFunc<?>) PigContext.instantiateFuncFromSpec(mFuncSpec);
-        Schema udfSchema = ef.outputSchema(Util.translateSchema(inputSchema));
+        
+        ef.setUDFContextSignature(signature);
+        Properties props = UDFContext.getUDFContext().getUDFProperties(ef.getClass());
+        Schema translatedInputSchema = Util.translateSchema(inputSchema);
+        if(translatedInputSchema != null) {
+    		props.put("pig.evalfunc.inputschema."+signature, translatedInputSchema);
+        }
+        // Store inputSchema into the UDF context
+        ef.setInputSchema(translatedInputSchema);
+;
+        Schema udfSchema = ef.outputSchema(translatedInputSchema);
+        
+        //TODO appendability should come from a setting
+        SchemaTupleFrontend.registerToGenerateIfPossible(translatedInputSchema, false, GenContext.UDF);
+        SchemaTupleFrontend.registerToGenerateIfPossible(udfSchema, false, GenContext.UDF);
 
         if (udfSchema != null) {
             Schema.FieldSchema fs;
@@ -212,6 +240,7 @@ public class UserFuncExpression extends LogicalExpression {
                     this.getFuncSpec().clone(),
                     viaDefine);
             
+            copy.signature = signature;
             // Deep copy the input expressions.
             List<Operator> inputs = plan.getSuccessors( this );
             if( inputs != null ) {
@@ -245,6 +274,10 @@ public class UserFuncExpression extends LogicalExpression {
         msg.append(")");
 
         return msg.toString();
+    }
+    
+    public String getSignature() {
+        return signature;
     }
 
     public boolean isViaDefine() {

@@ -34,11 +34,12 @@ public class MiniCluster extends MiniGenericCluster {
     @Override
     protected void setupMiniDfsAndMrClusters() {
         try {
+            System.setProperty("hadoop.log.dir", "build/test/logs");
             final int dataNodes = 4;     // There will be 4 data nodes
             final int taskTrackers = 4;  // There will be 4 task tracker nodes
-            
+
             // Create the configuration hadoop-site.xml file
-            File conf_dir = new File(System.getProperty("user.home"), "pigtest/conf/");
+            File conf_dir = new File("build/classes/");
             conf_dir.mkdirs();
             File conf_file = new File(conf_dir, "hadoop-site.xml");
 
@@ -49,16 +50,17 @@ public class MiniCluster extends MiniGenericCluster {
             m_dfs = new MiniDFSCluster(config, dataNodes, true, null);
             m_fileSys = m_dfs.getFileSystem();
             m_mr = new MiniMRCluster(taskTrackers, m_fileSys.getUri().toString(), 1);
-            
+
             // Write the necessary config info to hadoop-site.xml
-            m_conf = m_mr.createJobConf();      
+            m_conf = m_mr.createJobConf();
             m_conf.setInt("mapred.submit.replication", 2);
             m_conf.set("dfs.datanode.address", "0.0.0.0:0");
             m_conf.set("dfs.datanode.http.address", "0.0.0.0:0");
             m_conf.set("mapred.map.max.attempts", "2");
             m_conf.set("mapred.reduce.max.attempts", "2");
+            m_conf.set("pig.jobcontrol.sleep", "100");
             m_conf.writeXml(new FileOutputStream(conf_file));
-            
+
             // Set the system properties needed by Pig
             System.setProperty("cluster", m_conf.get("mapred.job.tracker"));
             System.setProperty("namenode", m_conf.get("fs.default.name"));
@@ -71,6 +73,6 @@ public class MiniCluster extends MiniGenericCluster {
     @Override
     protected void shutdownMiniMrClusters() {
         if (m_mr != null) { m_mr.shutdown(); }
-            m_mr = null;        
+            m_mr = null;
     }
 }

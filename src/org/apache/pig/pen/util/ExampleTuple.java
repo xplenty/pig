@@ -25,11 +25,12 @@ import java.util.List;
 
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.Tuple;
+import org.apache.pig.data.AbstractTuple;
 
 //Example tuple adds 2 booleans to Tuple
 //synthetic say whether the tuple was generated synthetically
 //omittable is for future use in case we want to attach weights to tuples that have been displayed earlier
-public class ExampleTuple implements Tuple {
+public class ExampleTuple extends AbstractTuple {
     private static final long serialVersionUID = 2L;
 
     public boolean synthetic = false;
@@ -57,12 +58,14 @@ public class ExampleTuple implements Tuple {
     }
 
     // Writable methods:
+    @Override
     public void write(DataOutput out) throws IOException {
         t.write(out);
         out.writeBoolean(synthetic);
         out.writeBoolean(omittable);
     }
 
+    @Override
     public void readFields(DataInput in) throws IOException {
         t.readFields(in);
         this.synthetic = in.readBoolean();
@@ -73,55 +76,53 @@ public class ExampleTuple implements Tuple {
         return t;
     }
 
+    @Override
     public void append(Object val) {
         t.append(val);
 
     }
 
+    @Override
     public Object get(int fieldNum) throws ExecException {
         return t.get(fieldNum);
     }
 
+    @Override
     public List<Object> getAll() {
         return t.getAll();
     }
 
+    @Override
     public long getMemorySize() {
         return t.getMemorySize();
     }
 
+    @Override
     public byte getType(int fieldNum) throws ExecException {
         return t.getType(fieldNum);
     }
 
+    @Override
     public boolean isNull(int fieldNum) throws ExecException {
         return t.isNull(fieldNum);
     }
 
-    public boolean isNull() {
-        return t.isNull();
-    }
-
+    @Override
     public void reference(Tuple t) {
         t.reference(t);
     }
 
+    @Override
     public void set(int fieldNum, Object val) throws ExecException {
         t.set(fieldNum, val);
     }
 
-    public void setNull(boolean isNull) {
-        t.setNull(isNull);
-    }
-
+    @Override
     public int size() {
         return t.size();
     }
 
-    public String toDelimitedString(String delim) throws ExecException {
-        return t.toDelimitedString(delim);
-    }
-
+    @Override
     @SuppressWarnings("unchecked")
     public int compareTo(Object o) {
         return t.compareTo(o);
