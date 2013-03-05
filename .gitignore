@@ -18,3 +18,5 @@ pig-withouthadoop.jar
 *.classpath
 *.project
 *.crc
+# Mac finder artifacts
+.DS_Store
