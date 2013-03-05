@@ -350,8 +350,13 @@ public class CSVExcelStorage extends PigStorage implements StoreFuncInterface, L
     	for (Object field : tupleToWrite.getAll()) {
     		fieldCounter++;
     		if (field == null) {
-    			logger.warn("Field " + fieldCounter + " within tuple '" + tupleToWrite + "' is null.");
-    			return;
+    			if (logger.isDebugEnabled())
+						logger.debug("Field " + fieldCounter + " within tuple '" + tupleToWrite + "' is null.");
+    			//Add string "null" to tuple when field is null. Field could be null
+    			//for reasons such as, when user tries to access non-existent field 
+    			//or if UDF returns null.
+    			mProtoTuple.add("");
+    			continue;
     		}
     		
     		fieldStr = field.toString();
