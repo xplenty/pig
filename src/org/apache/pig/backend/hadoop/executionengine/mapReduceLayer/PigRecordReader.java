@@ -209,6 +209,7 @@ public class PigRecordReader extends RecordReader<Text, Tuple> {
             startNanos = System.nanoTime();
         }
         while ((curReader == null) || (curValue = loadfunc.getNext()) == null) {
+        	PigStatusReporter.getInstance().progress();
             if (!initNextRecordReader()) {
               return false;
             }
