@@ -26,15 +26,12 @@ import java.util.regex.Pattern;
 
 import org.apache.pig.EvalFunc;
 import org.apache.pig.FuncSpec;
-import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
-import org.joda.time.format.DateTimeFormat;
-import org.joda.time.format.DateTimeFormatter;
 
 /**
  * 
@@ -81,6 +78,8 @@ import org.joda.time.format.DateTimeFormatter;
  * </dl>
  */
 public class ToDate extends EvalFunc<DateTime> {
+    
+    private static final Pattern TIMEZONE_PATTERN = Pattern.compile("(Z|(?<=(T[0-9\\.:]{0,12}))((\\+|-)\\d{2}(:?\\d{2})?))$");
 
     public DateTime exec(Tuple input) throws IOException {
         return new DateTime(DataType.toLong(input.get(0)));
@@ -114,8 +113,7 @@ public class ToDate extends EvalFunc<DateTime> {
     }
     
     public static DateTimeZone extractDateTimeZone(String dtStr) {
-        Pattern pattern = Pattern.compile("(Z|((\\+|-)\\d{2}(:?\\d{2})?))$");
-        Matcher matcher = pattern.matcher(dtStr);
+        Matcher matcher = TIMEZONE_PATTERN.matcher(dtStr);
         if (matcher.find()) {
             String dtzStr = matcher.group();
             if (dtzStr.equals("Z")) {

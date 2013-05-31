@@ -47,6 +47,8 @@
     <artifact name="pig" m:classifier="withdependencies" conf="master"/>
     <artifact name="pig" m:classifier="sources" conf="master"/>
     <artifact name="pig" m:classifier="javadoc" conf="master"/>
+    <artifact name="pig" m:classifier="h2" conf="master"/>
+    <artifact name="pig" m:classifier="withouthadoop-h2" conf="master"/>
   </publications>
   <dependencies>
     <dependency org="checkstyle" name="checkstyle" rev="${checkstyle.version}"
@@ -218,6 +220,7 @@
     <dependency org="dk.brics.automaton" name="automaton" rev="1.11-8" conf="compile->default"/>
 
     <dependency org="org.jruby" name="jruby-complete" rev="${jruby.version}" conf="compile->master"/>
+    <dependency org="asm" name="asm" rev="${asm.version}" conf="compile->default"/>
 
     <dependency org="org.apache.hbase" name="hbase" rev="${hbase.version}" conf="compile->master">
       <artifact name="hbase" type="jar"/>

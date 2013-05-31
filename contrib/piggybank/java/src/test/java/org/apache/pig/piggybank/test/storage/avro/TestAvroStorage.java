@@ -27,6 +27,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.pig.ExecType;
+import org.apache.pig.LoadFunc;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.executionengine.ExecJob;
@@ -36,6 +37,7 @@ import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.piggybank.storage.avro.AvroStorage;
 import org.apache.pig.piggybank.storage.avro.PigSchema2Avro;
+import org.apache.pig.test.MiniCluster;
 import org.apache.pig.test.Util;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -44,6 +46,7 @@ import org.junit.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
@@ -70,7 +73,19 @@ public class TestAvroStorage {
       };
 
     private static String getInputFile(String file) {
-        return "file://" + System.getProperty("user.dir") + "/" + basedir + file;
+        String locations[] = LoadFunc.getPathStrings(file);
+        if (locations.length == 1)
+            return System.getProperty("user.dir") + "/" + basedir
+                    + file;
+        else {
+            ArrayList<String> pathStrings = new ArrayList<String>();
+            for (int index = 0; index < locations.length; index++) {
+                String f = System.getProperty("user.dir") + "/"
+                        + basedir + locations[index].trim();
+                pathStrings.add(f);
+            }
+            return LoadFunc.join(pathStrings, ",");
+        }
     }
 
     final private String testDir1 = getInputFile("test_dir1");
@@ -79,6 +94,8 @@ public class TestAvroStorage {
     final private String testDir1Files321 = getInputFile("test_dir1/test_glob{3,2,1}.avro");
     final private String testDir12AllFiles = getInputFile("{test_dir1,test_dir2}/test_glob*.avro");
     final private String testDir21AllFiles = getInputFile("{test_dir2,test_dir1}/test_glob*.avro");
+    final private String testCommaSeparated1 = getInputFile("test_dir1/test_glob1.avro,test_dir1/test_glob2.avro,test_dir1/test_glob3.avro");
+    final private String testCommaSeparated2 = getInputFile("test_dir1/test_glob*,test_dir2/test_glob4.avro,test_dir2/test_glob5.avro");
     final private String testNoMatchedFiles = getInputFile("test_dir{1,2}/file_that_does_not_exist*.avro");
     final private String testArrayFile = getInputFile("test_array.avro");
     final private String testArraySchema = getInputFile("test_array.avsc");
@@ -163,6 +180,7 @@ public class TestAvroStorage {
     final private String testCorruptedFile = getInputFile("test_corrupted_file.avro");
     final private String testMultipleSchemas1File = getInputFile("test_primitive_types/*");
     final private String testMultipleSchemas2File = getInputFile("test_complex_types/*");
+    final private String testUserDefinedLoadSchemaFile = getInputFile("test_user_defined_load_schema/*");
 
     @BeforeClass
     public static void setup() throws ExecException, IOException {
@@ -185,7 +203,7 @@ public class TestAvroStorage {
         String expected = testRecursiveRecordInMap;
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInMap +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInMap) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " STORE in INTO '" + output +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
@@ -203,7 +221,7 @@ public class TestAvroStorage {
         String expected = testRecursiveRecordInArray;
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInArray +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInArray) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " STORE in INTO '" + output +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
@@ -221,7 +239,7 @@ public class TestAvroStorage {
         String expected = testRecursiveRecordInUnion;
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInUnion +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInUnion) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " STORE in INTO '" + output +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
@@ -239,12 +257,12 @@ public class TestAvroStorage {
         String expected = testRecursiveRecordInRecord;
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInRecord +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInRecord) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " STORE in INTO '" + output +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
               " 'no_schema_check'," +
-              " 'schema', '" + recursiveRecordInRecord + "' );"
+              " 'schema', '" + Util.encodeEscape(recursiveRecordInRecord) + "' );"
            };
         testAvroStorage(queries);
         verifyResults(output, expected);
@@ -258,12 +276,12 @@ public class TestAvroStorage {
         String expected = testRecursiveRecordInUnion;
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInUnion +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInUnion) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " STORE in INTO '" + output +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
               " 'no_schema_check'," +
-              " 'same', '" + testRecursiveRecordInUnion + "' );"
+              " 'same', '" + Util.encodeEscape(testRecursiveRecordInUnion) + "' );"
            };
         testAvroStorage(queries);
         verifyResults(output, expected);
@@ -287,7 +305,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testRecursiveRecordReference1.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInUnion +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInUnion) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " first = FOREACH in GENERATE $0 AS value;",
           " filtered = FILTER first BY value is not null;",
@@ -317,7 +335,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testRecursiveRecordReference2.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInUnion +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInUnion) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " second = FOREACH in GENERATE $1.$0 AS value;",
           " filtered = FILTER second BY value is not null;",
@@ -346,7 +364,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testRecursiveRecordReference3.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInUnion +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInUnion) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " third = FOREACH in GENERATE $1.$1.$0 AS value;",
           " filtered = FILTER third BY value is not null;",
@@ -366,7 +384,7 @@ public class TestAvroStorage {
         String output= outbasedir + "testRecursiveRecordWithNoAvroSchema";
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInUnion +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInUnion) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " STORE in INTO '" + output +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
@@ -384,7 +402,7 @@ public class TestAvroStorage {
         String output= outbasedir + "testRecursiveWithSchemaCheck";
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInUnion +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInUnion) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " STORE in INTO '" + output +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
@@ -406,12 +424,12 @@ public class TestAvroStorage {
         String output= outbasedir + "testRecursiveWithSchemaFile";
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInUnion +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInUnion) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " STORE in INTO '" + output +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
               " 'no_schema_check'," +
-              " 'schema_file', '" + testRecursiveRecordInUnionSchema + "' );"
+              " 'schema_file', '" + Util.encodeEscape(testRecursiveRecordInUnionSchema) + "' );"
            };
         try {
             testAvroStorage(queries);
@@ -429,12 +447,12 @@ public class TestAvroStorage {
         String output= outbasedir + "testRecursiveWithData";
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testRecursiveRecordInUnion +
+          " in = LOAD '" + Util.encodeEscape(testRecursiveRecordInUnion) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " STORE in INTO '" + output +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
               " 'no_schema_check'," +
-              " 'data', '" + testRecursiveRecordInUnion + "' );"
+              " 'data', '" + Util.encodeEscape(testRecursiveRecordInUnion) + "' );"
            };
         try {
             testAvroStorage(queries);
@@ -452,7 +470,7 @@ public class TestAvroStorage {
         String output= outbasedir + "testGenericUnion";
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testGenericUnionFile +
+          " in = LOAD '" + Util.encodeEscape(testGenericUnionFile) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
           " STORE in INTO '" + output +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();"
@@ -497,7 +515,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testMultipleSchemas1.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testMultipleSchemas1File +
+          " in = LOAD '" + Util.encodeEscape(testMultipleSchemas1File) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ('multiple_schemas');",
           " s = FOREACH in GENERATE StringConcat($0);",
           " o = ORDER s BY $0;",
@@ -549,7 +567,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testMultipleSchemas2.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-          " in = LOAD '" + testMultipleSchemas2File +
+          " in = LOAD '" + Util.encodeEscape(testMultipleSchemas2File) +
               "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ('multiple_schemas');",
           " f = FOREACH in GENERATE ($0 is not null ? (chararray)$0 : '')," +
           "                         ($1 is not null ? (chararray)$1 : '')," +
@@ -567,13 +585,48 @@ public class TestAvroStorage {
     }
 
     @Test
+    public void testUserDefinedLoadSchema() throws IOException {
+        // Verify that user specified schema correctly maps to input schemas
+        // Input Avro files have the following schemas:
+        //   name:"string", address:[customField1:"int", addressLine:"string"]
+        //   address:[addressLine:"string", customField2:"int"], name:"string"
+        // User Avro schema looks like this:
+        //   name:"string", address:[customField1:"int", customField2:"int", customField3:"int"]
+        // This test will confirm that AvroStorage correctly maps fields from writer to reader schema,
+        // dropping, adding, and reordering fields where needed.
+        String output= outbasedir + "testUserDefinedLoadSchema";
+        String expected = basedir + "expected_testUserDefinedLoadSchema.avro";
+        String customSchema = 
+                    "{\"type\": \"record\", \"name\": \"employee\", \"fields\": [ "
+                        +"{ \"default\": \"***\", \"type\": \"string\", \"name\": \"name\" }, "
+                        +"{ \"name\": \"address\", \"type\": { "
+                            +"\"type\": \"record\", \"name\": \"addressDetails\", \"fields\": [ "
+                                +"{ \"default\": 0, \"type\": \"int\", \"name\": \"customField1\" }, "
+                                +"{ \"default\": 0, \"type\": \"int\", \"name\": \"customField2\" }, "
+                                +"{ \"default\": 0, \"type\": \"int\", \"name\": \"customField3\" } "
+                            +"] "
+                        +"} } "
+                    +"] } ";
+
+        deleteDirectory(new File(output));
+        String [] queries = {
+            " in = LOAD '" + testUserDefinedLoadSchemaFile
+                + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ('schema', '" + customSchema + "');",
+            " o = ORDER in BY name;",
+            " STORE o INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();" 
+           };
+        testAvroStorage(queries);
+        verifyResults(output, expected);
+    }
+
+    @Test
     public void testDir() throws IOException {
         // Verify that all files in a directory including its sub-directories are loaded.
         String output= outbasedir + "testDir";
         String expected = basedir + "expected_testDir.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testDir1 + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testDir1) + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
                "   'schema', '{\"type\":\"array\",\"items\":\"float\"}'  );"
             };
@@ -588,7 +641,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testDir.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testDir1AllFiles + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testDir1AllFiles) + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
                "   'schema', '{\"type\":\"array\",\"items\":\"float\"}'  );"
             };
@@ -603,7 +656,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_test_dir_1.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testDir1Files123 + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testDir1Files123) + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
                "   'schema', '{\"type\":\"array\",\"items\":\"float\"}'  );"
             };
@@ -618,7 +671,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_test_dir_1.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testDir1Files321 + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testDir1Files321) + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
                "   'schema', '{\"type\":\"array\",\"items\":\"float\"}'  );"
             };
@@ -633,7 +686,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_test_dir_1_2.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testDir12AllFiles + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testDir12AllFiles) + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
                "   'schema', '{\"type\":\"array\",\"items\":\"float\"}'  );"
             };
@@ -648,7 +701,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_test_dir_1_2.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testDir21AllFiles + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testDir21AllFiles) + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
                "   'schema', '{\"type\":\"array\",\"items\":\"float\"}'  );"
             };
@@ -662,7 +715,7 @@ public class TestAvroStorage {
         String output = outbasedir + "testGlob6";
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testNoMatchedFiles + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testNoMatchedFiles) + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
                "   'schema', '{\"type\":\"array\",\"items\":\"float\"}'  );"
             };
@@ -678,6 +731,36 @@ public class TestAvroStorage {
     }
 
     @Test
+    public void testComma1() throws IOException {
+        // Verify that comma-separated file can be processed
+        String output = outbasedir + "testComma1";
+        String expected = basedir + "expected_test_dir_1.avro";
+        deleteDirectory(new File(output));
+        String [] queries = {
+           " in = LOAD '" + Util.encodeEscape(testCommaSeparated1) + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
+               "   'schema', '{\"type\":\"array\",\"items\":\"float\"}'  );"
+           };
+        testAvroStorage(queries);
+        verifyResults(output, expected);
+    }
+
+    @Test
+    public void testComma2() throws IOException {
+        // Verify that comma-separated file can be processed
+        String output = outbasedir + "testComma2";
+        String expected = basedir + "expected_test_dir_1_2.avro";
+        deleteDirectory(new File(output));
+        String [] queries = {
+           " in = LOAD '" + Util.encodeEscape(testCommaSeparated2) + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
+               "   'schema', '{\"type\":\"array\",\"items\":\"float\"}'  );"
+            };
+        testAvroStorage(queries);
+        verifyResults(output, expected);
+    }
+
+    @Test
     public void testArrayDefault() throws IOException {
         String output= outbasedir + "testArrayDefault";
         String expected = basedir + "expected_testArrayDefault.avro";
@@ -685,7 +768,7 @@ public class TestAvroStorage {
         deleteDirectory(new File(output));
 
         String [] queries = {
-           " in = LOAD '" + testArrayFile + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testArrayFile) + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();"
             };
         testAvroStorage( queries);
@@ -698,7 +781,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testArrayWithSchema.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-                " in = LOAD '" + testArrayFile + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+                " in = LOAD '" + Util.encodeEscape(testArrayFile) + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
                 " STORE in INTO '" + output +
                 "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ( "  +
                 "   'schema', '{\"type\":\"array\",\"items\":\"float\"}'  );"
@@ -713,10 +796,10 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testArrayWithSchemaURI.avro"; // doubles (not floats) stored
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testArrayFile + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testArrayFile) + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output +
                "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ( "  +
-               "   'schema_uri', '" + testArraySchema  + "'  );"
+               "   'schema_uri', '" + Util.encodeEscape(testArraySchema)  + "'  );"
             };
         testAvroStorage( queries);
         verifyResults(output, expected);
@@ -728,7 +811,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testArrayWithSchema.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testArrayFile + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testArrayFile) + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output +
                "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ( "  +
                "   '{\"nullable\": false }'  );"
@@ -743,10 +826,10 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testArrayWithSchema.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testArrayFile + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testArrayFile) + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output +
                "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ( "  +
-               "   'same', '" + testArrayFile + "'  );"
+               "   'same', '" + Util.encodeEscape(testArrayFile) + "'  );"
             };
         testAvroStorage(queries);
         verifyResults(output, expected);
@@ -766,7 +849,7 @@ public class TestAvroStorage {
         PigServer pigServer = new PigServer(ExecType.LOCAL, properties);
         pigServer.setBatchOn();
         String [] queries = {
-           " in = LOAD '" + testArrayFile + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testArrayFile) + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();"
             };
         for (String query: queries){
@@ -786,7 +869,7 @@ public class TestAvroStorage {
         deleteDirectory(new File(output1));
         deleteDirectory(new File(output2));
         String [] queries = {
-           " avro = LOAD '" + testRecordFile + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " avro = LOAD '" + Util.encodeEscape(testRecordFile) + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " groups = GROUP avro BY member_id;",
            " sc = FOREACH groups GENERATE group AS key, COUNT(avro) AS cnt;",
            " STORE sc INTO '" + output1 + "' " +
@@ -817,7 +900,7 @@ public class TestAvroStorage {
         deleteDirectory(new File(output1));
         deleteDirectory(new File(output2));
         String [] queries = {
-           " avro = LOAD '" + testTextFile + "' AS (member_id:int, browser_id:chararray, tracking_time:long, act_content:bag{inner:tuple(key:chararray, value:chararray)});",
+           " avro = LOAD '" + Util.encodeEscape(testTextFile) + "' AS (member_id:int, browser_id:chararray, tracking_time:long, act_content:bag{inner:tuple(key:chararray, value:chararray)});",
            " groups = GROUP avro BY member_id;",
            " sc = FOREACH groups GENERATE group AS key, COUNT(avro) AS cnt;",
            " STORE sc INTO '" + output1 + "' " +
@@ -845,12 +928,12 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testRecordWithFieldSchema.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-           " avro = LOAD '" + testRecordFile + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " avro = LOAD '" + Util.encodeEscape(testRecordFile) + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " avro1 = FILTER avro BY member_id > 1211;",
            " avro2 = FOREACH avro1 GENERATE member_id, browser_id, tracking_time, act_content ;",
            " STORE avro2 INTO '" + output + "' " +
                  " USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
-                 "'{\"data\":  \"" + testRecordFile + "\" ," +
+                 "'{\"data\":  \"" + Util.encodeEscape(testRecordFile) + "\" ," +
                  "  \"field0\": \"int\", " +
                   " \"field1\":  \"def:browser_id\", " +
                  "  \"field3\": \"def:act_content\" " +
@@ -867,12 +950,12 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testRecordWithFieldSchema.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-          " avro = LOAD '" + testTextFile + "' AS (member_id:int, browser_id:chararray, tracking_time:long, act_content:bag{inner:tuple(key:chararray, value:chararray)});",
+          " avro = LOAD '" + Util.encodeEscape(testTextFile) + "' AS (member_id:int, browser_id:chararray, tracking_time:long, act_content:bag{inner:tuple(key:chararray, value:chararray)});",
           " avro1 = FILTER avro BY member_id > 1211;",
           " avro2 = FOREACH avro1 GENERATE member_id, browser_id, tracking_time, act_content ;",
           " STORE avro2 INTO '" + output + "' " +
                 " USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
-                "'{\"data\":  \"" + testRecordFile + "\" ," +
+                "'{\"data\":  \"" + Util.encodeEscape(testRecordFile) + "\" ," +
                 "  \"field0\": \"int\", " +
                  " \"field1\":  \"def:browser_id\", " +
                 "  \"field3\": \"def:act_content\" " +
@@ -889,12 +972,12 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testRecordWithFieldSchema.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-           " avro = LOAD '" + testTextFile + "' AS (member_id:int, browser_id:chararray, tracking_time:long, act_content:bag{inner:tuple(key:chararray, value:chararray)});",
+           " avro = LOAD '" + Util.encodeEscape(testTextFile) + "' AS (member_id:int, browser_id:chararray, tracking_time:long, act_content:bag{inner:tuple(key:chararray, value:chararray)});",
           " avro1 = FILTER avro BY member_id > 1211;",
           " avro2 = FOREACH avro1 GENERATE member_id, browser_id, tracking_time, act_content ;",
           " STORE avro2 INTO '" + output + "' " +
                 " USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
-                "'{\"schema_file\":  \"" + testRecordSchema + "\" ," +
+                "'{\"schema_file\":  \"" + Util.encodeEscape(testRecordSchema) + "\" ," +
                 "  \"field0\": \"int\", " +
                  " \"field1\":  \"def:browser_id\", " +
                 "  \"field3\": \"def:act_content\" " +
@@ -910,7 +993,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testSingleFieldTuples.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-                " messages = LOAD '" + testSingleTupleBagFile + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+                " messages = LOAD '" + Util.encodeEscape(testSingleTupleBagFile) + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
                 " a = foreach (group messages by user_id) { sorted = order messages by message_id DESC; GENERATE group AS user_id, sorted AS messages; };",
                 " STORE a INTO '" + output + "' " +
                         " USING org.apache.pig.piggybank.storage.avro.AvroStorage ();"
@@ -925,12 +1008,12 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testFileWithNoExtension.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-                " avro = LOAD '" + testNoExtensionFile + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+                " avro = LOAD '" + Util.encodeEscape(testNoExtensionFile) + " ' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
                 " avro1 = FILTER avro BY member_id > 1211;",
                 " avro2 = FOREACH avro1 GENERATE member_id, browser_id, tracking_time, act_content ;",
                 " STORE avro2 INTO '" + output + "' " +
                         " USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
-                        "'{\"data\":  \"" + testNoExtensionFile + "\" ," +
+                        "'{\"data\":  \"" + Util.encodeEscape(testNoExtensionFile) + "\" ," +
                         "  \"field0\": \"int\", " +
                         " \"field1\":  \"def:browser_id\", " +
                         "  \"field3\": \"def:act_content\" " +
@@ -948,12 +1031,12 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testRecordWithFieldSchema.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-          " avro = LOAD '" + testTextFile + "' AS (member_id:int, browser_id:chararray, tracking_time:long, act_content:bag{inner:tuple(key:chararray, value:chararray)});",
+          " avro = LOAD '" + Util.encodeEscape(testTextFile) + "' AS (member_id:int, browser_id:chararray, tracking_time:long, act_content:bag{inner:tuple(key:chararray, value:chararray)});",
           " avro1 = FILTER avro BY member_id > 1211;",
           " avro2 = FOREACH avro1 GENERATE member_id, browser_id, tracking_time, act_content ;",
           " STORE avro2 INTO '" + output + "' " +
                 " USING org.apache.pig.piggybank.storage.avro.AvroStorage (" +
-                "'schema_file', '" + testRecordSchema + "'," +
+                "'schema_file', '" + Util.encodeEscape(testRecordSchema) + "'," +
                 "'field0','int'," +
                 "'field1','def:browser_id'," +
                 "'field3','def:act_content'" +
@@ -969,7 +1052,7 @@ public class TestAvroStorage {
         String output = outbasedir + "testCorruptedFile1";
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testCorruptedFile + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
+           " in = LOAD '" + Util.encodeEscape(testCorruptedFile) + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();",
            " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();"
             };
         // Job is expected to fail for bad files.
@@ -984,7 +1067,7 @@ public class TestAvroStorage {
         String expected = basedir + "expected_testCorruptedFile.avro";
         deleteDirectory(new File(output));
         String [] queries = {
-           " in = LOAD '" + testCorruptedFile + "'" +
+           " in = LOAD '" + Util.encodeEscape(testCorruptedFile) + "'" +
                   " USING org.apache.pig.piggybank.storage.avro.AvroStorage ('ignore_bad_files');",
            " STORE in INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();"
             };
