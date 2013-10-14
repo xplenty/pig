@@ -1,0 +1,2 @@
+ant clean jar-withouthadoop -Dhadoopversion=23
+ant clean jar-withouthadoop -Dhadoopversion=20

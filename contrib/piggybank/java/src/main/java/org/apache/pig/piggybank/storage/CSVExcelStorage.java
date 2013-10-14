@@ -295,6 +295,12 @@ public class CSVExcelStorage extends PigStorage implements StoreFuncInterface, L
     	super(delimiter);
     	initializeInstance(delimiter, multilineTreatment, eolTreatment);
     }
+    
+
+    public CSVExcelStorage(String delimiter, String multilineTreatment,  String eolTreatment, String options) {
+    	super(delimiter, options);
+    	initializeInstance(delimiter, multilineTreatment, eolTreatment);
+    }
 
     
     private void initializeInstance(String delimiter, String multilineStr, String theEofTreatment) {

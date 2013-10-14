@@ -74,6 +74,13 @@ public class DBStorage extends StoreFunc {
     this.insertQuery = insertQuery;
     this.batchSize = Integer.parseInt(batchSize);
   }
+  
+  private static SQLException getExceptionWithNextAsCause(SQLException e){
+  	SQLException underlying = e;
+  	if ((e.getCause() == null || e.getCause() == e) && e.getNextException() != null)
+  		underlying = new SQLException(e.getMessage(), e.getNextException());
+  	return underlying;
+  }
 
   /**
    * Write the tuple to Database directly here.
@@ -204,7 +211,7 @@ public class DBStorage extends StoreFunc {
               con.close();
             }
           } catch (SQLException sqe) {
-            throw new IOException(sqe);
+            throw new IOException(getExceptionWithNextAsCause(sqe));
           }
         }
 
@@ -219,8 +226,9 @@ public class DBStorage extends StoreFunc {
               ps = null;
               con = null;
             } catch (SQLException e) {
-              log.error("ps.close", e);
-              throw new IOException("JDBC Error", e);
+            	SQLException underlying = getExceptionWithNextAsCause(e);
+			  log.error("ps.close", underlying);
+			  throw new IOException("JDBC Error", underlying);
             }
           }
         }
@@ -295,7 +303,7 @@ public class DBStorage extends StoreFunc {
       ps = con.prepareStatement(insertQuery);
     } catch (SQLException e) {
       log.error("Unable to connect to JDBC @" + jdbcURL);
-      throw new IOException("JDBC Error", e);
+      throw new IOException("JDBC Error", getExceptionWithNextAsCause(e));
     }
     count = 0;
   }
