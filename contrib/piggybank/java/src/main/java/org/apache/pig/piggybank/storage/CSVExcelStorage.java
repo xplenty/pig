@@ -349,10 +349,12 @@ public class CSVExcelStorage extends PigStorage implements StoreFuncInterface, L
     	// Do the escaping:
     	for (Object field : tupleToWrite.getAll()) {
     		fieldCounter++;
+
+            // Fix for removing log lines for null fields
     		if (field == null) {
-    			logger.warn("Field " + fieldCounter + " within tuple '" + tupleToWrite + "' is null.");
-    			return;
-    		}
+                mProtoTuple.add("");
+                continue;
+            }
     		
     		fieldStr = field.toString();
     		
