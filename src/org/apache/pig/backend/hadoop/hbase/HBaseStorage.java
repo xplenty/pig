@@ -16,10 +16,8 @@
  */
 package org.apache.pig.backend.hadoop.hbase;
 
-import java.io.ByteArrayOutputStream;
 import java.io.DataInput;
 import java.io.DataOutput;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -62,7 +60,6 @@ import org.apache.hadoop.hbase.mapreduce.TableInputFormat;
 import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
 import org.apache.hadoop.hbase.mapreduce.TableOutputFormat;
 import org.apache.hadoop.hbase.mapreduce.TableSplit;
-import org.apache.hadoop.hbase.util.Base64;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.WritableComparable;
 import org.apache.hadoop.mapred.JobConf;
@@ -81,7 +78,6 @@ import org.apache.pig.OrderedLoadFunc;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
 import org.apache.pig.StoreFuncInterface;
-import org.apache.pig.backend.hadoop.datastorage.ConfigurationUtil;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
 import org.apache.pig.backend.hadoop.hbase.HBaseTableInputFormat.HBaseTableIFBuilder;
 import org.apache.pig.builtin.Utf8StorageConverter;
@@ -302,7 +298,7 @@ public class HBaseStorage extends LoadFunc implements StoreFuncInterface, LoadPu
         if (configuredOptions_.hasOption("minTimestamp")){
             minTimestamp_ = Long.parseLong(configuredOptions_.getOptionValue("minTimestamp"));
         } else {
-            minTimestamp_ = Long.MIN_VALUE;
+            minTimestamp_ = 0;
         }
 
         if (configuredOptions_.hasOption("maxTimestamp")){
@@ -677,6 +673,7 @@ public class HBaseStorage extends LoadFunc implements StoreFuncInterface, LoadPu
         .withLte(lte_)
         .withConf(m_conf)
         .build();
+        inputFormat.setScan(scan);
         return inputFormat;
     }
 
@@ -722,16 +719,33 @@ public class HBaseStorage extends LoadFunc implements StoreFuncInterface, LoadPu
                     new String[] {contextSignature});
             p.setProperty(contextSignature + "_projectedFields", ObjectSerializer.serialize(requiredFieldList));
         }
-        m_conf.set(TableInputFormat.SCAN, convertScanToString(scan));
     }
 
     private void initialiseHBaseClassLoaderResources(Job job) throws IOException {
         // Make sure the HBase, ZooKeeper, and Guava jars get shipped.
         TableMapReduceUtil.addDependencyJars(job.getConfiguration(),
-            org.apache.hadoop.hbase.client.HTable.class,
+            org.apache.hadoop.hbase.client.HTable.class, // main hbase jar or hbase-client
+            org.apache.hadoop.hbase.mapreduce.TableSplit.class, // main hbase jar or hbase-server
             com.google.common.collect.Lists.class,
             org.apache.zookeeper.ZooKeeper.class);
 
+          // Additional jars that are specific to only some HBase versions
+          // HBase 0.95+
+          addClassToJobIfExists(job, "org.cloudera.htrace.Trace");
+          addClassToJobIfExists(job, "org.apache.hadoop.hbase.protobuf.generated.HBaseProtos"); // hbase-protocol
+          addClassToJobIfExists(job, "org.apache.hadoop.hbase.TableName"); // hbase-common
+    }
+
+    private void addClassToJobIfExists(Job job, String className) throws IOException {
+      Class klass = null;
+      try {
+          klass = Class.forName(className);
+      } catch (ClassNotFoundException e) {
+          LOG.debug("Skipping adding jar for class: " + className);
+          return;
+      }
+
+      TableMapReduceUtil.addDependencyJars(job.getConfiguration(), klass);
     }
 
     private JobConf initializeLocalJobConfig(Job job) {
@@ -805,19 +819,6 @@ public class HBaseStorage extends LoadFunc implements StoreFuncInterface, LoadPu
     public String relativeToAbsolutePath(String location, Path curDir)
     throws IOException {
         return location;
-    }
-
-    private static String convertScanToString(Scan scan) {
-        try {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            DataOutputStream dos = new DataOutputStream(out);
-            scan.write(dos);
-            return Base64.encodeBytes(out.toByteArray());
-        } catch (IOException e) {
-            LOG.error(e);
-            return "";
-        }
-
     }
 
     /**

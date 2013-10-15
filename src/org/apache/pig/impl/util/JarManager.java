@@ -25,11 +25,13 @@ import java.io.InputStream;
 import java.io.ObjectOutputStream;
 import java.io.OutputStream;
 import java.net.MalformedURLException;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.URLDecoder;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
@@ -42,8 +44,15 @@ import java.util.zip.ZipEntry;
 import org.antlr.runtime.CommonTokenStream;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.util.StringUtils;
+import org.apache.pig.backend.hadoop.executionengine.Launcher;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigMapReduce;
 import org.apache.pig.impl.PigContext;
+import org.apache.pig.impl.builtin.StreamingUDF;
 import org.apache.tools.bzip2r.BZip2Constants;
 import org.codehaus.jackson.annotate.JsonPropertyOrder;
 import org.codehaus.jackson.map.annotate.JacksonStdImpl;
@@ -132,7 +141,10 @@ public class JarManager {
      */
     @SuppressWarnings("deprecation")
     public static void createJar(OutputStream os, Set<String> funcs, PigContext pigContext) throws ClassNotFoundException, IOException {
+        JarOutputStream jarFile = new JarOutputStream(os);
+        HashMap<String, String> contents = new HashMap<String, String>();
         Vector<JarListEntry> jarList = new Vector<JarListEntry>();
+
         for (DefaultPigPackages pkgToSend : DefaultPigPackages.values()) {
             addContainingJar(jarList, pkgToSend.getPkgClass(), pkgToSend.getPkgPrefix(), pigContext);
         }
@@ -141,10 +153,16 @@ public class JarManager {
             Class clazz = pigContext.getClassForAlias(func);
             if (clazz != null) {
                 addContainingJar(jarList, clazz, null, pigContext);
+                
+                if (clazz.getSimpleName().equals("StreamingUDF")) {
+                    for (String fileName : StreamingUDF.getResourcesForJar()) {
+                        InputStream in = Launcher.class.getResourceAsStream(fileName);
+                        addStream(jarFile, fileName, in, contents);
+                    }
+                }
             }
         }
-        HashMap<String, String> contents = new HashMap<String, String>();
-        JarOutputStream jarFile = new JarOutputStream(os);
+
         Iterator<JarListEntry> it = jarList.iterator();
         while (it.hasNext()) {
             JarListEntry jarEntry = it.next();
@@ -349,6 +367,52 @@ public class JarManager {
             throw new RuntimeException(e);
         }
         return null;
+    }
+    
+    /**
+     * Add the jars containing the given classes to the job's configuration
+     * such that JobClient will ship them to the cluster and add them to
+     * the DistributedCache
+     * 
+     * @param job
+     *           Job object
+     * @param classes
+     *            classes to find
+     * @throws IOException
+     */
+    public static void addDependencyJars(Job job, Class<?>... classes)
+            throws IOException {
+        Configuration conf = job.getConfiguration();
+        FileSystem fs = FileSystem.getLocal(conf);
+        Set<String> jars = new HashSet<String>();
+        jars.addAll(conf.getStringCollection("tmpjars"));
+        addQualifiedJarsName(fs, jars, classes);
+        if (jars.isEmpty())
+            return;
+        conf.set("tmpjars", StringUtils.arrayToString(jars.toArray(new String[0])));
+    }
+    
+    /**
+     * Add the qualified path name of jars containing the given classes 
+     * 
+     * @param fs
+     *            FileSystem object
+     * @param jars
+     *            the resolved path names to be added to this set
+     * @param classes
+     *            classes to find
+     */
+    private static void addQualifiedJarsName(FileSystem fs, Set<String> jars, Class<?>... classes) {
+        URI fsUri = fs.getUri();
+        Path workingDir = fs.getWorkingDirectory();
+        for (Class<?> clazz : classes) {
+            String jarName = findContainingJar(clazz);
+            if (jarName == null) {
+                log.warn("Could not find jar for class " + clazz);
+                continue;
+            }
+            jars.add(new Path(jarName).makeQualified(fsUri, workingDir).toString());
+        }
     }
 
 }

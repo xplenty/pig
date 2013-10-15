@@ -23,10 +23,8 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.io.StringReader;
-import java.io.StringWriter;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -46,7 +44,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.mapreduce.Job;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 import org.apache.pig.backend.datastorage.ContainerDescriptor;
@@ -56,10 +53,6 @@ import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.executionengine.ExecJob;
 import org.apache.pig.backend.executionengine.ExecJob.JOB_STATUS;
 import org.apache.pig.backend.hadoop.executionengine.HJob;
-import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MapReduceLauncher;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POStore;
-import org.apache.pig.backend.hadoop.executionengine.util.MapRedUtil;
 import org.apache.pig.builtin.PigStorage;
 import org.apache.pig.classification.InterfaceAudience;
 import org.apache.pig.classification.InterfaceStability;
@@ -85,11 +78,11 @@ import org.apache.pig.newplan.logical.expression.LogicalExpressionVisitor;
 import org.apache.pig.newplan.logical.expression.ScalarExpression;
 import org.apache.pig.newplan.logical.optimizer.AllExpressionVisitor;
 import org.apache.pig.newplan.logical.optimizer.DanglingNestedNodeRemover;
-import org.apache.pig.newplan.logical.optimizer.UidResetter;
 import org.apache.pig.newplan.logical.relational.LOForEach;
 import org.apache.pig.newplan.logical.relational.LOLoad;
 import org.apache.pig.newplan.logical.relational.LOStore;
 import org.apache.pig.newplan.logical.relational.LogicalPlan;
+import org.apache.pig.newplan.logical.relational.LogicalPlanData;
 import org.apache.pig.newplan.logical.relational.LogicalRelationalOperator;
 import org.apache.pig.newplan.logical.relational.LogicalSchema;
 import org.apache.pig.newplan.logical.visitor.CastLineageSetter;
@@ -104,7 +97,6 @@ import org.apache.pig.parser.QueryParserUtils;
 import org.apache.pig.pen.ExampleGenerator;
 import org.apache.pig.scripting.ScriptEngine;
 import org.apache.pig.tools.grunt.GruntParser;
-import org.apache.pig.tools.parameters.ParameterSubstitutionPreprocessor;
 import org.apache.pig.tools.pigstats.JobStats;
 import org.apache.pig.tools.pigstats.OutputStats;
 import org.apache.pig.tools.pigstats.PigStats;
@@ -129,7 +121,7 @@ public class PigServer {
     public static final String PRETTY_PRINT_SCHEMA_PROPERTY = "pig.pretty.print.schema";
     private static final String PIG_LOCATION_CHECK_STRICT = "pig.location.check.strict";
 
-    /*
+    /*    
      * The data structure to support grunt shell operations.
      * The grunt shell can only work on one graph at a time.
      * If a script is contained inside another script, the grunt
@@ -159,6 +151,7 @@ public class PigServer {
     private boolean aggregateWarning = true;
 
     private boolean validateEachStatement = false;
+    private boolean skipParseInRegisterForBatch = false;
 
     private String constructScope() {
         // scope servers for now as a session id
@@ -177,12 +170,23 @@ public class PigServer {
     /**
      * @param execTypeString can be 'mapreduce' or 'local'.  Local mode will
      * use Hadoop's local job runner to execute the job on the local machine.
-     * Mapreduce mode will connect to a cluster to execute the job.
-     * @throws ExecException
+     * Mapreduce mode will connect to a cluster to execute the job. If 
+     * execTypeString is not one of these two, Pig will deduce the ExecutionEngine
+     * if it is on the classpath and use it for the backend execution.
+     * @throws ExecException 
      * @throws IOException
      */
     public PigServer(String execTypeString) throws ExecException, IOException {
-        this(ExecType.fromString(execTypeString));
+        this(addExecTypeProperty(PropertiesUtil.loadDefaultProperties(), execTypeString));
+    }
+
+    public PigServer(Properties properties) throws ExecException, IOException {
+        this(new PigContext(properties));
+    }
+
+    private static Properties addExecTypeProperty(Properties properties, String execType) {
+        properties.setProperty("exectype", execType);
+        return properties;
     }
 
     /**
@@ -491,6 +495,11 @@ public class PigServer {
      * @throws IOException
      */
     public void registerJar(String name) throws IOException {
+        if (pigContext.hasJar(name)) {
+            log.debug("Ignoring duplicate registration for jar " + name);
+            return;
+        }
+
         // first try to locate jar via system resources
         // if this fails, try by using "name" as File (this preserves
         // compatibility with case when user passes absolute path or path
@@ -505,19 +514,18 @@ public class PigServer {
 
             if (resource == null) {
                 FetchFileRet[] files = FileLocalizer.fetchFiles(pigContext.getProperties(), name);
+                for (FetchFileRet file : files) {
+                    File f = file.file;
+                    if (!f.canRead()) {
+                        int errCode = 4002;
+                        String msg = "Can't read jar file: " + name;
+                        throw new FrontendException(msg, errCode, PigException.USER_ENVIRONMENT);
+                    }
 
-                for(FetchFileRet file : files) {
-                  File f = file.file;
-                  if (!f.canRead()) {
-                    int errCode = 4002;
-                    String msg = "Can't read jar file: " + name;
-                    throw new FrontendException(msg, errCode, PigException.USER_ENVIRONMENT);
-                  }
-
-                  pigContext.addJar(f.toURI().toURL());
+                    pigContext.addJar(f.toURI().toURL(), name);
                 }
             } else {
-              pigContext.addJar(resource);
+                pigContext.addJar(resource, name);
             }
         }
     }
@@ -531,7 +539,15 @@ public class PigServer {
      * @throws IOException
      */
     public void registerCode(String path, String scriptingLang, String namespace)
-    throws IOException {
+                             throws IOException {
+        if (pigContext.scriptingUDFs.containsKey(path) &&
+            pigContext.scriptingUDFs.get(path).equals(namespace)) {
+            log.debug("Ignoring duplicate registration for scripting udf file " + path + " in namespace " + namespace);
+            return;
+        } else {
+            pigContext.scriptingUDFs.put(path, namespace);
+        }
+
         File f = FileLocalizer.fetchFile(pigContext.getProperties(), path).file;
         if (!f.canRead()) {
             int errCode = 4002;
@@ -562,7 +578,7 @@ public class PigServer {
      * @throws IOException
      */
     public void registerQuery(String query, int startLine) throws IOException {
-        currDAG.registerQuery(query, startLine, validateEachStatement);
+        currDAG.registerQuery(query, startLine, validateEachStatement, skipParseInRegisterForBatch);
     }
 
     /**
@@ -632,7 +648,7 @@ public class PigServer {
      */
     public void registerScript(InputStream in, Map<String,String> params,List<String> paramsFiles) throws IOException {
         try {
-            String substituted = doParamSubstitution(in, params, paramsFiles);
+            String substituted = pigContext.doParamSubstitution(in, paramMapToList(params), paramsFiles);
             GruntParser grunt = new GruntParser(new StringReader(substituted));
             grunt.setInteractive(false);
             grunt.setParams(this);
@@ -643,39 +659,14 @@ public class PigServer {
         }
     }
 
-    /**
-     * Do parameter substitution.
-     * @param in The InputStream of file containing Pig Latin to do substitution on.
-     * @param params Parameters to use to substitute
-     * @param paramsFiles Files to use to do substitution.
-     * @return String containing Pig Latin with substitutions done
-     * @throws IOException
-     */
-    protected String doParamSubstitution(InputStream in,
-                                         Map<String,String> params,
-                                         List<String> paramsFiles) throws IOException {
-        // transform the map type to list type which can been accepted by ParameterSubstitutionPreprocessor
+    protected List<String> paramMapToList(Map<String, String> params) {
         List<String> paramList = new ArrayList<String>();
         if (params != null) {
             for (Map.Entry<String, String> entry : params.entrySet()) {
                 paramList.add(entry.getKey() + "=" + entry.getValue());
-             }
+            }
         }
-
-        // do parameter substitution
-        try {
-            ParameterSubstitutionPreprocessor psp = new ParameterSubstitutionPreprocessor(50);
-            StringWriter writer = new StringWriter();
-            psp.genSubstitutedFile(new BufferedReader(new InputStreamReader(in)),
-                                   writer,
-                                   paramList.size() > 0 ? paramList.toArray(new String[0]) : null,
-                                   paramsFiles!=null ? paramsFiles.toArray(new String[0]) : null);
-
-            return writer.toString();
-        } catch (org.apache.pig.tools.parameters.ParseException e) {
-            log.error(e.getLocalizedMessage());
-            throw new IOException(e.getCause());
-        }
+        return paramList;
     }
 
     /**
@@ -863,6 +854,10 @@ public class PigServer {
      */
     public Iterator<Tuple> openIterator(String id) throws IOException {
         try {
+            pigContext.getProperties().setProperty( PigContext.JOB_NAME, jobName );
+            if( jobPriority != null ) {
+                pigContext.getProperties().setProperty( PigContext.JOB_PRIORITY, jobPriority );
+            }
             ExecJob job = store(id, FileLocalizer.getTemporaryPath(pigContext)
                     .toString(), Utils.getTmpFileCompressorName(pigContext)
                     + "()");
@@ -1004,7 +999,7 @@ public class PigServer {
      */
     public void explain(String alias,
                         PrintStream stream) throws IOException {
-        explain(alias, "text", true, false, stream, stream, stream);
+        explain(alias, "text", true, false, stream, stream, null, null);
     }
 
     /**
@@ -1018,8 +1013,9 @@ public class PigServer {
      * call to execute in the respoect that all the pending stores are
      * marked as complete.
      * @param lps Stream to print the logical tree
-     * @param pps Stream to print the physical tree
-     * @param eps Stream to print the execution tree
+     * @param eps Stream to print the ExecutionEngine trees. If null, then will print to files
+     * @param dir Directory to print ExecutionEngine trees. If null, will use eps
+     * @param suffix Suffix of file names 
      * @throws IOException if the requested alias cannot be found.
      */
     @SuppressWarnings("unchecked")
@@ -1028,26 +1024,33 @@ public class PigServer {
                         boolean verbose,
                         boolean markAsExecute,
                         PrintStream lps,
-                        PrintStream pps,
-                        PrintStream eps) throws IOException {
+                        PrintStream eps,
+                        File dir,
+                        String suffix) throws IOException {
         try {
             pigContext.inExplain = true;
             buildStorePlan( alias );
-            if( currDAG.lp.size() == 0 ) {
-                lps.println("Logical plan is empty.");
-                pps.println("Physical plan is empty.");
-                eps.println("Execution plan is empty.");
-                return;
+            
+            //Only add root xml node if all plans are being written to same stream.
+            if (format == "xml" && lps == eps) {
+                lps.println("<plan>");
             }
-            PhysicalPlan pp = compilePp();
+
             currDAG.lp.explain(lps, format, verbose);
 
-            pp.explain(pps, format, verbose);
+            if( currDAG.lp.size() == 0 ) {
+                if (format == "xml" && lps == eps) {
+                    lps.println("</plan>");
+                }
+                return;
+            }
 
-            MapRedUtil.checkLeafIsStore(pp, pigContext);
-            MapReduceLauncher launcher = new MapReduceLauncher();
-            launcher.explain(pp, pigContext, eps, format, verbose);
+            pigContext.getExecutionEngine().explain(currDAG.lp, pigContext, eps, format, verbose, dir, suffix );
 
+            if (format.equals("xml") && lps == eps) {
+                lps.println("</plan>");
+            }
+            
             if (markAsExecute) {
                 currDAG.markAsExecuted();
             }
@@ -1070,7 +1073,7 @@ public class PigServer {
      * @throws IOException
      */
     public long capacity() throws IOException {
-        if (pigContext.getExecType() == ExecType.LOCAL) {
+        if (pigContext.getExecType().isLocal()) {
             throw new IOException("capacity only supported for non-local execution");
         }
         else {
@@ -1199,9 +1202,9 @@ public class PigServer {
      */
     public void shutdown() {
         // clean-up activities
-            // TODO: reclaim scope to free up resources. Currently
+        // TODO: reclaim scope to free up resources. Currently
         // this is not implemented and throws an exception
-            // hence, for now, we won't call it.
+        // hence, for now, we won't call it.
         //
         // pigContext.getExecutionEngine().reclaimScope(this.scope);
 
@@ -1302,9 +1305,8 @@ public class PigServer {
     private PigStats executeCompiledLogicalPlan() throws ExecException, FrontendException {
         // discover pig features used in this script
         ScriptState.get().setScriptFeatures( currDAG.lp );
-        PhysicalPlan pp = compilePp();
 
-        return launchPlan(pp, "job_pigexec_");
+        return launchPlan(currDAG.lp, "job_pigexec_");
     }
 
     /**
@@ -1315,52 +1317,23 @@ public class PigServer {
      * @throws ExecException
      * @throws FrontendException
      */
-    protected PigStats launchPlan(PhysicalPlan pp, String jobName) throws ExecException, FrontendException {
-        MapReduceLauncher launcher = new MapReduceLauncher();
+    protected PigStats launchPlan(LogicalPlan lp, String jobName) throws ExecException, FrontendException {
+
         PigStats stats = null;
         try {
-            stats = launcher.launchPig(pp, jobName, pigContext);
+            stats = pigContext.getExecutionEngine().launchPig(lp, jobName, pigContext);
+        } catch (ExecException e) {
+            throw (ExecException) e;
+        } catch (FrontendException e) {
+            throw (FrontendException) e;
         } catch (Exception e) {
             // There are a lot of exceptions thrown by the launcher.  If this
             // is an ExecException, just let it through.  Else wrap it.
-            if (e instanceof ExecException){
-                throw (ExecException)e;
-            } else if (e instanceof FrontendException) {
-                throw (FrontendException)e;
-            } else {
-                int errCode = 2043;
-                String msg = "Unexpected error during execution.";
-                throw new ExecException(msg, errCode, PigException.BUG, e);
-            }
-        } finally {
-            launcher.reset();
+            int errCode = 2043;
+            String msg = "Unexpected error during execution.";
+            throw new ExecException(msg, errCode, PigException.BUG, e);
         }
 
-        for (OutputStats output : stats.getOutputStats()) {
-            if (!output.isSuccessful()) {
-                POStore store = output.getPOStore();
-                try {
-                    store.getStoreFunc().cleanupOnFailure(
-                            store.getSFile().getFileName(),
-                            new Job(output.getConf()));
-                } catch (IOException e) {
-                    throw new ExecException(e);
-                }
-            } else {
-                POStore store = output.getPOStore();
-                try {
-                    store.getStoreFunc().cleanupOnSuccess(
-                            store.getSFile().getFileName(),
-                            new Job(output.getConf()));
-                } catch (IOException e) {
-                    throw new ExecException(e);
-                } catch (AbstractMethodError nsme) {
-                    // Just swallow it.  This means we're running against an
-                    // older instance of a StoreFunc that doesn't implement
-                    // this method.
-                }
-            }
-        }
         return stats;
     }
 
@@ -1375,11 +1348,6 @@ public class PigServer {
         return currDAG.lp;
     }
 
-    private PhysicalPlan compilePp() throws FrontendException {
-        // translate lp to physical plan
-        return pigContext.getExecutionEngine().compile( currDAG.lp, null );
-    }
-
     private LogicalRelationalOperator getOperatorForAlias(String alias) throws IOException {
         buildStorePlan (alias);
         LogicalRelationalOperator op = (LogicalRelationalOperator)currDAG.getOperator( alias );
@@ -1389,6 +1357,18 @@ public class PigServer {
             throw new FrontendException(msg, errCode, PigException.INPUT, false, null);
         }
         return op;
+    }
+    
+    /**
+     * Returns data associated with LogicalPlan. It makes
+     * sense to call this method only after a query/script
+     * has been registered with one of the {@link #registerQuery(String)}
+     * or {@link #registerScript(InputStream)} methods.
+     * 
+     * @return LogicalPlanData
+     */
+    public LogicalPlanData getLogicalPlanData() {
+	return new LogicalPlanData(currDAG.lp);
     }
 
     /*
@@ -1579,8 +1559,8 @@ public class PigServer {
          * Accumulate the given statement to previous query statements and generate
          * an overall (raw) plan.
          */
-        void registerQuery(String query, int startLine, boolean validateEachStatement)
-        throws IOException {
+        void registerQuery(String query, int startLine, boolean validateEachStatement,
+                boolean skipParseForBatch) throws IOException {
             if( batchMode ) {
                 if( startLine == currentLineNum ) {
                     String line = scriptCache.remove( scriptCache.size() - 1 );
@@ -1597,6 +1577,9 @@ public class PigServer {
                         currentLineNum++;
                         line = br.readLine();
                     }
+                }
+                if (skipParseForBatch) {
+                    return;
                 }
             } else {
                 scriptCache.add( query );
@@ -1667,7 +1650,12 @@ public class PigServer {
                 int errCode = 1000;
                 String msg = "Error during parsing. "
                         + (pe == null ? ex.getMessage() : pe.getMessage());
-                throw new FrontendException (msg, errCode, PigException.INPUT , ex );
+                log.error("exception during parsing: " + msg, ex);
+                if (null == pe) {
+                    throw new FrontendException (msg, errCode, PigException.INPUT , ex);
+                } else {
+                    throw new FrontendException (msg, errCode, PigException.INPUT , ex, pe.getSourceLocation() );
+                }
             }
         }
 
@@ -1815,7 +1803,7 @@ public class PigServer {
                     // TODO: Need to figure out if anything different needs to happen if batch
                     // mode is not on
                     // Don't have to do the validation again, so set validateEachStatement param to false
-                    graph.registerQuery(it.next(), lineNumber, false);
+                    graph.registerQuery(it.next(), lineNumber, false, false);
                 }
                 graph.postProcess();
             } catch (IOException ioe) {
@@ -1834,6 +1822,14 @@ public class PigServer {
      */
     public void setValidateEachStatement(boolean validateEachStatement) {
         this.validateEachStatement = validateEachStatement;
+    }
+
+    /**
+     * Set whether to skip parsing while registering the query in batch mode
+     * @param skipParseInRegisterForBatch
+     */
+    public void setSkipParseInRegisterForBatch(boolean skipParseInRegisterForBatch) {
+        this.skipParseInRegisterForBatch = skipParseInRegisterForBatch;
     }
 
     public String getLastRel() {

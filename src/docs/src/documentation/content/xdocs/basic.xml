@@ -132,7 +132,7 @@
    <table>
          <tr>
             <td> <p>-- A </p> </td>
-            <td> <p>and, any, all, arrange, as, asc, AVG</p> </td>
+            <td> <p>assert, and, any, all, arrange, as, asc, AVG</p> </td>
          </tr>      
       
          <tr>
@@ -142,12 +142,12 @@
 
          <tr>
             <td> <p>-- C </p> </td>
-            <td> <p>cache, cat, cd, chararray, cogroup, CONCAT, copyFromLocal, copyToLocal, COUNT, cp, cross</p> </td>
+            <td> <p>cache, CASE, cat, cd, chararray, cogroup, CONCAT, copyFromLocal, copyToLocal, COUNT, cp, cross</p> </td>
          </tr>
          
          <tr>
             <td> <p>-- D </p> </td>
-            <td> <p>datetime, %declare, %default, define, desc, describe, DIFF, distinct, double, du, dump</p> </td>
+            <td> <p>datetime, %declare, %default, define, dense, desc, describe, DIFF, distinct, double, du, dump</p> </td>
          </tr>  
          
          <tr>
@@ -217,7 +217,7 @@
          
          <tr>
             <td> <p>-- R </p> </td>
-            <td> <p>register, right, rm, rmf, run, RANK</p> </td>
+            <td> <p>register, returns, right, rm, rmf, rollup, run</p> </td>
          </tr>  
 
          <tr>
@@ -237,7 +237,7 @@
 
          <tr>
             <td> <p>-- V, W, X, Y, Z </p> </td>
-            <td> <p> </p> </td>
+            <td> <p>void</p> </td>
          </tr>  
             
    </table>
@@ -612,6 +612,28 @@ DUMP X;
          </tr>
          <tr>
             <td>
+               <p>biginteger</p>
+            </td>
+            <td>
+               <p>Java BigInteger</p>
+            </td>
+            <td>
+               <p>200000000000</p>
+            </td>
+         </tr>
+         <tr>
+            <td>
+               <p>bigdecimal</p>
+            </td>
+            <td>
+               <p>Java BigDecimal</p>
+            </td>
+            <td>
+               <p>33.456783321323441233442</p>
+            </td>
+         </tr>
+         <tr>
+            <td>
                <p><strong>Complex Types</strong></p>
             </td>
             <td>
@@ -953,6 +975,7 @@ DUMP X;
                <p> + , -, *, /</p>
                <p>% modulo</p>
                <p>? : bincond</p>
+               <p>CASE : case</p>
             </td>
             <td>
                <p>If either subexpression is null, the resulting expression is null.</p>
@@ -1646,7 +1669,7 @@ X = FOREACH A GENERATE f1 as user, f2 as age, f3 as gpa;
      <!-- ++++++++++++++++++++++++++++++++++ -->  
    <section  id="schema-simple">
    <title>Schemas for Simple Data Types</title>
-   <p>Simple data types include int, long, float, double, chararray, bytearray, boolean and datetime.</p>
+   <p>Simple data types include int, long, float, double, chararray, bytearray, boolean, datetime, biginteger and bigdecimal.</p>
    
    <section>
    <title>Syntax</title>
@@ -2113,6 +2136,21 @@ d = foreach @ generate x;
                <p>Use expressions  only (relational operators are not allowed).</p>
             </td>
           </tr>
+         <tr>
+            <td>
+               <p>case</p>
+            </td>
+            <td>
+               <p>CASE WHEN THEN ELSE END</p>
+            </td>
+            <td>
+               <p>CASE expression [ WHEN value THEN value ]+ [ ELSE value ]? END</p>
+               <p>CASE [ WHEN condition THEN value ]+ [ ELSE value ]? END</p>
+               <p>Case operator is equivalent to nested bincond operators.</p> 
+               <p>The schemas for all the outputs of the when/else branches should match.</p>
+               <p>Use expressions only (relational operators are not allowed).</p>
+            </td>
+          </tr>
    </table>
 
    <section>
@@ -2145,6 +2183,34 @@ DUMP X;
 (1,1L)
 (3,2L)
 (6,3L)
+</source>
+
+   <p>In this example the case operator is used with field f2. The expression is "f2 % 2"; if the expression is equal to 0, return 'even'; if the expression is equal to 1, return 'odd'.</p>
+<source>
+X = FOREACH A GENERATE f2, (
+  CASE f2 % 2
+    WHEN 0 THEN 'even'
+    WHEN 1 THEN 'odd'
+  END
+);
+DUMP X;
+(1,odd)
+(3,odd)
+(6,even)
+</source>
+
+   <p>This can be also written as follows:</p>
+<source>
+X = FOREACH A GENERATE f2, (
+  CASE
+    WHEN f2 % 2 == 0 THEN 'even'
+    WHEN f2 % 2 == 1 THEN 'odd'
+  END
+);
+DUMP X;
+(1,odd)
+(3,odd)
+(6,even)
 </source>
    </section>
    
@@ -2906,6 +2972,17 @@ DUMP X;
          </tr>
          <tr>
             <td>
+               <p>IN</p>
+            </td>
+            <td>
+               <p>in</p>
+            </td>
+            <td>
+               <p>IN operator is equivalent to nested OR operators.</p>
+            </td>
+         </tr>
+         <tr>
+            <td>
                <p>NOT</p>
             </td>
             <td>
@@ -2921,7 +2998,7 @@ DUMP X;
    <section>
    <title>Example</title>
 <source>
-X = FILTER A BY (f1==8) OR (NOT (f2+f3 > f1));
+X = FILTER A BY (f1==8) OR (NOT (f2+f3 > f1)) OR (f1 IN (9, 10, 11));
 </source>
    
    </section></section></section>   
@@ -3710,10 +3787,22 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>datetime </p>
             </td>
+            <td>
+               <p>biginteger </p>
+            </td>
+            <td>
+               <p>bigdecimal </p>
+            </td>
          </tr>
          <tr>
             <td>
                <p>bag </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
             </td>
             <td>
                <p>error </p>
@@ -3787,6 +3876,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
@@ -3801,6 +3896,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>boolean </p>
                <p>(see Note 2)</p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
             </td>
             <td>
                <p>error </p>
@@ -3864,6 +3965,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
@@ -3897,6 +4004,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
                <p>cast as boolean </p>
             </td>
              <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
                <p>error </p>
             </td>
             <td>
@@ -3940,6 +4053,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
@@ -3971,6 +4090,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             </td>
             <td>
                <p>cast as boolean  </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
             </td>
             <td>
                <p>error </p>
@@ -4016,6 +4141,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
@@ -4054,6 +4185,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
@@ -4092,10 +4229,110 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
                <p>datetime </p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p>boolean</p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+         </tr>
+         <tr>
+            <td>
+               <p>biginteger </p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p>boolean</p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+         </tr>
+         <tr>
+            <td>
+               <p>bigdecimal </p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
             </td>
             <td>
                <p></p>
@@ -4177,10 +4414,22 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>datetime </p>
             </td>
+            <td>
+               <p>biginteger </p>
+            </td>
+            <td>
+               <p>bigdecimal </p>
+            </td>
          </tr>
          <tr>
             <td>
                <p>bag </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
             </td>
             <td>
                <p>error </p>
@@ -4253,6 +4502,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
@@ -4263,6 +4518,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             </td>
             <td>
                <p></p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
             </td>
             <td>
                <p>error </p>
@@ -4329,6 +4590,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
@@ -4360,6 +4627,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             </td>
             <td>
                <p>boolean (bytearray cast as long) </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
             </td>
             <td>
                <p>error </p>
@@ -4405,6 +4678,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
@@ -4436,6 +4715,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             </td>
             <td>
                <p>boolean (bytearray cast as double) </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
             </td>
             <td>
                <p>error </p>
@@ -4481,6 +4766,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
@@ -4519,6 +4810,12 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
@@ -4557,10 +4854,110 @@ X = FILTER A BY (f1 matches '.*apache.*');
             <td>
                <p>error </p>
             </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
          </tr>
          <tr>
             <td>
+               <p>datetime</p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
                <p>boolean </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+         </tr>
+         <tr>
+            <td>
+               <p>biginteger</p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p>boolean </p>
+            </td>
+            <td>
+               <p>error </p>
+            </td>
+         </tr>
+                  <tr>
+            <td>
+               <p>bigdecimal</p>
+            </td>
+            <td>
+               <p></p>
+            </td>
+            <td>
+               <p></p>
             </td>
             <td>
                <p></p>
@@ -5221,6 +5618,22 @@ B = FOREACH A GENERATE -x, y;
                <p>error </p>
             </td>
          </tr>
+         <tr>
+            <td>
+               <p>biginteger </p>
+            </td>
+            <td>
+               <p>biginteger </p>
+            </td>
+         </tr>
+         <tr>
+            <td>
+               <p>bigdecimal </p>
+            </td>
+            <td>
+               <p>bigdecimal </p>
+            </td>
+         </tr>
    </table>
    </section>
   
@@ -5231,6 +5644,87 @@ B = FOREACH A GENERATE -x, y;
 <!-- RELATIONAL OPERATORS, ETC -->
 <section>
 <title>Relational Operators</title>
+
+<!-- =================================================================== -->
+   <section id="assert">
+   <title>ASSERT</title>
+   <p>Assert a condition on the data.</p>
+
+   <section>
+   <title>Syntax</title>
+   <table>
+       <tr>
+            <td>
+               <p>ASSERT alias BY expression [message];</p>
+            </td>
+        </tr>
+   </table>
+   </section>
+
+   <section>
+   <title>Terms</title>
+   <table>
+      <tr>
+            <td>
+               <p>alias</p>
+            </td>
+            <td>
+               <p>The name of the relation.</p>
+            </td>
+         </tr>
+         <tr>
+            <td>
+               <p>BY</p>
+            </td>
+            <td>
+               <p>Required keyword.</p>
+            </td>
+         </tr>
+         <tr>
+            <td>
+               <p>expression</p>
+            </td>
+            <td>
+               <p>A boolean expression.</p>
+            </td>
+         </tr>
+         <tr>
+            <td>
+               <p>message</p>
+            </td>
+            <td>
+               <p>Error message when assertion fails.</p>
+            </td>
+         </tr>
+   </table>
+   </section>
+
+   <section>
+     <title>Usage</title>
+     <p>Use assert to ensure a condition is true on your data. Processing fails if any of the records voilate the condition.</p>
+   </section>
+
+   <section>
+   <title>Examples</title>
+   <p>Suppose we have relation A.</p>
+<source>
+A = LOAD 'data' AS (a0:int,a1:int,a2:int);
+
+DUMP A;
+(1,2,3)
+(4,2,1)
+(8,3,4)
+(4,3,3)
+(7,2,5)
+(8,4,3)
+</source>
+
+<p>Now, you can assert that a0 column in your data is >0, fail if otherwise</p>
+<source>
+ASSERT A by a0 > 0 'a0 should be greater than 0';
+</source>
+
+</section></section>
 
 <!-- =================================================================== -->
  <section id="cogroup">

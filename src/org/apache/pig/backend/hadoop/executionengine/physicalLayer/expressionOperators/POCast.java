@@ -53,7 +53,6 @@ import org.apache.pig.impl.plan.VisitorException;
 import org.apache.pig.impl.util.CastUtils;
 import org.apache.pig.impl.util.LogUtils;
 import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
 
 /**
  * This is just a cast that converts DataByteArray into either String or
@@ -1071,15 +1070,9 @@ public class POCast extends ExpressionOperator {
             return in.getNextDateTime();
 
         case DataType.CHARARRAY: {
-            String str = null;
             Result res = in.getNextString();
             if (res.returnStatus == POStatus.STATUS_OK && res.result != null) {
-                DateTimeZone dtz = ToDate.extractDateTimeZone((String) res.result);
-                if (dtz == null) {
-                    res.result = new DateTime((String) res.result);
-                } else {
-                    res.result = new DateTime((String) res.result, dtz);
-                }
+                res.result = ToDate.extractDateTime((String) res.result);
             }
             return res;
         }
@@ -1391,14 +1384,7 @@ public class POCast extends ExpressionOperator {
                     result = obj;
             } else if (obj instanceof DataByteArray) {
                 if (null != caster) {
-                    try {
-                        result = caster.bytesToMap(((DataByteArray)obj).get(), fs);
-                    }  catch(AbstractMethodError e) {
-                        // this is for backward compatibility wherein some old LoadCaster
-                        // which does not implement bytesToMap(byte[] b, ResourceFieldSchema fieldSchema)
-                        // In this case, we only cast bytes to map, but leave the value as bytearray
-                        result = caster.bytesToMap(((DataByteArray)obj).get());
-                    }
+                    result = caster.bytesToMap(((DataByteArray)obj).get(), fs);
                 } else {
                     int errCode = 1075;
                     String msg = "Received a bytearray from the UDF. Cannot determine how to convert the bytearray to tuple.";
@@ -1658,12 +1644,7 @@ public class POCast extends ExpressionOperator {
                 result = (DateTime)obj;
                 break;
             case DataType.CHARARRAY:
-                DateTimeZone dtz = ToDate.extractDateTimeZone((String) obj);
-                if (dtz == null) {
-                    result = new DateTime((String) obj);
-                } else {
-                    result = new DateTime((String) obj, dtz);
-                }
+                result = ToDate.extractDateTime((String) obj);
                 break;
             case DataType.BIGINTEGER:
                 result = new DateTime(((BigInteger)obj).longValue());
@@ -1967,14 +1948,7 @@ public class POCast extends ExpressionOperator {
                 }
                 try {
                     if (null != caster) {
-                        try {
-                            res.result = caster.bytesToMap(dba.get(), fieldSchema);
-                        } catch(AbstractMethodError e) {
-                            // this is for backward compatibility wherein some old LoadCaster
-                            // which does not implement bytesToMap(byte[] b, ResourceFieldSchema fieldSchema)
-                            // In this case, we only cast bytes to map, but leave the value as bytearray
-                            res.result = caster.bytesToMap(dba.get());
-                        }
+                        res.result = caster.bytesToMap(dba.get(), fieldSchema);
                     } else {
                         int errCode = 1075;
                         String msg = "Received a bytearray from the UDF. Cannot determine how to convert the bytearray to map.";

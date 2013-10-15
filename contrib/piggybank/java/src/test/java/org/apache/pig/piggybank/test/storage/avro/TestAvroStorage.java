@@ -16,6 +16,10 @@
  */
 package org.apache.pig.piggybank.test.storage.avro;
 
+import static org.apache.pig.builtin.mock.Storage.resetData;
+import static org.apache.pig.builtin.mock.Storage.schema;
+import static org.apache.pig.builtin.mock.Storage.tuple;
+
 import org.apache.avro.file.DataFileStream;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.commons.logging.Log;
@@ -33,6 +37,8 @@ import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.executionengine.ExecJob;
 import org.apache.pig.backend.executionengine.ExecJob.JOB_STATUS;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.JobCreationException;
+import org.apache.pig.builtin.mock.Storage.Data;
+import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.piggybank.storage.avro.AvroStorage;
@@ -180,7 +186,9 @@ public class TestAvroStorage {
     final private String testCorruptedFile = getInputFile("test_corrupted_file.avro");
     final private String testMultipleSchemas1File = getInputFile("test_primitive_types/*");
     final private String testMultipleSchemas2File = getInputFile("test_complex_types/*");
+    final private String testMultipleSchemasWithDefaultValue = getInputFile("test_merge_schemas_default/{Employee{3,4,6}.avro}");
     final private String testUserDefinedLoadSchemaFile = getInputFile("test_user_defined_load_schema/*");
+    final private String testLoadwithNullValues = getInputFile("test_loadavrowithnulls.avro");
 
     @BeforeClass
     public static void setup() throws ExecException, IOException {
@@ -615,6 +623,127 @@ public class TestAvroStorage {
             " o = ORDER in BY name;",
             " STORE o INTO '" + output + "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ();" 
            };
+        testAvroStorage(queries);
+        verifyResults(output, expected);
+    }
+
+    @Test
+    public void testMultipleSchemasWithDefaultValue() throws IOException {
+        //        ==> Employee3.avro <==
+        //            {
+        //            "type" : "record",
+        //            "name" : "employee",
+        //            "fields":[
+        //                    {"name" : "name", "type" : "string", "default" : "NU"},
+        //                    {"name" : "age", "type" : "int", "default" : 0 },
+        //                    {"name" : "dept", "type": "string", "default" : "DU"} ] }
+        //
+        //            ==> Employee4.avro <==
+        //            {
+        //            "type" : "record",
+        //            "name" : "employee",
+        //            "fields":[
+        //                    {"name" : "name", "type" : "string", "default" : "NU"},
+        //                    {"name" : "age", "type" : "int", "default" : 0},
+        //                    {"name" : "dept", "type": "string", "default" : "DU"},
+        //                    {"name" : "office", "type": "string", "default" : "OU"} ] }
+        //
+        //            ==> Employee6.avro <==
+        //            {
+        //            "type" : "record",
+        //            "name" : "employee",
+        //            "fields":[
+        //                    {"name" : "name", "type" : "string", "default" : "NU"},
+        //                    {"name" : "lastname", "type": "string", "default" : "LNU"},
+        //                    {"name" : "age", "type" : "int","default" : 0},
+        //                    {"name" : "salary", "type": "int", "default" : 0},
+        //                    {"name" : "dept", "type": "string","default" : "DU"},
+        //                    {"name" : "office", "type": "string","default" : "OU"} ] }
+        // The relation 'in' looks like this: (order of rows can be different.)
+        // Avro file stored after processing looks like this:
+        // The relation 'in' looks like this: (order of rows can be different.)
+        //      Employee3.avro
+        //        (Milo,30,DH)
+        //        (Asmya,34,PQ)
+        //        (Baljit,23,RS)
+        //
+        //      Employee4.avro
+        //        (Praj,54,RMX,Champaign)
+        //        (Buba,767,HD,Sunnyvale)
+        //        (Manku,375,MS,New York)
+        //
+        //      Employee6.avro
+        //        (Pune,Warriors,60,5466,Astrophysics,UTA)
+        //        (Rajsathan,Royals,20,1378,Biochemistry,Stanford)
+        //        (Chennai,Superkings,50,7338,Microbiology,Hopkins)
+        //        (Mumbai,Indians,20,4468,Applied Math,UAH)
+
+        // Data file stored after without looks like this with the
+        // following schema and data
+        // {name: chararray,age: int,dept: chararray,office: chararray,
+        // lastname: chararray,salary: int}
+        //(Asmya,34,PQ,OU,LNU,0)
+        //(Baljit,23,RS,OU,LNU,0)
+        //(Buba,767,HD,Sunnyvale,LNU,0)
+        //(Chennai,50,Microbiology,Hopkins,Superkings,7338)
+        //(Manku,375,MS,New York,LNU,0)
+        //(Milo,30,DH,OU,LNU,0)
+        //(Mumbai,20,Applied Math,UAH,Indians,4468)
+        //(Praj,54,RMX,Champaign,LNU,0)
+        //(Pune,60,Astrophysics,UTA,Warriors,5466)
+        //(Rajsathan,20,Biochemistry,Stanford,Royals,1378)
+
+        Data data = resetData(pigServerLocal);
+        String output= outbasedir + "testMultipleSchemasWithDefaultValue";
+        deleteDirectory(new File(output));
+        String expected = basedir + "expected_testMultipleSchemasWithDefaultValue.avro";
+        String [] queries = {
+          " a = LOAD '" + testMultipleSchemasWithDefaultValue +
+              "' USING org.apache.pig.piggybank.storage.avro.AvroStorage ('multiple_schemas');",
+          " b = foreach a generate name,age,dept,office,lastname,salary;",
+          " c = filter b by age < 40 ;",
+          " d = order c by  name;",
+          " STORE d INTO '" + output+ "' using mock.Storage();"
+           };
+        testAvroStorage(queries);
+        List<Tuple> out = data.get(output);
+        assertEquals(out + " size", 5, out.size());
+        assertEquals(
+               schema("name: chararray,age: int,dept: chararray,office: chararray,lastname: chararray,salary: int"),
+                data.getSchema(output));
+        assertEquals(tuple("Asmya", 34, "PQ", "OU", "LNU", 0), out.get(0));
+        assertEquals(tuple("Baljit", 23, "RS", "OU", "LNU", 0), out.get(1));
+        assertEquals(tuple("Milo", 30, "DH", "OU", "LNU", 0), out.get(2));
+        assertEquals(tuple("Mumbai", 20, "Applied Math", "UAH", "Indians", 4468), out.get(3));
+        assertEquals(tuple("Rajsathan", 20, "Biochemistry", "Stanford", "Royals", 1378), out.get(4));
+    }
+
+    @Test
+    // Verify the default values specified in the schema in AvroStorage
+    // are actually written to the schema in the output avro file
+    public void testDefaultValueSchemaWrite() throws IOException {
+        String output = outbasedir + "testDefaultValueSchemaWrite";
+        String expected = basedir + "expected_testDefaultSchemaWrite.avro";
+        Data data = resetData(pigServerLocal);
+              data.set("testDefaultValueSchemaWrite",
+                tuple(0,115,115000,115000.1),
+                tuple(1,116,116000,116000.1),
+                tuple(2,117,117000,117000.1),
+                tuple(3,118,118000,118000.1),
+                tuple(4,119,119000,119000.1)
+                );
+        deleteDirectory(new File(output));
+        String [] queries = {
+            " a = LOAD 'testDefaultValueSchemaWrite' USING mock.Storage as  " +
+            " (id: int, intval:int, longval:long, floatval:float);",
+            " b = foreach a generate id, longval, floatval;",
+            " c = order b by id;",
+            " STORE c INTO '" + output + "' USING "+
+            " org.apache.pig.piggybank.storage.avro.AvroStorage (' { \"debug\" : 5, \"schema\" : "+
+            " {  \"name\" : \"rmyrecord\", \"type\" : \"record\",  \"fields\" : [ { \"name\" : \"id\", "+
+            " \"type\" : \"int\" , \"default\" : 0 }, {  \"name\" : \"longval\",  \"type\" : \"long\","+
+            " \"default\" : 0 }, { \"name\" : \"floatval\", \"type\" : \"float\", \"default\" : 1.0 } ] } } " +
+            " ');" };
         testAvroStorage(queries);
         verifyResults(output, expected);
     }
@@ -1075,6 +1204,39 @@ public class TestAvroStorage {
         verifyResults(output, expected);
     }
 
+    @Test
+    // Schema for the generated avro file test_loadavrowithnulls.avro
+    // ["null",{"type":"record","name":"TUPLE_0",
+    // "fields":[
+    // {"name":"name","type":["null","string"],"doc":"autogenerated from Pig Field Schema"},
+    // {"name":"age","type":["null","int"],"doc":"autogenerated from Pig Field Schema"},
+    // {"name":"gpa","type":["null","double"],"doc":"autogenerated from Pig Field Schema"}]}]
+    public void testLoadwithNullValues() throws IOException {
+    //Input is supposed to have empty tuples
+    PigSchema2Avro.setTupleIndex(0);
+    Data data = resetData(pigServerLocal);
+    String output = outbasedir + "testLoadwithNulls";
+    deleteDirectory(new File(output));
+    String [] queries = {
+       " A = load '" +  testLoadwithNullValues + "' USING " +
+          " org.apache.pig.piggybank.storage.avro.AvroStorage(); ",
+       " B = order A by name;",
+       " store B into '" +  output +"' USING mock.Storage();"
+       };
+    testAvroStorage(queries);
+    List<Tuple> out = data.get(output);
+    assertEquals(out + " size", 4, out.size());
+
+    assertEquals(schema("name:chararray,age:int,gpa:double"), data.getSchema(output));
+
+    // sorted data ordered by name
+    assertEquals(tuple((String)null),out.get(0));
+    assertEquals(tuple((String)null),out.get(1));
+    assertEquals(tuple("calvin ellison", 24, 0.71), out.get(2));
+    assertEquals(tuple("wendy johnson", 60, 0.07), out.get(3));
+
+   }
+
     private static void deleteDirectory (File path) {
         if ( path.exists()) {
             File [] files = path.listFiles();
@@ -1115,9 +1277,6 @@ public class TestAvroStorage {
     }
 
     private void verifyResults(String outPath, String expectedOutpath, String expectedCodec) throws IOException {
-        // Seems compress for Avro is broken in 23. Skip this test and open Jira PIG-
-        if (Util.isHadoop23())
-            return;
 
         FileSystem fs = FileSystem.getLocal(new Configuration()) ;
 

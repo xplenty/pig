@@ -31,7 +31,7 @@
     <property name="pigsmoke.pom" value="${basedir}/ivy/pigsmoke.pom" />
     <property name="pigunit.pom" value="${basedir}/ivy/pigunit.pom" />
     <property name="piggybank.pom" value="${basedir}/ivy/piggybank.pom" />
-    <property name="pig.version" value="0.12.0" />
+    <property name="pig.version" value="0.13.0" />
     <property name="pig.version.suffix" value="-SNAPSHOT" />
     <property name="version" value="${pig.version}${pig.version.suffix}" />
     <property name="final.name" value="${name}-${version}" />
@@ -40,6 +40,7 @@
     <!-- source properties -->
     <property name="lib.dir" value="${basedir}/lib" />
     <property name="src.dir" value="${basedir}/src" />
+    <property name="python.src.dir" value="${src.dir}/python" />
     <property name="src.lib.dir" value="${basedir}/lib-src" />
     <property name="src.gen.dir" value="${basedir}/src-gen" />
     <property name="docs.dir" value="${basedir}/src/docs" />
@@ -179,6 +180,17 @@
         <equals arg1="${hadoopversion}" arg2="23"/>
     </condition>
 
+    <!--
+      HBase master version
+      Denotes how the HBase dependencies are layout. Value "94" denotes older
+      format where all HBase code is present in one single jar, which is the
+      way HBase is available up to version 0.94. Value "95" denotes new format
+      where HBase is cut into multiple dependencies per each major subsystem,
+      e.g. "client", "server", ... . Only values "94" and "95" are supported
+      at the moment.
+    -->
+    <property name="hbaseversion" value="94" />
+
     <property name="src.shims.dir" value="${basedir}/shims/src/hadoop${hadoopversion}" />
     <property name="src.shims.test.dir" value="${basedir}/shims/test/hadoop${hadoopversion}" />
 
@@ -220,10 +232,10 @@
 
     <!-- jdiff properties -->
     <property name="jdiff.jar" value="${ivy.lib.dir}/jdiff-${jdiff.version}.jar"/>
-    <property name="xerces.jar" value="${ivy.lib.dir}/xerces-${xerces.version}.jar"/>
+    <property name="xerces.jar" value="${ivy.lib.dir}/xercesImpl-${xerces.version}.jar"/>
     <property name="jdiff.build.dir" value="${build.docs}/jdiff"/>
     <property name="jdiff.xml.dir" value="${lib.dir}/jdiff"/>
-    <property name="jdiff.stable" value="0.11.1"/>
+    <property name="jdiff.stable" value="0.12.0"/>
     <property name="jdiff.stable.javadoc" value="http://hadoop.apache.org/${name}/docs/r${jdiff.stable}/api/"/>
 
     <!-- Packaging properties -->
@@ -331,6 +343,11 @@
             <include name="guava-${guava.version}.jar"/>
             <include name="automaton-${automaton.version}.jar"/>
             <include name="jansi-${jansi.version}.jar"/>
+            <include name="avro-${avro.version}.jar"/>     
+            <include name="avro-mapred-${avro.version}.jar"/>     
+            <include name="trevni-core-${avro.version}.jar"/>     
+            <include name="trevni-avro-${avro.version}.jar"/>
+            <include name="snappy-java-${snappy.version}.jar"/>
             <include name="asm*.jar"/>
         </patternset>
     </fileset>
@@ -338,17 +355,21 @@
     <fileset dir="${ivy.lib.dir}" id="runtime.dependencies.jar">
         <patternset id="pattern.runtime.dependencies.jar">
             <patternset refid="pattern.runtime.dependencies-withouthadoop.jar"/>
-            <include name="hadoop-core-${hadoop-core.version}.jar"/>
-            <include name="hadoop-*-${hadoop-common.version}.jar"/>
+            <include name="hadoop-core-${hadoop-core.version}.jar" unless="isHadoop23"/>
+            <include name="hadoop-*-${hadoop-common.version}.jar" if="isHadoop23"/>
             <exclude name="hadoop-hdfs-${hadoop-hdfs.version}.jar"/>
             <include name="junit-${junit.version}.jar"/>
             <include name="jsch-${jsch.version}.jar"/>
             <include name="protobuf-java-${protobuf-java.version}.jar"/>
-            <include name="avro-${avro.version}.jar"/>
             <include name="commons*.jar"/>
             <include name="log4j*.jar"/>
             <include name="slf4j*.jar"/>
             <include name="jsp-api*.jar"/>
+            <include name="avro-${avro.version}.jar"/>
+            <include name="avro-mapred-${avro.version}.jar"/>    
+            <include name="trevni-core-${avro.version}.jar"/>    
+            <include name="trevni-avro-${avro.version}.jar"/>
+            <include name="snappy-java-${snappy.version}.jar"/>
             <include name="asm*.jar"/>
         </patternset>
     </fileset>
@@ -518,6 +539,9 @@
         <echo>*** Else, you will only be warned about deprecations ***</echo>
         <compileSources sources="${src.dir};${src.gen.dir};${src.lib.dir}/shock;${src.lib.dir}/bzip2;${src.shims.dir}"
             excludes="" dist="${build.classes}" cp="classpath" warnings="${javac.args.warnings}" />
+        <copy todir="${build.classes}/META-INF">
+            <fileset dir="${src.dir}/META-INF" includes="**"/>
+        </copy>
     </target>
 
     <target name="compile-test" depends="compile, ivy-test">
@@ -527,7 +551,6 @@
         <compileSources sources="${test.src.dir};${src.shims.test.dir}"
             excludes="**/PigTestLoader.java **/resources/** perf/**" dist="${test.build.classes}" cp="test.classpath" warnings="${javac.args.warnings}" />
         <copy file="${basedir}/test/hbase-site.xml" tofile="${test.build.classes}/hbase-site.xml"/>
-
         <ivy:cachepath pathid="mr-apps-test-ivy.classpath" conf="test" />
         <path id="mr-apps-test.classpath">
             <fileset dir="${clover.home}" erroronmissingdir="false">
@@ -561,6 +584,9 @@
             </javac>
             <copy file="${src.dir}/org/apache/pig/tools/grunt/autocomplete" todir="${build.classes}/org/apache/pig/tools/grunt"/>
             <copy file="${src.dir}/org/apache/pig/tools/grunt/autocomplete_aliases" todir="${build.classes}/org/apache/pig/tools/grunt"/>
+            <copy todir="${build.classes}/python">
+                <fileset dir="${python.src.dir}"/>
+            </copy>
         </sequential>
     </macrodef>
 
@@ -629,6 +655,7 @@
             </manifest>
             <fileset dir="${src.lib.dir}/shock"/>
             <fileset dir="${src.lib.dir}/bzip2"/>
+            <fileset dir="${python.src.dir}"/>
         </jar>
     </target>
     <target name="javadoc-jar" depends="cc-compile, javadoc">
@@ -966,6 +993,8 @@
         <copy todir="${tar.dist.dir}/conf" file="conf/pig.properties"/>
 
         <copy todir="${tar.dist.dir}/conf" file="conf/log4j.properties.template"/>
+
+        <copy todir="${tar.dist.dir}/conf" file="conf/test-log4j.properties"/>
 
         <copy todir="${tar.dist.dir}/src" includeEmptyDirs="true">
             <fileset dir="${src.dir}" />

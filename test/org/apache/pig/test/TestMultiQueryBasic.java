@@ -466,7 +466,7 @@ public class TestMultiQueryBasic {
         "F2  = FOREACH F GENERATE f0, f7, f8;" +
         "I = GROUP F2 BY (f7, f8);" +
         "STORE I into 'foo4'  using BinStorage();" +
-        "explain I;";
+        "explain;";
         myPig.setBatchOn();
         Util.registerMultiLineQuery(myPig, query);
         myPig.executeBatch();
@@ -576,6 +576,44 @@ public class TestMultiQueryBasic {
  
         Util.deleteFile(new PigContext(ExecType.LOCAL, new Properties()), "output1_checkOutputSpec_test");
         Util.deleteFile(new PigContext(ExecType.LOCAL, new Properties()), "output2_checkOutputSpec_test");
+    }
+
+    /**
+     * Test that MultiQuery optimization won't use user's output for
+     * ScalarExpression (and get empty output) at the end
+     */
+    @Test
+    public void testMultiQueryWithScalarExpression() throws Exception {
+
+        System.out.println("===== multi-query with ScalarExpression =====");
+
+        String[] inputData = {"john","henry", "adam"};
+        Util.createLocalInputFile("queryInput.txt", inputData);
+
+        myPig.setBatchOn();
+
+        myPig.registerQuery("a = load 'queryInput.txt' using PigStorage() as (uname:chararray);");
+        myPig.registerQuery("b = group a ALL;");
+        myPig.registerQuery("c = foreach b generate COUNT(a) as count;");
+        myPig.registerQuery("store c into 'output1';");
+        myPig.registerQuery("z = load 'queryInput.txt' using PigStorage() as (uname:chararray);");
+        myPig.registerQuery("y = foreach z generate uname, c.count;");
+        myPig.registerQuery("store y into 'output2';");
+
+        List<ExecJob> jobs = myPig.executeBatch();
+
+        for (ExecJob job : jobs) {
+            assertTrue(job.getStatus() == ExecJob.JOB_STATUS.COMPLETED);
+        }
+        myPig.registerQuery("aa = load 'output2' as (uname:chararray, cnt:int) ;");
+        Iterator<Tuple> it = myPig.openIterator("aa");
+        int i = 0;
+        while(it.hasNext()) {
+            Tuple t = it.next();
+            i++;
+            assertEquals(3, t.get(1));
+        }
+        assertEquals(3, i);
     }
         
     private static final String DUMMY_STORE_WITH_OUTPUTFORMAT_CLASS
