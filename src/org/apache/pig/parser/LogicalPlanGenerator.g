@@ -173,6 +173,7 @@ scope {
  : general_statement
  | split_statement
  | realias_statement
+ | assert_statement
  | register_statement
 ;
 
@@ -180,6 +181,9 @@ split_statement : split_clause
 ;
 
 realias_statement : realias_clause
+;
+
+assert_statement : assert_clause
 ;
 
 register_statement
@@ -426,24 +430,19 @@ tuple_type returns[LogicalSchema logicalSchema]
 bag_type returns[LogicalSchema logicalSchema]
  : ^( BAG_TYPE IDENTIFIER? tuple_type? )
    {
-       if ($tuple_type.logicalSchema!=null && $tuple_type.logicalSchema.size()==1 && $tuple_type.logicalSchema.getField(0).type==DataType.TUPLE) {
-           $logicalSchema = $tuple_type.logicalSchema;
-       }
-       else {
-           LogicalSchema s = new LogicalSchema();
-           s.addField(new LogicalFieldSchema($IDENTIFIER.text, $tuple_type.logicalSchema, DataType.TUPLE));
-           $logicalSchema = s;
-       }
+       LogicalSchema s = new LogicalSchema();
+       s.addField(new LogicalFieldSchema($IDENTIFIER.text, $tuple_type.logicalSchema, DataType.TUPLE));
+       $logicalSchema = s;
    }
 ;
 
 map_type returns[LogicalSchema logicalSchema]
- : ^( MAP_TYPE type? )
+ : ^( MAP_TYPE IDENTIFIER? type? )
    {
        LogicalSchema s = null;
        if( $type.datatype != null ) {
            s = new LogicalSchema();
-           s.addField( new LogicalFieldSchema( null, $type.logicalSchema, $type.datatype ) );
+           s.addField( new LogicalFieldSchema( $IDENTIFIER.text, $type.logicalSchema, $type.datatype ) );
        }
        $logicalSchema = s;
    }
@@ -1717,13 +1716,14 @@ scope GScope;
 split_otherwise throws PlanGenerationFailureException
 scope GScope;
 @init {
+	boolean allowNulls = false;
     $GScope::currentOp = builder.createSplitOutputOp();
 }
- : ^( OTHERWISE alias )
+ : ^( OTHERWISE alias ( ALL { allowNulls = true; } )? )
   {
        SourceLocation loc = new SourceLocation( (PigParserNode)$alias.start );
        builder.buildSplitOtherwiseOp( loc, (LOSplitOutput)$GScope::currentOp, $alias.name,
-           $statement::inputAlias);
+           $statement::inputAlias, allowNulls);
   }
 ;
 
@@ -1759,15 +1759,20 @@ alias_col_ref[LogicalExpressionPlan plan] returns[LogicalExpression expr]
            throw new PlanGenerationFailureException( input, loc, e );
        }
 
-       Operator op = builder.lookupOperator( alias );
-       if( op != null && ( schema == null || schema.getFieldPosition( alias ) == -1 ) ) {
-           $expr = new ScalarExpression( plan, op,
-               inForeachPlan ? $foreach_clause::foreachOp : $GScope::currentOp );
-           $expr.setLocation( loc );
+       // PIG-3581
+       // check within foreach scope before looking at outer scope for scalar
+       if( inForeachPlan && ($foreach_plan::operators).containsKey(alias)) {
+           $expr = builder.buildProjectExpr( loc, $plan, $GScope::currentOp,
+               $foreach_plan::operators, $foreach_plan::exprPlans, alias, 0 );
        } else {
-           if( inForeachPlan ) {
+           Operator op = builder.lookupOperator( alias );
+           if( op != null && ( schema == null || schema.getFieldPosition( alias ) == -1 ) ) {
+               $expr = new ScalarExpression( plan, op,
+                   inForeachPlan ? $foreach_clause::foreachOp : $GScope::currentOp );
+               $expr.setLocation( loc );
+           } else if( inForeachPlan ) {
                $expr = builder.buildProjectExpr( loc, $plan, $GScope::currentOp,
-                    $foreach_plan::operators, $foreach_plan::exprPlans, alias, 0 );
+                   $foreach_plan::operators, $foreach_plan::exprPlans, alias, 0 );
            } else {
                $expr = builder.buildProjectExpr( loc, $plan, $GScope::currentOp,
                    $statement::inputIndex, alias, 0 );
@@ -1997,6 +2002,7 @@ eid returns[String id] : rel_str_op { $id = $rel_str_op.id; }
     | TOBAG { $id = "TOBAG"; }
     | TOMAP { $id = "TOMAP"; }
     | TOTUPLE { $id = "TOTUPLE"; }
+    | ASSERT { $id = "ASSERT"; } 
 ;
 
 // relational operator

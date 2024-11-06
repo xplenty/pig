@@ -17,7 +17,7 @@
  */
 package org.apache.pig.data;
 
-import static org.apache.pig.PigConfiguration.SHOULD_USE_SCHEMA_TUPLE;
+import static org.apache.pig.PigConfiguration.PIG_SCHEMA_TUPLE_ENABLED;
 import static org.apache.pig.PigConstants.SCHEMA_TUPLE_ON_BY_DEFAULT;
 
 import java.io.File;
@@ -33,13 +33,13 @@ import java.util.Set;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.pig.ExecType;
 import org.apache.pig.PigConstants;
 import org.apache.pig.data.SchemaTupleClassGenerator.GenContext;
 import org.apache.pig.data.utils.StructuresHelper.SchemaKey;
 import org.apache.pig.data.utils.StructuresHelper.Triple;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
+import org.apache.pig.impl.util.Utils;
 
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -151,8 +151,8 @@ public class SchemaTupleBackend {
             return;
         }
         // Step one is to see if there are any classes in the distributed cache
-        if (!jConf.getBoolean(SHOULD_USE_SCHEMA_TUPLE, SCHEMA_TUPLE_ON_BY_DEFAULT)) {
-            LOG.info("Key [" + SHOULD_USE_SCHEMA_TUPLE +"] was not set... will not generate code.");
+        if (!jConf.getBoolean(PIG_SCHEMA_TUPLE_ENABLED, SCHEMA_TUPLE_ON_BY_DEFAULT)) {
+            LOG.info("Key [" + PIG_SCHEMA_TUPLE_ENABLED +"] was not set... will not generate code.");
             return;
         }
         // Step two is to copy everything from the distributed cache if we are in distributed mode
@@ -184,14 +184,22 @@ public class SchemaTupleBackend {
             LOG.info("Attempting to read file: " + s);
             // The string is the symlink into the distributed cache
             File src = new File(s);
-            FileInputStream fin = new FileInputStream(src);
-            FileOutputStream fos = new FileOutputStream(new File(codeDir, s));
+            FileInputStream fin = null;
+            FileOutputStream fos = null;
+            try {
+                fin = new FileInputStream(src);
+                fos = new FileOutputStream(new File(codeDir, s));
 
-            fin.getChannel().transferTo(0, src.length(), fos.getChannel());
-
-            fin.close();
-            fos.close();
-            LOG.info("Successfully copied file to local directory.");
+                fin.getChannel().transferTo(0, src.length(), fos.getChannel());
+                LOG.info("Successfully copied file to local directory.");
+            } finally {
+                if (fin != null) {
+                    fin.close();
+                }
+                if (fos != null) {
+                    fos.close();
+                }
+            }
         }
     }
 
@@ -265,14 +273,20 @@ public class SchemaTupleBackend {
     private static SchemaTupleBackend stb;
 
     public static void initialize(Configuration jConf, PigContext pigContext) throws IOException {
-        initialize(jConf, pigContext, pigContext.getExecType().isLocal());
+        if (stb != null) {
+            SchemaTupleFrontend.lazyReset(pigContext);
+        }
+        initialize(jConf, pigContext.getExecType().isLocal());
     }
 
-    public static void initialize(Configuration jConf, PigContext pigContext, boolean isLocal) throws IOException {
+    public static void initialize(Configuration jConf) throws IOException {
+        initialize(jConf, Utils.isLocal(jConf));
+    }
+
+    public static void initialize(Configuration jConf, boolean isLocal) throws IOException {
         if (stb != null) {
             LOG.warn("SchemaTupleBackend has already been initialized");
         } else {
-            SchemaTupleFrontend.lazyReset(pigContext);
             SchemaTupleFrontend.reset();
             SchemaTupleBackend stbInstance = new SchemaTupleBackend(jConf, isLocal);
             stbInstance.copyAndResolve();

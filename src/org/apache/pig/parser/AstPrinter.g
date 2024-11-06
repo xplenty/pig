@@ -57,6 +57,7 @@ statement : general_statement
           | split_statement { sb.append(";\n"); }
           | import_statement { sb.append(";\n"); }
           | register_statement { sb.append(";\n"); }
+          | assert_statement { sb.append(";\n"); }
           | realias_statement
 ;
 
@@ -74,6 +75,9 @@ import_statement : ^( IMPORT QUOTEDSTRING ) {
 register_statement : ^( REGISTER QUOTEDSTRING {
                             sb.append($REGISTER.text).append(" ").append($QUOTEDSTRING.text);
                         } scripting_udf_clause? )
+;
+
+assert_statement : assert_clause
 ;
 
 scripting_udf_clause : scripting_language_clause scripting_namespace_clause
@@ -218,7 +222,7 @@ bag_type
     : ^( BAG_TYPE { sb.append("bag{"); } ( { sb.append("T:"); } IDENTIFIER? tuple_type )? ) { sb.append("}"); }
 ;
 
-map_type : ^( MAP_TYPE { sb.append("map["); } type? ) { sb.append("]"); }
+map_type : ^( MAP_TYPE { sb.append("map["); } IDENTIFIER? type? ) { sb.append("]"); }
 ;
 
 func_clause
@@ -597,7 +601,7 @@ split_branch
 ;
 
 split_otherwise
-    : ^( OTHERWISE alias { sb.append(" " + $OTHERWISE.text); } )
+    : ^( OTHERWISE alias { sb.append(" " + $OTHERWISE.text); } ( ALL { sb.append(" " + $ALL.text); } )? )
 ;
 
 col_ref : alias_col_ref | dollar_col_ref
@@ -735,6 +739,7 @@ eid : rel_str_op
     | TOTUPLE    { sb.append($TOTUPLE.text); }
     | IN         { sb.append($IN.text); }
     | CASE       { sb.append($CASE.text); }
+    | ASSERT     { sb.append($ASSERT.text); }
 ;
 
 // relational operator

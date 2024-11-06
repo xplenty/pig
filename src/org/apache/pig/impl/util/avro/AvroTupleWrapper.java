@@ -18,28 +18,41 @@
 
 package org.apache.pig.impl.util.avro;
 
-import java.io.DataInput;
-import java.io.DataOutput;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-
+import com.google.common.base.Function;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import org.apache.avro.Schema;
 import org.apache.avro.Schema.Field;
 import org.apache.avro.Schema.Type;
 import org.apache.avro.generic.GenericArray;
 import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.generic.GenericDatumWriter;
+import org.apache.avro.generic.GenericEnumSymbol;
 import org.apache.avro.generic.IndexedRecord;
+import org.apache.avro.io.DatumReader;
+import org.apache.avro.io.DatumWriter;
+import org.apache.avro.io.Decoder;
+import org.apache.avro.io.DecoderFactory;
+import org.apache.avro.io.Encoder;
+import org.apache.avro.io.EncoderFactory;
+import org.apache.avro.util.Utf8;
+import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.DataByteArray;
 import org.apache.pig.data.Tuple;
+import org.apache.pig.data.TupleFactory;
 
-import com.google.common.base.Function;
-import com.google.common.collect.Iterators;
-import com.google.common.collect.Lists;
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.nio.ByteBuffer;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Object that wraps an Avro object in a tuple.
@@ -47,11 +60,13 @@ import com.google.common.collect.Lists;
  */
 public final class AvroTupleWrapper <T extends IndexedRecord>
     implements Tuple {
+    private static final Log LOG = LogFactory.getLog(AvroTupleWrapper.class);
+    private transient TupleFactory mTupleFactory = TupleFactory.getInstance();
 
   /**
    * The Avro object wrapped in the pig Tuple.
    */
-  private T avroObject;
+  private transient T avroObject;
 
   /**
    * Creates a new AvroTupleWrapper object.
@@ -62,9 +77,9 @@ public final class AvroTupleWrapper <T extends IndexedRecord>
   }
 
   @Override
-  public void write(final DataOutput o) throws IOException {
-    throw new IOException(
-        this.getClass().toString() + ".write called, but not implemented yet");
+  public void write(DataOutput out) throws IOException {
+      Tuple t = mTupleFactory.newTupleNoCopy(getAll());
+      t.write(out);
   }
 
   @SuppressWarnings("rawtypes")
@@ -130,24 +145,35 @@ public final class AvroTupleWrapper <T extends IndexedRecord>
       case BYTES:
         return new DataByteArray(((ByteBuffer) o).array());
       case UNION:
-        if (o instanceof org.apache.avro.util.Utf8) {
-          return o.toString();
-        } else if (o instanceof IndexedRecord) {
-          return new AvroTupleWrapper<T>((T) o);
-        } else if (o instanceof GenericArray) {
-          return new AvroBagWrapper<GenericData.Record>(
-              (GenericArray<GenericData.Record>) o);
-        } else if (o instanceof Map) {
-          return new AvroMapWrapper((Map<CharSequence, Object>) o);
-        } else if (o instanceof GenericData.Fixed) {
-          return new DataByteArray(((GenericData.Fixed) o).bytes());
-        } else if (o instanceof ByteBuffer) {
-          return new DataByteArray(((ByteBuffer) o).array());
-        }
+        return getPigObject(o);
       default:
         return o;
     }
+  }
 
+  /**
+   * @param o An Avro object to convert to an equivalent type in Pig
+   * @return Equivalent Pig object
+   */
+  public static Object getPigObject(Object o) {
+    if (o instanceof org.apache.avro.util.Utf8) {
+      return o.toString();
+    } else if (o instanceof IndexedRecord) {
+      return new AvroTupleWrapper<IndexedRecord>((IndexedRecord) o);
+    } else if (o instanceof GenericArray) {
+      return new AvroBagWrapper<GenericData.Record>(
+          (GenericArray<GenericData.Record>) o);
+    } else if (o instanceof Map) {
+      return new AvroMapWrapper((Map<CharSequence, Object>) o);
+    } else if (o instanceof GenericData.Fixed) {
+      return new DataByteArray(((GenericData.Fixed) o).bytes());
+    } else if (o instanceof ByteBuffer) {
+      return new DataByteArray(((ByteBuffer) o).array());
+    } else if (o instanceof GenericEnumSymbol) {
+      return o.toString();
+    } else {
+      return o;
+    }
   }
 
   @Override
@@ -158,8 +184,7 @@ public final class AvroTupleWrapper <T extends IndexedRecord>
       try {
         all.add(get(f.pos()));
       } catch (ExecException e) {
-        LogFactory.getLog(getClass()).error(
-            "could not process tuple with contents " + avroObject, e);
+        LOG.error("could not process tuple with contents " + avroObject, e);
         return null;
       }
     }
@@ -191,7 +216,14 @@ public final class AvroTupleWrapper <T extends IndexedRecord>
       case NULL:
         break;
       case STRING:
-        total += ((String) r.get(f.pos())).length()
+        Object val = r.get(f.pos());
+        String value;
+        if (val instanceof Utf8) {
+          value = val.toString();
+        } else {
+          value = (String) val;
+        }
+        total += value.length()
            * (Character.SIZE << bitsPerByte);
         break;
       case BYTES:
@@ -277,4 +309,21 @@ public final class AvroTupleWrapper <T extends IndexedRecord>
         );
   }
 
+  // Required for Java serialization used by Spark: PIG-5134
+  private void writeObject(ObjectOutputStream out) throws IOException {
+    out.writeObject(avroObject.getSchema().toString());
+    DatumWriter<T> writer = new GenericDatumWriter<>();
+    writer.setSchema(avroObject.getSchema());
+    Encoder encoder = EncoderFactory.get().binaryEncoder(out, null);
+    writer.write(avroObject, encoder);
+    encoder.flush();
+  }
+
+  // Required for Java serialization used by Spark: PIG-5134
+  private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+    Schema schema = new Schema.Parser().parse((String) in.readObject());
+    DatumReader<T> reader = new GenericDatumReader<>(schema);
+    Decoder decoder = DecoderFactory.get().binaryDecoder(in, null);
+    avroObject = reader.read(avroObject, decoder);
+  }
 }

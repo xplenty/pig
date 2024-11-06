@@ -39,11 +39,13 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
-import junit.framework.Assert;
+import org.junit.Assert;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.pig.EvalFunc;
@@ -55,6 +57,8 @@ import org.apache.pig.builtin.PigStorage;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.DataByteArray;
 import org.apache.pig.data.DataType;
+import org.apache.pig.data.DefaultTuple;
+import org.apache.pig.data.NonSpillableDataBag;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.PigContext;
@@ -745,8 +749,8 @@ public class TestTypeCheckingValidatorNewLP {
         // value of datetime and one of other type
         LogicalExpressionPlan plan = new LogicalExpressionPlan();
         ConstantExpression constant0 = new ConstantExpression(plan, new DateTime(0L));
-        ConstantExpression constant1 = new ConstantExpression(plan, new DataByteArray("1970-01-01T00:00:00.000Z"));
-        CastExpression cast1 = new CastExpression(plan,  constant1, createFS(DataType.BYTEARRAY));
+        ConstantExpression constant1 = new ConstantExpression(plan, new String("1970-01-01T00:00:00.000Z"));
+        CastExpression cast1 = new CastExpression(plan,  constant1, createFS(DataType.CHARARRAY));
         EqualExpression eq1 = new EqualExpression(plan, constant0, cast1);
 
         CompilationMessageCollector collector = new CompilationMessageCollector();
@@ -2679,7 +2683,7 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupLineage() throws Throwable {
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a'  using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a'  using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by field1, b by field4;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = foreach d generate group, field1 + 1, field4 + 2.0 ;";
@@ -2690,7 +2694,7 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupMapLookupLineage() throws Throwable {
             String query =  "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by field1, b by field4;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = foreach d generate group, field1#'key' + 1, field4 + 2.0 ;";
@@ -2716,26 +2720,26 @@ public class TestTypeCheckingValidatorNewLP {
             exOp = (LogicalExpression) foreachPlan.getSinks().get(0);
             if(! (exOp instanceof ProjectExpression)) exOp = (LogicalExpression) foreachPlan.getSinks().get(1);
             CastExpression cast = (CastExpression)foreachPlan.getPredecessors(exOp).get(0);
-            checkCastLoadFunc(cast, "PigStorage('b')");
+            checkCastLoadFunc(cast, "org.apache.pig.test.PigStorageWithDifferentCaster('b')");
         }
 
         @Test
         public void testCogroupStarLineage() throws Throwable {
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'b' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'b' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by *, b by *;"
             + "d = foreach c generate group, flatten($1), flatten($2);"
             + "e = foreach d generate group, field1 + 1, field4 + 2.0;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 2);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 2);
         }
 
         @Test
         public void testCogroupStarLineageFail() throws Throwable {
 
-            String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'b' using PigStorage('b') as (field4, field5, field6: chararray );"
+            String query = "a = load 'a' using PigStorage('x') as (field1, field2: float, field3: chararray );"
+            + "b = load 'b' using PigStorage('x') as (field4, field5, field6: chararray );"
             + "c = cogroup a by *, b by *;"
             + "d = foreach c generate group, flatten($1), flatten($2);"
             + "e = foreach d generate group + 1, field1 + 1, field4 + 2.0;";
@@ -2774,8 +2778,8 @@ public class TestTypeCheckingValidatorNewLP {
 
         @Test
         public void testCogroupStarLineageNoSchemaFail() throws Throwable {
-            String query = "a = load 'a' using PigStorage('a');"
-            + "b = load 'b' using PigStorage('b');"
+            String query = "a = load 'a' using PigStorage('x');"
+            + "b = load 'b' using PigStorage('x');"
             + "c = cogroup a by *, b by *;";
 
             String exMsg= "Cogroup/Group by '*' or 'x..' " +
@@ -2788,33 +2792,33 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupMultiColumnProjectLineage() throws Throwable {
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'b' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'b' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by field1, b by field4;"
             + "d = foreach c generate group, a.(field1, field2), b.(field4);"
             + "e = foreach d generate group, flatten($1), flatten($2);"
             + "f = foreach e generate group, field1 + 1, field4 + 2.0;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 2);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 2);
         }
 
         @Test
         public void testCogroupProjectStarLineage() throws Throwable {
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'b' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'b' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by field1, b by field4;"
             + "d = foreach c generate *;"
             + "f = foreach d generate group, flatten(a), flatten(b) ;"
             + "g = foreach f generate group, field1 + 1, field4 + 2.0 ;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 2);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 2);
         }
 
         @Test
         public void testCogroupProjectStarLineageNoSchema() throws Throwable {
             String query = "a = load 'a' using PigStorage('a');"
-            + "b = load 'b' using PigStorage('b');"
+            + "b = load 'b' using org.apache.pig.test.PigStorageWithDifferentCaster('b');"
             + "c = cogroup a by $0, b by $0;"
             + "d = foreach c generate *;"
             + "f = foreach d generate group, flatten(a), flatten(b) ;"
@@ -2827,7 +2831,7 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupProjectStarLineageMixSchema() throws Throwable {
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'b' using PigStorage();"
+            + "b = load 'b' using org.apache.pig.test.PigStorageWithDifferentCaster();"
             + "c = cogroup a by field1, b by $0;"
             + "d = foreach c generate *;"
             + "f = foreach d generate group, flatten(a), flatten(b) ;"
@@ -2840,20 +2844,20 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupLineageFail() throws Throwable {
             String query =  "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by field1, b by field4;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = foreach d generate group + 1, field1 + 1, field4 + 2.0 ;";
 
             checkLastForeachCastLoadFunc(query, null, 0);
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 2);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 2);
         }
 
         @Test
         public void testCogroupLineage2NoSchema() throws Throwable {
             String query = "a = load 'a' using PigStorage('a');"
-            + "b = load 'a' using PigStorage('b');"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b');"
             + "c = cogroup a by $0, b by $0;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = foreach d generate $0, $1 + 1, $2 + 2.0 ;";
@@ -2866,7 +2870,7 @@ public class TestTypeCheckingValidatorNewLP {
         public void testUnionLineage() throws Throwable {
             //here the type checker will insert a cast for the union, converting the column field2 into a float
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = union a , b;"
             + "d = foreach c generate field2 + 2.0 ;";
 
@@ -2888,7 +2892,7 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testUnionLineageNoSchemaDiffLoadFunc() throws Throwable {
             String query = "a = load 'a' using PigStorage('a');"
-            + "b = load 'a' using PigStorage('b');"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b');"
             + "c = union a , b;"
             + "d = foreach c generate $1 + 2.0 ;";
 
@@ -2908,12 +2912,12 @@ public class TestTypeCheckingValidatorNewLP {
 
         @Test
         public void testUnionLineageDifferentSchemaFail() throws Throwable {
-            String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray, field7 );"
-            + "c = union a , b;"
+            String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );\n"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray, field7 );\n"
+            + "c = union a , b;\n"
             + "d = foreach c generate $3 + 2.0 ;";
 
-            checkWarning(query, CAST_LOAD_NOT_FOUND);
+            checkWarning(query, CAST_LOAD_NOT_FOUND + " to double at <line 4,");
         }
 
         private void checkWarning(String query, String warnMsg) throws FrontendException {
@@ -2928,7 +2932,7 @@ public class TestTypeCheckingValidatorNewLP {
             printMessageCollector(collector);
 
             boolean isWarningSeen = false;
-            assertTrue("message collector has message", collector.hasMessage());
+            assertTrue("message collector does not have message", collector.hasMessage());
 
             for (Message msg : collector){
                 if (msg.getMessageType() == MessageType.Warning
@@ -2937,7 +2941,7 @@ public class TestTypeCheckingValidatorNewLP {
                 }
             }
 
-            assertTrue("Expected warning is seen", isWarningSeen);
+            assertTrue("Expected warning is not seen", isWarningSeen);
         }
 
         @Test
@@ -2953,14 +2957,14 @@ public class TestTypeCheckingValidatorNewLP {
 
         @Test
         public void testUnionLineageMixSchemaFail() throws Throwable {
-            // different loader func spec associated with each input, so can't determine
+            // different loader caster associated with each input, so can't determine
             // which one to use on union output
-            String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b');"
-            + "c = union a , b;"
+            String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );\n"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b');\n"
+            + "c = union a , b;\n"
             + "d = foreach c generate $3 + 2.0 ;";
 
-            checkWarning(query, CAST_LOAD_NOT_FOUND);
+            checkWarning(query, CAST_LOAD_NOT_FOUND + " to double at <line 4,");
         }
 
         @Test
@@ -3014,20 +3018,20 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupFilterLineage() throws Throwable {
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by field1, b by field4;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = filter d by field4 > 5;"
             + "f = foreach e generate group, field1 + 1, field4 + 2.0 ;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 2);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 2);
         }
 
         @Test
         public void testCogroupFilterLineageNoSchema() throws Throwable {
             String query = "a = load 'a' using PigStorage('a');"
-            + "b = load 'a' using PigStorage('b');"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b');"
             + "c = cogroup a by $0, b by $0;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = filter d by $2 > 5;"
@@ -3115,20 +3119,20 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupSplitLineage() throws Throwable {
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-                + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+                + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
                 + "c = cogroup a by field1, b by field4;"
                 + "d = foreach c generate group, flatten(a), flatten(b) ;"
                 + "split d into e if field4 > 'm', f if field6 > 'm' ;"
                 + "g = foreach e generate group, field1 + 1, field4 + 2.0 ;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 2);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 2);
         }
 
         @Test
         public void testCogroupSplitLineageNoSchema() throws Throwable {
             String query = "a = load 'a' using PigStorage('a');"
-                + "b = load 'a' using PigStorage('b');"
+                + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b');"
                 + "c = cogroup a by $0, b by $0;"
                 + "d = foreach c generate group, flatten(a), flatten(b) ;"
                 + "split d into e if $1 > 'm', f if $1 > 'm' ;"
@@ -3158,20 +3162,20 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupDistinctLineage() throws Throwable {
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by field1, b by field4;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = distinct d;"
             + "f = foreach e generate group, field1 + 1, field4 + 2.0 ;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 2);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 2);
         }
 
         @Test
         public void testCogroupDistinctLineageNoSchema() throws Throwable {
             String query =  "a = load 'a' using PigStorage('a');"
-            + "b = load 'a' using PigStorage();"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster();"
             + "c = cogroup a by $0, b by $0;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = distinct d;"
@@ -3231,20 +3235,20 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupSortLineage() throws Throwable {
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by field1, b by field4;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = order d by field4 desc;"
             + "f = foreach e generate group, field1 + 1, field4 + 2.0 ;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 2);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 2);
         }
 
         @Test
         public void testCogroupSortLineageNoSchema() throws Throwable {
             String query =  "a = load 'a' using PigStorage('a');"
-            + "b = load 'a' using PigStorage('b');"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b');"
             + "c = cogroup a by $0, b by $0;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = order d by $2 desc;"
@@ -3256,20 +3260,20 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupSortStarLineage() throws Throwable {
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by field1, b by field4;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = order d by * desc;"
             + "f = foreach e generate group, field1 + 1, field4 + 2.0 ;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 2);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 2);
         }
 
         @Test
         public void testCogroupSortStarLineageNoSchema() throws Throwable {
             String query = "a = load 'a' using PigStorage('a');"
-            + "b = load 'a' using PigStorage('b');"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b');"
             + "c = cogroup a by $0, b by $0;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = order d by * desc;"
@@ -3282,12 +3286,12 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCrossLineage() throws Throwable {
             String query =  "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cross a, b;"
             + "d = foreach c generate field1 + 1, field4 + 2.0 ;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')",0);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')",1);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')",1);
         }
 
         @Test
@@ -3302,12 +3306,12 @@ public class TestTypeCheckingValidatorNewLP {
 
         @Test
         public void testCrossLineageNoSchemaFail() throws Throwable {
-            String query = "a = load 'a' using PigStorage('a');"
-            + "b = load 'a' using PigStorage('b');"
-            + "c = cross a , b;"
+            String query = "a = load 'a' using PigStorage('a');\n"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b');\n"
+            + "c = cross a , b;\n"
             + "d = foreach c generate $1 + 2.0 ;";
 
-            checkWarning(query, CAST_LOAD_NOT_FOUND);
+            checkWarning(query, CAST_LOAD_NOT_FOUND + " to double at <line 4,");
         }
 
         @Test
@@ -3323,23 +3327,23 @@ public class TestTypeCheckingValidatorNewLP {
 
         @Test
         public void testCrossLineageMixSchemaFail() throws Throwable {
-            String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b');"
-            + "c = cross a , b;"
+            String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );\n"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b');\n"
+            + "c = cross a , b;\n"
             + "d = foreach c generate $3 + 2.0 ;";
 
-            checkWarning(query, CAST_LOAD_NOT_FOUND);
+            checkWarning(query, CAST_LOAD_NOT_FOUND + " to double at <line 4,");
         }
 
         @Test
         public void testJoinLineage() throws Throwable {
             String query =  "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = join a by field1, b by field4;"
             + "d = foreach c generate field1 + 1, field4 + 2.0 ;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 0);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 1);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 1);
 
         }
 
@@ -3357,12 +3361,12 @@ public class TestTypeCheckingValidatorNewLP {
         public void testJoinLineageNoSchemaFail() throws Throwable {
             //this test case should change when we decide on what flattening a tuple or bag
             //with null schema results in a foreach flatten and hence a join
-            String query =  "a = load 'a' using PigStorage('a');"
-            + "b = load 'a' using PigStorage();"
-            + "c = join a by $0, b by $0;"
+            String query =  "a = load 'a' using PigStorage('a');\n"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster();\n"
+            + "c = join a by $0, b by $0;\n"
             + "d = foreach c generate $1 + 2.0 ;";
 
-            checkWarning(query, CAST_LOAD_NOT_FOUND);
+            checkWarning(query, CAST_LOAD_NOT_FOUND + " to double at <line 4,");
         }
 
         @Test
@@ -3378,12 +3382,12 @@ public class TestTypeCheckingValidatorNewLP {
         public void testJoinLineageMixSchemaFail() throws Throwable {
             //this test case should change when we decide on what flattening a tuple or bag
             //with null schema results in a foreach flatten and hence a join
-            String query =  "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage();"
-            + "c = join a by field1, b by $0;"
+            String query =  "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );\n"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster();\n"
+            + "c = join a by field1, b by $0;\n"
             + "d = foreach c generate $3 + 2.0 ;";
 
-            checkWarning(query, CAST_LOAD_NOT_FOUND);
+            checkWarning(query, CAST_LOAD_NOT_FOUND + " to double at <line 4,");
         }
 
         @Test
@@ -3407,20 +3411,20 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupLimitLineage() throws Throwable {
             String query = "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by field1, b by field4;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = limit d 100;"
             + "f = foreach e generate group, field1 + 1, field4 + 2.0 ;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 2);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 2);
         }
 
         @Test
         public void testCogroupLimitLineageNoSchema() throws Throwable {
             String query = "a = load 'a' using PigStorage('a');"
-            + "b = load 'a' using PigStorage('b');"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b');"
             + "c = cogroup a by $0, b by $0;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = limit d 100;"
@@ -3433,7 +3437,7 @@ public class TestTypeCheckingValidatorNewLP {
         @Test
         public void testCogroupTopKLineage() throws Throwable {
             String query =  "a = load 'a' using PigStorage('a') as (field1, field2: float, field3: chararray );"
-            + "b = load 'a' using PigStorage('b') as (field4, field5, field6: chararray );"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b') as (field4, field5, field6: chararray );"
             + "c = cogroup a by field1, b by field4;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = order d by field1 desc;"
@@ -3441,13 +3445,13 @@ public class TestTypeCheckingValidatorNewLP {
             + "g = foreach f generate group, field1 + 1, field4 + 2.0 ;";
 
             checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
-            checkLastForeachCastLoadFunc(query, "PigStorage('b')", 2);
+            checkLastForeachCastLoadFunc(query, "org.apache.pig.test.PigStorageWithDifferentCaster('b')", 2);
         }
 
         @Test
         public void testCogroupTopKLineageNoSchema() throws Throwable {
             String query = "a = load 'a' using PigStorage('a');"
-            + "b = load 'a' using PigStorage('b');"
+            + "b = load 'a' using org.apache.pig.test.PigStorageWithDifferentCaster('b');"
             + "c = cogroup a by $0, b by $0;"
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = order d by $2 desc;"
@@ -3496,8 +3500,13 @@ public class TestTypeCheckingValidatorNewLP {
             + "d = foreach c generate group, flatten(a), flatten(b) ;"
             + "e = foreach d generate $0, $1 + 1, $2 + 2.0 ;";
 
-            checkLastForeachCastLoadFunc(query, null, 1);
-            checkLastForeachCastLoadFunc(query, null, 2);
+            // PigStorage and PigStreaming both returns Utf8StorageConverter so
+            // it may return either PigStorage or PigStreaming.
+            // Here, our code happens to return the first one thus
+            // checking with PigStorage.  Depending on the implementation,
+            // this test may start failing.
+            checkLastForeachCastLoadFunc(query, "PigStorage('a')", 1);
+            checkLastForeachCastLoadFunc(query, "PigStorage('a')", 2);
         }
 
         @Test
@@ -3680,6 +3689,7 @@ public class TestTypeCheckingValidatorNewLP {
                     super(p, walker);
                 }
 
+                @Override
                 public void visit(CastExpression cExp){
                     casts.add(cExp);
                 }
@@ -3740,7 +3750,7 @@ public class TestTypeCheckingValidatorNewLP {
                      "[k1#good,k2#morning]" };
              PigServer ps = new PigServer(ExecType.LOCAL);
              File f = org.apache.pig.test.Util.createInputFile("test", ".txt", input);
-             String inputFileName = Util.generateURI(Util.encodeEscape(f.getAbsolutePath()), ps.getPigContext());
+             String inputFileName = Util.generateURI(f.getAbsolutePath(), ps.getPigContext());
              // load as bytearray and use as map
              String query = "a= load '" + inputFileName + "' as (m);"
              + " b = foreach a generate m#'k1';";
@@ -3861,12 +3871,12 @@ public class TestTypeCheckingValidatorNewLP {
          */
         @Test
         public void testLineageMultipleLoader3() throws FrontendException {
-            String query =  "A = LOAD 'data1' USING PigStorage() AS (u, v, w);"
-            +  "B = LOAD 'data2' USING TextLoader() AS (x, y);"
-            + "C = COGROUP A BY u, B by x;"
-            +  "D = FOREACH C GENERATE (chararray)group;";
+            String query =  "A = LOAD 'data1' USING PigStorage() AS (u, v, w);\n"
+            +  "B = LOAD 'data2' USING TextLoader() AS (x, y);\n"
+            +  "C = COGROUP A BY u, B by x;\n"
+            +  "D = FOREACH C GENERATE (chararray)group;\n";
 
-            checkWarning(query, CAST_LOAD_NOT_FOUND);
+            checkWarning(query, CAST_LOAD_NOT_FOUND + " to chararray at <line 4,");
         }
 
         /**
@@ -4057,12 +4067,12 @@ public class TestTypeCheckingValidatorNewLP {
 
         @Test
         public void testUDFNoInnerSchema() throws FrontendException {
-            String query = "a= load '1.txt';"
+            String query = "a= load '1.txt' using PigStorage(':') ;"
                 + "b = foreach a generate "+TestUDFTupleNullInnerSchema.class.getName()+"($0);"
                 + "c = foreach b generate flatten($0);"
                 + "d = foreach c generate $0 + 1;";
 
-            checkLastForeachCastLoadFunc(query, null, 0);
+            checkLastForeachCastLoadFunc(query, "PigStorage(':')");
         }
 
         //see PIG-1990
@@ -4111,5 +4121,57 @@ public class TestTypeCheckingValidatorNewLP {
                 " has datatype int which is incompatible with type of" +
                 " corresponding column in earlier relation(s) in the statement";
             Util.checkExceptionMessage(query, "c", msg);
+        }
+        //see PIG-4734
+        public static class GenericToMap extends EvalFunc<Map<String, Double>> {
+            @Override
+            public Map exec(Tuple input) throws IOException {
+                Map<String, Double> output = new HashMap<String, Double>();
+                output.put((String)input.get(0), (Double)input.get(1));
+                return output;
+            }
+        }
+        @Test
+        public void testBinCondCompatMap() throws Exception {
+            String query =
+                "a = load 'studenttab10k' as (name:chararray, gpa:double);"
+                + "b = foreach a generate gpa, TOMAP(name, gpa) as m1, "
+                + GenericToMap.class.getName() + "(name, gpa) as m2;"
+                + "c = foreach b generate (gpa>3? m1 : m2);";
+                createAndProcessLPlan(query);
+        }
+        public static class GenericToTuple extends EvalFunc<Tuple> {
+            @Override
+            public Tuple exec(Tuple input) throws IOException {
+                return input;
+            }
+        }
+        @Test
+        public void testBinCondCompatTuple() throws Exception {
+            String query =
+                "a = load 'studenttab10k' as (name:chararray, gpa:double);"
+                + "b = foreach a generate gpa, TOTUPLE(name, gpa) as t1, "
+                + GenericToTuple.class.getName() + "(name, gpa) as t2;"
+                + "c = foreach b generate (gpa>3? t1 : t2);";
+                createAndProcessLPlan(query);
+        }
+        public static class GenericToBag extends EvalFunc<DataBag> {
+            @Override
+            public DataBag exec(Tuple input) throws IOException {
+                DataBag bag = new NonSpillableDataBag(1);
+                Tuple t = new DefaultTuple();
+                t.append(input.get(0));
+                bag.add(t);
+                return bag;
+            }
+        }
+        @Test
+        public void testBinCondCompatBag() throws Exception {
+            String query =
+                "a = load 'studenttab10k' as (name:chararray, gpa:double);"
+                + "b = foreach a generate gpa, TOBAG(name) as b1, "
+                + GenericToBag.class.getName() + "(name) as b2;"
+                + "c = foreach b generate (gpa>3? b1 : b2);";
+                createAndProcessLPlan(query);
         }
 }

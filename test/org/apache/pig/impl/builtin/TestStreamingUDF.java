@@ -26,27 +26,60 @@ import java.math.BigInteger;
 import java.util.Iterator;
 import java.util.List;
 
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.builtin.mock.Storage.Data;
 import org.apache.pig.data.DataBag;
+import org.apache.pig.data.DataByteArray;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
-import org.apache.pig.test.MiniCluster;
+import org.apache.pig.test.MiniGenericCluster;
 import org.apache.pig.test.Util;
+import org.apache.pig.test.junit.OrderedJUnit4Runner;
+import org.apache.pig.test.junit.OrderedJUnit4Runner.TestOrder;
 import org.joda.time.DateTime;
+import org.junit.AfterClass;
+import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 
+// Need to run testPythonUDF_onCluster first due to TEZ-1802
+@RunWith(OrderedJUnit4Runner.class)
+@TestOrder({
+    "testPythonUDF_onCluster",
+    "testPythonUDF_withBytearrayAndBytes_onCluster",
+    "testPythonUDF__allTypes",
+    "testPythonUDF__withBigDecimal",
+    "testPythonUDF",
+    "testPythonUDF__withBigInteger",
+    "testPythonUDF__withDateTime",
+    "testPythonUDF_withNewline"
+})
 public class TestStreamingUDF {
     private static PigServer pigServerLocal = null;
     private static PigServer pigServerMapReduce = null;
-    
+
     private TupleFactory tf = TupleFactory.getInstance();
-    private static MiniCluster cluster = MiniCluster.buildCluster();
-    
+    private static MiniGenericCluster cluster;
+
+    @BeforeClass
+    public static void oneTimeSetup() {
+        cluster = MiniGenericCluster.buildCluster();
+    }
+
+    @AfterClass
+    public static void oneTimeTearDown() throws Exception {
+        cluster.shutDown();
+    }
+
+    @Before
+    public void setUp() throws Exception {
+        Util.resetStateForExecModeSwitch();
+    }
+
     @Test
     public void testPythonUDF_onCluster() throws Exception {
-        pigServerMapReduce = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        pigServerMapReduce = new PigServer(cluster.getExecType(), cluster.getProperties());
 
         String[] pythonScript = {
                 "from pig_util import outputSchema",
@@ -80,10 +113,45 @@ public class TestStreamingUDF {
         assertEquals(expected0, actual0);
         assertEquals(expected1, actual1);
     }
+    
+    @Test
+    public void testPythonUDF_withBytearrayAndBytes_onCluster() throws Exception {
+        pigServerMapReduce = new PigServer(cluster.getExecType(), cluster.getProperties());
+
+        
+        String[] pythonScript = {
+            "from pig_util import outputSchema",
+            "import os",
+            "@outputSchema('f:bytearray')",
+            "def foo(bar):",
+            "    return bytearray(os.urandom(1000))"
+        };
+        
+        Util.createLocalInputFile( "pyfilewBaB.py", pythonScript);
+
+        String[] input = {
+            "field1"
+        };
+        Util.createLocalInputFile("testTupleBaB", input);
+        Util.copyFromLocalToCluster(cluster, "testTupleBaB", "testTupleBaB");
+
+        pigServerMapReduce.registerQuery("REGISTER 'pyfilewBaB.py' USING streaming_python AS pf;");
+        pigServerMapReduce.registerQuery("A = LOAD 'testTupleBaB' as (b:chararray);");
+        pigServerMapReduce.registerQuery("B = FOREACH A generate pf.foo(b);");
+
+        Iterator<Tuple> iter = pigServerMapReduce.openIterator("B");
+        assertTrue(iter.hasNext());
+        Object result = iter.next().get(0);
+
+        //Mostly we're happy we got a result w/o throwing an exception, but we'll
+        //do a basic check.
+        assertTrue(result instanceof DataByteArray);
+        assertEquals(1000, ((DataByteArray)result).size());
+    }
 
     @Test
     public void testPythonUDF() throws Exception {
-        pigServerLocal = new PigServer(ExecType.LOCAL);
+        pigServerLocal = new PigServer(Util.getLocalTestMode());
 
         String[] pythonScript = {
                 "from pig_util import outputSchema",
@@ -118,7 +186,7 @@ public class TestStreamingUDF {
     
     @Test
     public void testPythonUDF_withNewline() throws Exception {
-        pigServerLocal = new PigServer(ExecType.LOCAL);
+        pigServerLocal = new PigServer(Util.getLocalTestMode());
 
         String[] pythonScript = {
                 "from pig_util import outputSchema",
@@ -128,7 +196,6 @@ public class TestStreamingUDF {
         };
         Util.createLocalInputFile( "pyfileNL.py", pythonScript);
 
-        
         Data data = resetData(pigServerLocal);
         Tuple t0 = tf.newTuple(2);
         t0.set(0, "field10");
@@ -153,7 +220,7 @@ public class TestStreamingUDF {
     
     @Test
     public void testPythonUDF__withBigInteger() throws Exception {
-        pigServerLocal = new PigServer(ExecType.LOCAL);
+        pigServerLocal = new PigServer(Util.getLocalTestMode());
 
         String[] pythonScript = {
                 "from pig_util import outputSchema",
@@ -181,7 +248,7 @@ public class TestStreamingUDF {
     
     @Test
     public void testPythonUDF__withBigDecimal() throws Exception {
-        pigServerLocal = new PigServer(ExecType.LOCAL);
+        pigServerLocal = new PigServer(Util.getLocalTestMode());
 
         String[] pythonScript = {
                 "from pig_util import outputSchema",
@@ -211,7 +278,7 @@ public class TestStreamingUDF {
     
     @Test
     public void testPythonUDF__withDateTime() throws Exception {
-        pigServerLocal = new PigServer(ExecType.LOCAL);
+        pigServerLocal = new PigServer(Util.getLocalTestMode());
 
         String[] pythonScript = {
                 "from pig_util import outputSchema",
@@ -239,7 +306,7 @@ public class TestStreamingUDF {
     
     @Test
     public void testPythonUDF__allTypes() throws Exception {
-        pigServerLocal = new PigServer(ExecType.LOCAL);
+        pigServerLocal = new PigServer(Util.getLocalTestMode());
 
         String[] pythonScript = {
             "# -*- coding: utf-8 -*-",

@@ -37,7 +37,7 @@ import org.joda.time.DateTimeZone;
  * This class was used to handle reading and writing of intermediate
  *  results of data types. Now that functionality is in {@link BinInterSedes}
  *  This class could also be used for storing permanent results, it used
- *  by BinStorage and Zebra through DefaultTuple class.
+ *  by BinStorage through DefaultTuple class.
  */
 @InterfaceAudience.Private
 @InterfaceStability.Stable
@@ -174,10 +174,14 @@ public class DataReaderWriter {
                 return Double.valueOf(in.readDouble());
 
             case DataType.BIGINTEGER:
-                return new BigInteger(((DataByteArray)readDatum(in, in.readByte())).get());
+                byte[] bigIntegerByteArray = new byte[in.readInt()];
+                in.readFully(bigIntegerByteArray);
+                return new BigInteger(bigIntegerByteArray);
 
             case DataType.BIGDECIMAL:
-                return new BigDecimal((String)readDatum(in, in.readByte()));
+                byte[] bt = new byte[in.readInt()];
+                in.readFully(bt);
+                return new BigDecimal(new String(bt, DataReaderWriter.UTF8));
 
             case DataType.BOOLEAN:
                 return Boolean.valueOf(in.readBoolean());
@@ -315,12 +319,16 @@ public class DataReaderWriter {
 
             case DataType.BIGINTEGER:
                 out.writeByte(DataType.BIGINTEGER);
-                writeDatum(out, ((BigInteger)val).toByteArray());
+                byte[] bytes = ((BigInteger)val).toByteArray();
+                out.writeInt(bytes.length);
+                out.write(bytes);
                 break;
 
             case DataType.BIGDECIMAL:
                 out.writeByte(DataType.BIGDECIMAL);
-                writeDatum(out, ((BigDecimal)val).toString());
+                byte[] bt =  ((BigDecimal)val).toString().getBytes(DataReaderWriter.UTF8);
+                out.writeInt(bt.length);
+                out.write(bt);
                 break;
 
             case DataType.CHARARRAY: {

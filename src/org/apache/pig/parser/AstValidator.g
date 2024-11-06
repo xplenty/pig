@@ -117,6 +117,7 @@ statement : general_statement
           | split_statement
           | realias_statement
           | register_statement
+          | assert_statement
 ;
 
 split_statement : split_clause
@@ -126,6 +127,9 @@ realias_statement : realias_clause
 ;
 
 register_statement : ^( REGISTER QUOTEDSTRING (USING IDENTIFIER AS IDENTIFIER)? )
+;
+
+assert_statement : assert_clause
 ;
 
 general_statement : ^( STATEMENT ( alias { aliases.add( $alias.name ); } )? op_clause parallel_clause? )
@@ -272,7 +276,7 @@ tuple_type : ^( TUPLE_TYPE field_def_list? )
 bag_type : ^( BAG_TYPE IDENTIFIER? tuple_type? )
 ;
 
-map_type : ^( MAP_TYPE type? )
+map_type : ^( MAP_TYPE IDENTIFIER? type? )
 ;
 
 func_clause : ^( FUNC_REF func_name )
@@ -607,7 +611,7 @@ split_branch
    }
 ;
 
-split_otherwise : ^( OTHERWISE alias )
+split_otherwise : ^( OTHERWISE alias ALL? )
    {
        aliases.add( $alias.name );
    }
@@ -724,6 +728,7 @@ eid : rel_str_op
     | TOBAG
     | TOMAP
     | TOTUPLE
+    | ASSERT
 ;
 
 // relational operator

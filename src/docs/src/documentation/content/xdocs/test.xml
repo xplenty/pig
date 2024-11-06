@@ -71,16 +71,16 @@ B = FILTER A BY name matches 'J.+';
 
 C = GROUP B BY name;
 
-D = FOREACH B GENERATE COUNT(B.age);
+D = FOREACH C GENERATE COUNT(B.age);
 
 DESCRIBE A;
-A: {group, B: (name: chararray,age: int,gpa: float}
+A: {name: chararray,age: int,gpa: float}
 
 DESCRIBE B;
-B: {group, B: (name: chararray,age: int,gpa: float}
+B: {name: chararray,age: int,gpa: float}
 
 DESCRIBE C;
-C: {group, chararry,B: (name: chararray,age: int,gpa: float}
+C: {group: chararray,B: {(name: chararray,age: int,gpa: float)}}
 
 DESCRIBE D;
 D: {long}
@@ -159,7 +159,7 @@ D: {age: bytearray}
    
    <p>
    Note that production scripts SHOULD NOT use DUMP as it will disable multi-query optimizations and is likely to slow down execution 
-   (see <a href="perf.html#Store-Dump">Store vs. Dump</a>).
+   (see <a href="perf.html#store-dump">Store vs. Dump</a>).
    </p>
    </section>
    
@@ -335,6 +335,21 @@ Local Rearrange[tuple]{chararray}(false) - xxx-Fri Dec 05 19:42:29 UTC 2008-34
 |   Project[chararray][0] - xxx-Fri Dec 05 19:42:29 UTC 2008-35
  <em>etc ... </em> 
 
+If you are running in Tez mode, Map Reduce Plan will be replaced with Tez Plan:
+
+#--------------------------------------------------
+# There are 1 DAGs in the session
+#--------------------------------------------------
+#--------------------------------------------------
+# TEZ DAG plan: PigLatin:185.pig-0_scope-0
+#--------------------------------------------------
+Tez vertex scope-21	->	Tez vertex scope-22,
+Tez vertex scope-22
+
+Tez vertex scope-21
+# Plan on vertex
+B: Local Rearrange[tuple]{chararray}(false) - scope-35	->	 scope-22
+ <em>etc ... </em> 
 </source> 
  </section></section>
   
@@ -505,7 +520,7 @@ grunt> illustrate -script visits.pig
 <!-- =========================================================================== -->
 <!-- DIAGNOSTIC OPERATORS -->    
 <section id="mapreduce-job-ids">
-<title>Pig Scripts and MapReduce Job IDs</title>
+<title>Pig Scripts and MapReduce Job IDs (MapReduce mode only)</title>
    <p>Complex Pig scripts often generate many MapReduce jobs. To help you debug a script, Pig prints a summary of the execution that shows which relations (aliases) are mapped to each MapReduce job. </p>
 <source>
 JobId Maps Reduces MaxMapTime MinMapTIme AvgMapTime MaxReduceTime 
@@ -525,7 +540,7 @@ job_201004271216_12714 1 1 3 3 3 12 12 12 D ORDER_BY,COMBINER
 
 <p>Pig Statistics is a framework for collecting and storing script-level statistics for Pig Latin. Characteristics of Pig Latin scripts and the resulting MapReduce jobs are collected while the script is executed. These statistics are then available for Pig users and tools using Pig (such as Oozie) to retrieve after the job is done.</p>
 
-<p>The new Pig statistics and the existing Hadoop statistics can also be accessed via the Hadoop job history file (and job xml file). Piggybank has a HadoopJobHistoryLoader which acts as an example of using Pig itself to query these statistics (the loader can be used as a reference implementation but is NOT supported for production use).</p>
+<p>The new Pig statistics and the existing Hadoop statistics can also be accessed via the Hadoop job history file (and job xml file).</p>
 
 <!-- +++++++++++++++++++++++++++++++++++++++ -->
 <section>
@@ -533,12 +548,17 @@ job_201004271216_12714 1 1 3 3 3 12 12 12 D ORDER_BY,COMBINER
 
 <p>Several new public classes make it easier for external tools such as Oozie to integrate with Pig statistics. </p>
 
-<p>The Pig statistics are available here: <a href="http://pig.apache.org/docs/r0.9.0/api/">http://pig.apache.org/docs/r0.9.0/api/</a></p>
+<p>The Pig statistics are available here: <a href="http://pig.apache.org/docs/r0.17.0/api/">http://pig.apache.org/docs/r0.17.0/api/</a></p>
 
 <p id="stats-classes">The stats classes are in the package: org.apache.pig.tools.pigstats</p>
 <ul>
 <li>PigStats</li>
+<li>SimplePigStats</li>
+<li>EmbeddedPigStats</li>
 <li>JobStats</li>
+<li>TezPigScriptStats</li>
+<li>TezDAGStats</li>
+<li>TezVertexStats</li>
 <li>OutputStats</li>
 <li>InputStats</li>
 </ul>
@@ -572,6 +592,8 @@ public interface PigProgressNotificationListener extends java.util.EventListener
     public void launchCompletedNotification(int numJobsSucceeded);
 }
 </source>
+<p>Depends on the type of the pig script, PigRunner.run() returns a particular subclass of PigStats: SimplePigStats(MapReduce/local mode), TezPigScriptStats(Tez/Tez local mode) or EmbeddedPigStats(embedded script). SimplePigStats contains a map of JobStats which capture the stats for each MapReduce job of the Pig script. TezPigScriptStats contains a map of TezDAGStats which capture the stats for each Tez DAG of the Pig script, and TezDAGStats contains a map of TezVertexStats which capture the stats for each vertex within the Tez DAG. Depending on the execution type, EmbeddedPigStats contains a map of SimplePigStats or TezPigScriptStats, which captures the Pig job launched in the embeded script. </p>
+<p>If one is running Pig in Tez mode (or both Tez/MapReduce mode), should pass PigTezProgressNotificationListener which extends PigProgressNotificationListener to PigRunner.run() to make sure to get notification in both Tez mode or MapReduce mode. </p>
 </section>
 
 <!-- +++++++++++++++++++++++++++++++++++++++ -->
@@ -686,93 +708,6 @@ public interface PigProgressNotificationListener extends java.util.EventListener
 </tr>
 </table>
 </section>
-
-
-<!-- +++++++++++++++++++++++++++++++++++++++ -->
-<section id="hadoop-job-history-loader">
-<title>Hadoop Job History Loader</title>
-<p>The HadoopJobHistoryLoader in Piggybank loads Hadoop job history files and job xml files from file system. For each MapReduce job, the loader produces a tuple with schema (j:map[], m:map[], r:map[]). The first map in the schema contains job-related entries. Here are some of important key names in the map: </p>
-
-<table>
-<tr>
-<td>
-<p>PIG_SCRIPT_ID</p>
-<p>CLUSTER </p>
-<p>QUEUE_NAME</p>
-<p>JOBID</p>
-<p>JOBNAME</p>
-<p>STATUS</p>
-</td>
-<td>
-<p>USER </p>
-<p>HADOOP_VERSION  </p>
-<p>PIG_VERSION</p>
-<p>PIG_JOB_FEATURE</p>
-<p>PIG_JOB_ALIAS </p>
-<p>PIG_JOB_PARENTS</p>
-</td>
-<td>
-<p>SUBMIT_TIME</p>
-<p>LAUNCH_TIME</p>
-<p>FINISH_TIME</p>
-<p>TOTAL_MAPS</p>
-<p>TOTAL_REDUCES</p>
-</td>
-</tr>
-</table>
-<p></p>
-<p>Examples that use the loader to query Pig statistics are shown below.</p>
-</section>
-
-<!-- +++++++++++++++++++++++++++++++++++++++ -->
-<section>
-<title>Examples</title>
-<p>Find scripts that generate more then three MapReduce jobs:</p>
-<source>
-a = load '/mapred/history/done' using HadoopJobHistoryLoader() as (j:map[], m:map[], r:map[]);
-b = group a by (j#'PIG_SCRIPT_ID', j#'USER', j#'JOBNAME');
-c = foreach b generate group.$1, group.$2, COUNT(a);
-d = filter c by $2 > 3;
-dump d;
-</source>
-
-<p>Find the running time of each script (in seconds): </p>
-<source>
-a = load '/mapred/history/done' using HadoopJobHistoryLoader() as (j:map[], m:map[], r:map[]);
-b = foreach a generate j#'PIG_SCRIPT_ID' as id, j#'USER' as user, j#'JOBNAME' as script_name, 
-         (Long) j#'SUBMIT_TIME' as start, (Long) j#'FINISH_TIME' as end;
-c = group b by (id, user, script_name)
-d = foreach c generate group.user, group.script_name, (MAX(b.end) - MIN(b.start)/1000;
-dump d;
-</source>
-
-<p>Find the number of scripts run by user and queue on a cluster: </p>
-<source>
-a = load '/mapred/history/done' using HadoopJobHistoryLoader() as (j:map[], m:map[], r:map[]);
-b = foreach a generate j#'PIG_SCRIPT_ID' as id, j#'USER' as user, j#'QUEUE_NAME' as queue;
-c = group b by (id, user, queue) parallel 10;
-d = foreach c generate group.user, group.queue, COUNT(b);
-dump d;
-</source>
-
-<p>Find scripts that have failed jobs: </p>
-<source>
-a = load '/mapred/history/done' using HadoopJobHistoryLoader() as (j:map[], m:map[], r:map[]);
-b = foreach a generate (Chararray) j#'STATUS' as status, j#'PIG_SCRIPT_ID' as id, j#'USER' as user, j#'JOBNAME' as script_name, j#'JOBID' as job;
-c = filter b by status != 'SUCCESS';
-dump c;
-</source>
-
-<p>Find scripts that use only the default parallelism: </p>
-<source>
-a = load '/mapred/history/done' using HadoopJobHistoryLoader() as (j:map[], m:map[], r:map[]);
-b = foreach a generate j#'PIG_SCRIPT_ID' as id, j#'USER' as user, j#'JOBNAME' as script_name, (Long) r#'NUMBER_REDUCES' as reduces;
-c = group b by (id, user, script_name) parallel 10;
-d = foreach c generate group.user, group.script_name, MAX(b.reduces) as max_reduces;
-e = filter d by max_reduces == 1;
-dump e;
-</source>
-</section>
 </section>   
 
 <!-- =========================================================================== -->
@@ -828,9 +763,9 @@ $pig_trunk ant pigunit-jar
 
 <!-- +++++++++++++++++++++++++++++++++++++++ -->
     <section>
-      <title>Mapreduce Mode</title>
-      <p>PigUnit also runs in Pig's mapreduce mode. Mapreduce mode requires you to use a Hadoop cluster and HDFS installation.
-        It is enabled when the Java system property pigunit.exectype.cluster is set to any value: e.g. -Dpigunit.exectype.cluster=true or System.getProperties().setProperty("pigunit.exectype.cluster", "true"). The cluster you select must be specified in the CLASSPATH (similar to the HADOOP_CONF_DIR variable). 
+      <title>Other Modes</title>
+      <p>PigUnit also runs in Pig's mapreduce/tez/tez_local mode. Mapreduce/Tez mode requires you to use a Hadoop cluster and HDFS installation.
+        It is enabled when the Java system property pigunit.exectype is set to specific values (mr/tez/tez_local): e.g. -Dpigunit.exectype=mr or System.getProperties().setProperty("pigunit.exectype", "mr"), which means PigUnit will run in mr mode. The cluster you select to run mr/tez test must be specified in the CLASSPATH (similar to the HADOOP_CONF_DIR variable). 
       </p>
     </section>
     </section>
@@ -846,7 +781,7 @@ $pig_trunk ant pigunit-jar
       
       <p>The example included here computes the top N of the most common queries. 
         The Pig script, top_queries.pig, is similar to the 
-        <a href="start.html#Pig-Script-1">Query Phrase Popularity</a> 
+        <a href="start.html#pig-script-1">Query Phrase Popularity</a> 
         in the Pig tutorial. It expects an input a file of queries and a parameter n (n is 2 in our case in order to do a top 2). 
       </p>
       
@@ -939,6 +874,50 @@ junit.framework.ComparisonFailure: null expected:&lt;...ahoo,3)
         at junit.framework.Assert.assertEquals(Assert.java:81)
         at junit.framework.Assert.assertEquals(Assert.java:87)
         at org.apache.pig.pigunit.PigTest.assertEquals(PigTest.java:272)
+</source>
+      </section>
+      
+<!-- +++++++++++++++++++++++++++++++++++++++ -->      
+      <section>
+        <title>Mocking</title>
+
+        <p>Sometimes you need to mock out the data in specific aliases. Using PigTest's 
+        mocking you can override an alias everywhere it is assigned. If you do not know
+        the schema (or want to keep your test dynamic) you can use PigTest.getAliasToSchemaMap() 
+        to determine the schema. If you chose to go this route, you should cache the map for
+        the specific script to ensure efficient execution.
+        </p>
+
+        <source>
+  @Test
+  public void testTop2Queries() {
+    String[] args = {
+        "n=2",
+        };
+ 
+    PigTest test = new PigTest("top_queries.pig", args);
+ 
+    String[] mockData = {
+        "yahoo",
+        "yahoo",
+        "yahoo",
+        "twitter",
+        "facebook",
+        "facebook",
+        "linkedin",
+    };
+    
+    //You should cache the map if you can
+    String schema = test.getAliasToSchemaMap().get("data");
+    test.mockAlias("data", mockData, schema);
+ 
+    String[] output = {
+        "(yahoo,3)",
+        "(facebook,2)",
+    };
+ 
+    test.assertOutputAnyOrder("queries_limit", output);
+  }
 </source>
       </section>
     </section>

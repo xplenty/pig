@@ -18,13 +18,13 @@
 package org.apache.pig.backend.hadoop.executionengine.mapReduceLayer;
 
 import java.io.IOException;
+import java.math.BigInteger;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.WritableComparator;
-import org.apache.hadoop.mapred.JobConf;
 import org.apache.pig.backend.hadoop.BigIntegerWritable;
 import org.apache.pig.impl.io.NullableBigIntegerWritable;
 import org.apache.pig.impl.util.ObjectSerializer;
@@ -46,14 +46,8 @@ public class PigBigIntegerRawComparator extends WritableComparator implements Co
 
     @Override
     public void setConf(Configuration conf) {
-        if (!(conf instanceof JobConf)) {
-            mLog.warn("Expected jobconf in setConf, got "
-                    + conf.getClass().getName());
-            return;
-        }
-        JobConf jconf = (JobConf)conf;
         try {
-            mAsc = (boolean[])ObjectSerializer.deserialize(jconf.get(
+            mAsc = (boolean[])ObjectSerializer.deserialize(conf.get(
                 "pig.sortOrder"));
         } catch (IOException ioe) {
             mLog.error("Unable to deserialize pig.sortOrder "
@@ -79,8 +73,10 @@ public class PigBigIntegerRawComparator extends WritableComparator implements Co
         if (b1[s1] == 0 && b2[s2] == 0) {
             rc = mWrappedComp.compare(b1, s1 + 1, l1 - 2, b2, s2 + 1, l2 - 2);
         } else {
-            // For sorting purposes two nulls are equal.
-            if (b1[s1] != 0 && b2[s2] != 0) rc = 0;
+            // Two nulls are equal if indices are same
+            if (b1[s1] != 0 && b2[s2] != 0) {
+                rc = b1[s1 + 1] - b2[s2 + 1];
+            }
             else if (b1[s1] != 0) rc = -1;
             else rc = 1;
         }
@@ -96,10 +92,12 @@ public class PigBigIntegerRawComparator extends WritableComparator implements Co
 
         // If either are null, handle differently.
         if (!ndw1.isNull() && !ndw2.isNull()) {
-            rc = ((Double)ndw1.getValueAsPigType()).compareTo((Double)ndw2.getValueAsPigType());
+            rc = ((BigInteger)ndw1.getValueAsPigType()).compareTo((BigInteger)ndw2.getValueAsPigType());
         } else {
-            // For sorting purposes two nulls are equal.
-            if (ndw1.isNull() && ndw2.isNull()) rc = 0;
+            // Two nulls are equal if indices are same
+            if (ndw1.isNull() && ndw2.isNull()) {
+                rc = ndw1.getIndex() - ndw2.getIndex();
+            }
             else if (ndw1.isNull()) rc = -1;
             else rc = 1;
         }

@@ -29,7 +29,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Properties;
 
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.builtin.BinStorage;
@@ -52,7 +51,7 @@ public class TestDataBagAccess {
 
     @Before
     public void setUp() throws Exception{
-        pigServer = new PigServer(ExecType.LOCAL, new Properties());
+        pigServer = new PigServer(Util.getLocalTestMode(), new Properties());
     }
 
     @Test
@@ -89,7 +88,7 @@ public class TestDataBagAccess {
         File input = Util.createInputFile("tmp", "",
                 new String[] {"sampledata\tnot_used"});
         pigServer.registerQuery("a = load '"
-                + Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext()) + "';");
+                + Util.generateURI(input.toString(), pigServer.getPigContext()) + "';");
         pigServer.registerQuery("b = foreach a generate {(16, 4.0e-2, 'hello', -101)} as mybag:{t:(i: int, d: double, c: chararray, e : int)};");
         pigServer.registerQuery("c = foreach b generate mybag.i, mybag.d, mybag.c, mybag.e;");
         Iterator<Tuple> it = pigServer.openIterator("c");
@@ -112,7 +111,7 @@ public class TestDataBagAccess {
         pigServer.setValidateEachStatement(true);
         try {
             pigServer.registerQuery("a = load '"
-                    + Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext()) + "';");
+                    + Util.generateURI(input.toString(), pigServer.getPigContext()) + "';");
             pigServer.registerQuery("b = foreach a generate {(16, 4.0e-2, 'hello')} as mybag:{t:(i: int, d: double, c: chararray)};");
             pigServer.registerQuery("c = foreach b generate mybag.t;");
             pigServer.explain("c", System.out);
@@ -129,7 +128,7 @@ public class TestDataBagAccess {
         File input = Util.createInputFile("tmp", "",
                 new String[] {"sampledata\tnot_used"});
         pigServer.registerQuery("A = load '"
-                + Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext()) + "';");
+                + Util.generateURI(input.toString(), pigServer.getPigContext()) + "';");
         pigServer.registerQuery("B = foreach A generate {(('p1-t1-e1', 'p1-t1-e2'),('p1-t2-e1', 'p1-t2-e2'))," +
                 "(('p2-t1-e1', 'p2-t1-e2'), ('p2-t2-e1', 'p2-t2-e2'))};");
         pigServer.registerQuery("C = foreach B generate $0 as pairbag : { pair: ( t1: (e1, e2), t2: (e1, e2) ) };");
@@ -153,7 +152,7 @@ public class TestDataBagAccess {
         File input = Util.createInputFile("tmp", "",
                 new String[] {"somestring\t10\t{(a,10),(b,20)}"});
         pigServer.registerQuery("a = load '"
-                + Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext())
+                + Util.generateURI(input.toString(), pigServer.getPigContext())
                 + "' " + "as (str:chararray, intval:int, bg:bag{t:tuple(s:chararray, i:int)});");
         pigServer.registerQuery("b = foreach a generate str, intval, flatten(bg);");
         pigServer.registerQuery("c = foreach b generate str, intval, s, i;");
@@ -191,7 +190,7 @@ public class TestDataBagAccess {
         File input = Util.createInputFile("tmp", "",
                 new String[] {"a\tid1", "a\tid2", "a\tid3", "b\tid4", "b\tid5", "b\tid6"});
         pigServer.registerQuery("a = load '"
-                + Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext())
+                + Util.generateURI(input.toString(), pigServer.getPigContext())
                 + "' " + "as (s:chararray, id:chararray);");
         pigServer.registerQuery("b = group a by s;");
         Class[] loadStoreClasses = new Class[] { BinStorage.class, PigStorage.class };

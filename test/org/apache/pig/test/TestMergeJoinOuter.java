@@ -33,6 +33,7 @@ import java.util.Properties;
 import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecException;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRConfiguration;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MapReduceOper;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.plans.MROperPlan;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
@@ -59,14 +60,14 @@ public class TestMergeJoinOuter {
     private static final String INPUT_FILE1 = "testMergeJoinInput.txt";
     private static final String INPUT_FILE2 = "testMergeJoinInput2.txt";
     private PigServer pigServer;
-    private static MiniCluster cluster = MiniCluster.buildCluster();
+    private static MiniGenericCluster cluster = MiniGenericCluster.buildCluster();
     
     public TestMergeJoinOuter() throws ExecException{
         
         Properties props = cluster.getProperties();
-        props.setProperty("mapred.map.max.attempts", "1");
-        props.setProperty("mapred.reduce.max.attempts", "1");
-        pigServer = new PigServer(ExecType.MAPREDUCE, props);
+        props.setProperty(MRConfiguration.MAP_MAX_ATTEMPTS, "1");
+        props.setProperty(MRConfiguration.REDUCE_MAX_ATTEMPTS, "1");
+        pigServer = new PigServer(cluster.getExecType(), props);
     }
     
     @Before
@@ -167,7 +168,7 @@ public class TestMergeJoinOuter {
     
     @Test
     public void testLeftOuter() throws IOException {
-        
+
         pigServer.registerQuery("A = LOAD '"+INPUT_FILE1+"' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
         pigServer.registerQuery("B = LOAD '"+INPUT_FILE2+"' using "+ DummyIndexableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
 
@@ -196,7 +197,7 @@ public class TestMergeJoinOuter {
     
     @Test
     public void testRightOuter() throws IOException{
-        
+
         pigServer.registerQuery("A = LOAD '"+INPUT_FILE1+"' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
         pigServer.registerQuery("B = LOAD '"+INPUT_FILE2+"' using "+ DummyIndexableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
         pigServer.registerQuery("C = join A by c1 right, B by c1 using 'merge';");
@@ -223,7 +224,7 @@ public class TestMergeJoinOuter {
     
     @Test
     public void testFullOuter() throws IOException{
-        
+
         pigServer.registerQuery("A = LOAD '"+INPUT_FILE1+"' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
         pigServer.registerQuery("B = LOAD '"+INPUT_FILE2+"' using "+ DummyIndexableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
         pigServer.registerQuery("C = join A by c1 full, B by c1 using 'merge';");

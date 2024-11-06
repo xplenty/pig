@@ -18,16 +18,11 @@
 
 package org.apache.pig.newplan.logical.optimizer;
 
-import static org.apache.pig.ExecType.LOCAL;
 import static org.apache.pig.builtin.mock.Storage.tuple;
 import static org.junit.Assert.assertEquals;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 
-import org.apache.pig.PigRunner;
 import org.apache.pig.PigServer;
 import org.apache.pig.builtin.mock.Storage;
 import org.apache.pig.builtin.mock.Storage.Data;
@@ -39,8 +34,8 @@ import org.junit.Test;
 public class TestImplicitSplitOnTuple {
 
     @Test
-    public void testImplicitSplitterOnTuple() throws IOException {
-        PigServer pigServer = new PigServer(LOCAL);
+    public void testImplicitSplitterOnTuple() throws Exception {
+        PigServer pigServer = new PigServer(Util.getLocalTestMode());
         Data data = Storage.resetData(pigServer);
         data.set("input",
                 tuple("1", "1001", "101"),
@@ -61,7 +56,7 @@ public class TestImplicitSplitOnTuple {
                 "D2 = FOREACH tuplified GENERATE tuplify.memberId as memberId, tuplify.shopId as shopId, score AS score;"+
                 "J = JOIN D1 By shopId, D2 by shopId;"+
                 "K = FOREACH J GENERATE D1::memberId AS member_id1, D2::memberId AS member_id2, D1::shopId as shop;"+
-                "L = ORDER K by shop;"+
+                "L = ORDER K by shop, member_id1, member_id2;"+
                 "STORE L into 'output' using mock.Storage;");
         List<Tuple> list = data.get("output");
         assertEquals("list: "+list, 20, list.size());

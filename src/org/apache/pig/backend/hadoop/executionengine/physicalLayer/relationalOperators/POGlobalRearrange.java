@@ -49,6 +49,8 @@ public class POGlobalRearrange extends PhysicalOperator {
      */
     protected String customPartitioner;
 
+    private boolean cross = false;
+
     public String getCustomPartitioner() {
 		return customPartitioner;
 	}
@@ -72,7 +74,13 @@ public class POGlobalRearrange extends PhysicalOperator {
     public POGlobalRearrange(OperatorKey k, int rp, List inp) {
         super(k, rp, inp);
     }
-    
+
+    public POGlobalRearrange(POGlobalRearrange copy) throws ExecException {
+        super(copy);
+        this.cross = copy.cross;
+        this.customPartitioner = copy.customPartitioner;
+    }
+
     @Override
     public void visit(PhyPlanVisitor v) throws VisitorException {
         v.visitGlobalRearrange(this);
@@ -103,5 +111,13 @@ public class POGlobalRearrange extends PhysicalOperator {
     @Override
     public Tuple illustratorMarkup(Object in, Object out, int eqClassIndex) {
       return null;
+    }
+
+    public void setCross(boolean cross) {
+        this.cross = cross;
+    }
+
+    public boolean isCross() {
+        return cross;
     }
 }

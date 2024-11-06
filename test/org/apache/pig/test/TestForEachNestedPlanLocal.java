@@ -19,7 +19,6 @@
 package org.apache.pig.test;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -30,8 +29,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
+import org.apache.pig.builtin.mock.Storage;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.test.utils.TestHelper;
 import org.junit.Test;
@@ -41,7 +40,7 @@ public class TestForEachNestedPlanLocal {
     private PigServer pig ;
 
     public TestForEachNestedPlanLocal() throws Throwable {
-        pig = new PigServer(ExecType.LOCAL) ;
+        pig = new PigServer(Util.getLocalTestMode()) ;
     }
 
     Boolean[] nullFlags = new Boolean[]{ false, true };
@@ -52,7 +51,7 @@ public class TestForEachNestedPlanLocal {
             System.err.println("Running testInnerOrderBy with nullFlags set to :" + nullFlags[i]);
             File tmpFile = genDataSetFile1(nullFlags[i]);
             pig.registerQuery("a = load '"
-                    + Util.generateURI(Util.encodeEscape(tmpFile.toString()), pig.getPigContext())
+                    + Util.generateURI(tmpFile.toString(), pig.getPigContext())
                     + "'; ");
             pig.registerQuery("b = group a by $0; ");
             pig.registerQuery("c = foreach b { " + "     c1 = order $1 by *; "
@@ -73,25 +72,15 @@ public class TestForEachNestedPlanLocal {
     public void testInnerLimit() throws Exception {
         File tmpFile = genDataSetFileOneGroup();
         pig.registerQuery("a = load '"
-                + Util.generateURI(Util.encodeEscape(tmpFile.toString()), pig.getPigContext())
+                + Util.generateURI(tmpFile.toString(), pig.getPigContext())
                 + "'; ");
         pig.registerQuery("b = group a by $0; ");
         pig.registerQuery("c = foreach b { " + "     c1 = limit $1 5; "
                 + "    generate COUNT(c1); " + "};");
         Iterator<Tuple> it = pig.openIterator("c");
-        Tuple t = null;
-        long count[] = new long[3];
-        for (int i = 0; i < 3 && it.hasNext(); i++) {
-            t = it.next();
-            count[i] = (Long)t.get(0);
-        }
+        List<Tuple> expected = Util.getTuplesFromConstantTupleStrings(new String[] {"(5L)", "(5L)", "(3L)" });
 
-        assertFalse(it.hasNext());
-
-        // Pig's previous local mode was screwed up correcting that
-        assertEquals(5L, count[0]);
-        assertEquals(5L, count[1]);
-        assertEquals(3L, count[2]);
+        Util.checkQueryOutputsAfterSort(it, expected);
     }
 
     @Test
@@ -112,14 +101,33 @@ public class TestForEachNestedPlanLocal {
         pig.registerQuery("D = foreach C {"
                 + "crossed = cross user, session;"
                 + "generate crossed;" + "}");
-        Iterator<Tuple> expectedItr = expectedResults.iterator();
         Iterator<Tuple> actualItr = pig.openIterator("D");
-        while (expectedItr.hasNext() && actualItr.hasNext()) {
-            Tuple expectedTuple = expectedItr.next();
-            Tuple actualTuple = actualItr.next();
-            assertEquals(expectedTuple, actualTuple);
-        }
-        assertEquals(expectedItr.hasNext(), actualItr.hasNext());
+        Util.checkQueryOutputsAfterSort(actualItr, expectedResults);
+    }
+
+    @Test
+    public void testNestedCrossTwoRelationsLimit() throws Exception {
+        Storage.Data data = Storage.resetData(pig);
+        data.set("input",
+                Storage.tuple(Storage.bag(Storage.tuple(1, 1), Storage.tuple(1, 2)), Storage.bag(Storage.tuple(1, 3), Storage.tuple(1, 4))),
+                Storage.tuple(Storage.bag(Storage.tuple(2, 1), Storage.tuple(2, 2)), Storage.bag(Storage.tuple(2, 3))),
+                Storage.tuple(Storage.bag(Storage.tuple(3, 1)), Storage.bag(Storage.tuple(3, 2))));
+
+        pig.setBatchOn();
+        pig.registerQuery("A = load 'input' using mock.Storage() as (bag1:bag{tup1:tuple(f1:int, f2:int)}, bag2:bag{tup2:tuple(f3:int, f4:int)});");
+        pig.registerQuery("B = foreach A {"
+                + "crossed = cross bag1, bag2;"
+                + "filtered = filter crossed by f1 == f3;"
+                + "lmt = limit filtered 1;"
+                + "generate FLATTEN(lmt);" + "}");
+        pig.registerQuery("store B into 'output' using mock.Storage();");
+
+        pig.executeBatch();
+
+        List<Tuple> actualResults = data.get("output");
+        List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
+                new String[] {"(1, 1, 1, 3)", "(2, 1, 2, 3)", "(3, 1, 3, 2)"});
+        Util.checkQueryOutputs(actualResults.iterator(), expectedResults);
     }
 
     @Test
@@ -142,14 +150,8 @@ public class TestForEachNestedPlanLocal {
                 + "crossed = cross user, distinct_session;"
                 + "filtered = filter crossed by user::region == distinct_session::region;"
                 + "generate filtered;" + "}");
-        Iterator<Tuple> expectedItr = expectedResults.iterator();
         Iterator<Tuple> actualItr = pig.openIterator("D");
-        while (expectedItr.hasNext() && actualItr.hasNext()) {
-            Tuple expectedTuple = expectedItr.next();
-            Tuple actualTuple = actualItr.next();
-            assertEquals(expectedTuple, actualTuple);
-        }
-        assertEquals(expectedItr.hasNext(), actualItr.hasNext());
+        Util.checkQueryOutputsAfterSort(actualItr, expectedResults);
     }
 
     @Test
@@ -173,14 +175,8 @@ public class TestForEachNestedPlanLocal {
         pig.registerQuery("D = foreach C {"
                 + "crossed = cross user, session, profile;"
                 + "generate crossed;" + "}");
-        Iterator<Tuple> expectedItr = expectedResults.iterator();
         Iterator<Tuple> actualItr = pig.openIterator("D");
-        while (expectedItr.hasNext() && actualItr.hasNext()) {
-            Tuple expectedTuple = expectedItr.next();
-            Tuple actualTuple = actualItr.next();
-            assertEquals(expectedTuple, actualTuple);
-        }
-        assertEquals(expectedItr.hasNext(), actualItr.hasNext());
+        Util.checkQueryOutputsAfterSort(actualItr, expectedResults);
     }
 
     /*

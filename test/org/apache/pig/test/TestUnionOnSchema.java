@@ -25,12 +25,13 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
 
-import junit.framework.Assert;
+import org.junit.Assert;
 
 import org.apache.pig.EvalFunc;
-import org.apache.pig.ExecType;
 import org.apache.pig.PigException;
 import org.apache.pig.PigServer;
+import org.apache.pig.builtin.mock.Storage;
+import org.apache.pig.builtin.mock.Storage.Data;
 import org.apache.pig.data.DataByteArray;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
@@ -51,6 +52,7 @@ public class TestUnionOnSchema  {
     private static final String INP_FILE_2NUMS = "TestUnionOnSchemaInput1";
     private static final String INP_FILE_2NUM_1CHAR_1BAG = "TestUnionOnSchemaInput2";
     private static final String INP_FILE_EMPTY= "TestUnionOnSchemaInput3";
+    private static final String INP_FILE_3NUMS = "TestUnionOnSchemaInput4";
     
     @Before
     public void setUp() throws Exception {
@@ -77,6 +79,11 @@ public class TestUnionOnSchema  {
 
         //3rd input - empty file
         Util.createLocalInputFile(INP_FILE_EMPTY, new String[0]);
+        
+        // 4th input
+        String[] input4 = {"1\t2\t3","4\t5\t6",};
+        Util.createLocalInputFile(INP_FILE_3NUMS, input4);
+
     }
     
     @AfterClass
@@ -89,12 +96,10 @@ public class TestUnionOnSchema  {
 
     /**
      * Test UNION ONSCHEMA on two inputs with same schema
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaSameSchema() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaSameSchema() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int, j : int);"
             + "l2 = load '" + INP_FILE_2NUMS + "' as (i : int, j : int);"
@@ -121,12 +126,10 @@ public class TestUnionOnSchema  {
     
     /**
      * Test UNION ONSCHEMA with operations after the union
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaFilter() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaFilter() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int, x : int);"
             + "l2 = load '" + INP_FILE_2NUMS + "' as (i : int, j : int);"
@@ -154,12 +157,10 @@ public class TestUnionOnSchema  {
     
     /**
      * Test UNION ONSCHEMA with operations after the union
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaSuccOps() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaSuccOps() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int);"
             + "l2 = load '" + INP_FILE_2NUMS + "' as (x : int, y : int);"
@@ -187,12 +188,10 @@ public class TestUnionOnSchema  {
     
     /**
      * Test UNION ONSCHEMA with cast from bytearray to another type
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaCastOnByteArray() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaCastOnByteArray() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             "  l1 = load '" + INP_FILE_2NUMS + "' as (i, j);"
             + " f1 = foreach l1 generate (int)i, (int)j;"
@@ -216,12 +215,10 @@ public class TestUnionOnSchema  {
     /**
      * Test UNION ONSCHEMA where a common column has additional 'namespace' part
      *  in the column name in one of the inputs
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaScopedColumnName() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaScopedColumnName() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query_prefix = 
         "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int, j : int); " 
         + "g = group l1 by i; "
@@ -259,12 +256,10 @@ public class TestUnionOnSchema  {
     /**
      * Test UNION ONSCHEMA where a common column has additional 'namespace' part
      *  in the column name in both the inputs
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaScopedColumnNameBothInp1() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaScopedColumnNameBothInp1() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query = 
         "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int, j : int); " 
         + "g1 = group l1 by i; "
@@ -295,12 +290,10 @@ public class TestUnionOnSchema  {
     /**
      * Test UNION ONSCHEMA where a common column has additional 'namespace' part
      *  in the column name in both the inputs
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaScopedColumnNameBothInp2() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaScopedColumnNameBothInp2() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             "   l1 = load '" + INP_FILE_2NUMS + "' as (i : int, j : int); " 
             + " l2 = load '" + INP_FILE_2NUMS + "' as (i : int, x : chararray); " 
@@ -333,11 +326,9 @@ public class TestUnionOnSchema  {
      * Test UNION ONSCHEMA where a common column has additional 'namespace' part
      *  in the column name in one of the inputs.
      *  Negative test case
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaScopedColumnNameNeg() throws IOException, ParserException {
+    public void testUnionOnSchemaScopedColumnNameNeg() throws Exception {
         
         String expectedErr = "Found more than one match: l1::i, l2::i";
         String query_prefix =
@@ -359,12 +350,10 @@ public class TestUnionOnSchema  {
     /**
      * Test UNION ONSCHEMA on two inputs with same column names, but different
      * numeric types - test type promotion
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaDiffNumType() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaDiffNumType() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int, j : double);"
             + "l2 = load '" + INP_FILE_2NUMS + "' as (i : long, j : float);"
@@ -389,12 +378,10 @@ public class TestUnionOnSchema  {
 
     /**
      * Test UNION ONSCHEMA on two inputs with no common columns
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaNoCommonCols() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaNoCommonCols() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int, j : int);"
             + "l2 = load '" + INP_FILE_2NUMS + "' as (x : long, y : float);"
@@ -417,12 +404,10 @@ public class TestUnionOnSchema  {
     
     /**
      * Test UNION ONSCHEMA on two inputs , one input with additional columns
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaAdditionalColumn() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaAdditionalColumn() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int, j : int);"
             + "l2 = load '" + INP_FILE_2NUM_1CHAR_1BAG + "' as " 
@@ -449,15 +434,52 @@ public class TestUnionOnSchema  {
         Util.checkQueryOutputsAfterSort(it, expectedRes);
     }
     
+    @Test
+    public void testUnionOnSchemaAdditionalColumnsWithImplicitSplit() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
+        Data data = Storage.resetData(pig);
+        
+        // Use batch to force multiple outputs from relation l3. This causes 
+        // ImplicitSplitInsertVisitor to call SchemaResetter. 
+        pig.setBatchOn();
+        
+        String query =
+            "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int, j: int);"
+            + "l2 = load '" + INP_FILE_3NUMS + "' as (i : int, j : int, k : int);" 
+            + "l3 = load '" + INP_FILE_EMPTY + "' as (i : int, j : int, k : int, l :int);"
+            + "u = union onschema l1, l2, l3;"
+            + "store u into 'out1' using mock.Storage;"
+            + "store l3 into 'out2' using mock.Storage;"
+        ;
+
+        Util.registerMultiLineQuery(pig, query);
+        
+        pig.executeBatch();
+        
+        
+        List<Tuple> list1 = data.get("out1");
+        List<Tuple> list2 = data.get("out2");
+        
+        List<Tuple> expectedRes = 
+                Util.getTuplesFromConstantTupleStrings(
+                        new String[] {
+                                "(1,2,null,null)",
+                                "(5,3,null,null)",
+                                "(1,2,3,null)",
+                                "(4,5,6,null)",
+                        });
+        
+        Util.checkQueryOutputsAfterSort(list1, expectedRes);
+        
+        assertEquals(0, list2.size());
+    }
     
     /**
      * Test UNION ONSCHEMA on 3 inputs 
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchema3Inputs() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchema3Inputs() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int, j : int); "
             + "l2 = load '" + INP_FILE_2NUMS + "' as (i : double, x : int); "            
@@ -487,12 +509,10 @@ public class TestUnionOnSchema  {
 
     /**
      * Test UNION ONSCHEMA with bytearray type 
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaByteArrayConversions() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaByteArrayConversions() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             " l1 = load '" + INP_FILE_2NUM_1CHAR_1BAG + "' as " 
             + "  (i : bytearray, x : bytearray, j : bytearray " 
@@ -526,11 +546,9 @@ public class TestUnionOnSchema  {
     
     /**
      * negative test - test error on no schema
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaNoSchema() throws IOException, ParserException {
+    public void testUnionOnSchemaNoSchema() throws Exception {
         String expectedErr = "UNION ONSCHEMA cannot be used with " +
         "relations that have null schema";
         String query =
@@ -551,11 +569,9 @@ public class TestUnionOnSchema  {
     
     /**
      * negative test - test error on null alias in one of the FieldSchema
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaNullAliasInFieldSchema() throws IOException, ParserException {
+    public void testUnionOnSchemaNullAliasInFieldSchema() throws Exception {
         String expectedErr = "Schema of relation f has a null fieldschema for " +
         		"column(s). Schema ::long,y:float";
         String query =
@@ -568,8 +584,8 @@ public class TestUnionOnSchema  {
     }
 
 
-    private void checkSchemaEx(String query, String expectedErr) throws IOException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    private void checkSchemaEx(String query, String expectedErr) throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
 
         boolean foundEx = false;
         try{
@@ -594,17 +610,23 @@ public class TestUnionOnSchema  {
 
     /**
      * test union with incompatible types in schema
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaIncompatibleTypes() throws IOException, ParserException {
+    public void testUnionOnSchemaIncompatibleTypes() throws Exception {
         String query =
             "  l1 = load '" + INP_FILE_2NUMS + "' as (x : long, y : chararray);"
             + "l2 = load '" + INP_FILE_2NUMS + "' as (x : long, y : float);"
             + "u = union onschema l1, l2;";
 
-        checkSchemaEquals(query, "x : long, y : bytearray");
+        checkSchemaEx(query, "Cannot cast from chararray to bytearray");
+
+        //without "onschema"
+        query =
+            "  l1 = load '" + INP_FILE_2NUMS + "' as (x : long, y : chararray);"
+            + "l2 = load '" + INP_FILE_2NUMS + "' as (x : long, y : float);"
+            + "u = union l1, l2;";
+
+        checkSchemaEx(query, "Cannot cast from chararray to bytearray");
 
 
         
@@ -613,8 +635,15 @@ public class TestUnionOnSchema  {
             + "l2 = load '" + INP_FILE_2NUMS + "' as (x : map[ ], y : chararray);"
             + "u = union onschema l1, l2;"
         ; 
-        checkSchemaEquals(query, "x : bytearray, y : chararray");
+        checkSchemaEx(query, "Cannot cast from long to bytearray");
                
+        query =
+            "  l1 = load '" + INP_FILE_2NUMS + "' as (x : long, y : chararray);"
+            + "l2 = load '" + INP_FILE_2NUMS + "' as (x : map[ ], y : chararray);"
+            + "u = union l1, l2;"
+        ;
+        checkSchemaEx(query, "Cannot cast from long to bytearray");
+
         // bag column with different internal column types
         query =
             "  l1 = load '" + INP_FILE_2NUMS 
@@ -646,15 +675,15 @@ public class TestUnionOnSchema  {
     }
     
     
-    private void checkSchemaEquals(String query, Schema expectedSch) throws IOException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    private void checkSchemaEquals(String query, Schema expectedSch) throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         Util.registerMultiLineQuery(pig, query);
         Schema sch = pig.dumpSchema("u");
         assertEquals("Checking expected schema", expectedSch, sch);      
     }
 
 
-    private void checkSchemaEquals(String query, String schemaStr) throws IOException, ParserException {
+    private void checkSchemaEquals(String query, String schemaStr) throws Exception {
         Schema expectedSch = Utils.getSchemaFromString(schemaStr);
         checkSchemaEquals(query, expectedSch);       
     }
@@ -662,12 +691,10 @@ public class TestUnionOnSchema  {
 
     /**
      * Test UNION ONSCHEMA with input relation having udfs
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaInputUdfs() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaInputUdfs() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int, j : chararray);"
             + "l2 = load '" + INP_FILE_2NUMS + "' as (i : int, j : chararray);"
@@ -699,12 +726,10 @@ public class TestUnionOnSchema  {
     /**
      * Test UNION ONSCHEMA with udf whose default type is different from
      * final type
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaUdfTypeEvolution() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaUdfTypeEvolution() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query_prefix =
             "  l1 = load '" + INP_FILE_2NUM_1CHAR_1BAG + "' as " 
             + "  (i : int, c : chararray, j : int " 
@@ -751,12 +776,10 @@ public class TestUnionOnSchema  {
     /**
      * Test UNION ONSCHEMA with udf whose default type is different from
      * final type - where udf is not in immediate input of union
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaUdfTypeEvolution2() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaUdfTypeEvolution2() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query_prefix =
             "  l1 = load '" + INP_FILE_2NUM_1CHAR_1BAG + "' as " 
             + "  (i : int, c : chararray, j : int " 
@@ -805,6 +828,7 @@ public class TestUnionOnSchema  {
      * Udf that has schema of tuple column with no inner schema 
      */
     public static class UDFTupleNullSchema extends EvalFunc <Tuple> {
+        @Override
         public Tuple exec(Tuple input) {
             return input;
         }
@@ -822,12 +846,10 @@ public class TestUnionOnSchema  {
     /**
      * Test UNION ONSCHEMA with input relation having column names with multiple
      * level of namespace in their names
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testUnionOnSchemaScopeMulti() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testUnionOnSchemaScopeMulti() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query_prefix =
             "  a = load '" + INP_FILE_2NUMS+ "' as (i:int, j:int); "
             + "b = group a by i; "
@@ -869,12 +891,10 @@ public class TestUnionOnSchema  {
     
     /**
      * Test query with a union-onschema having another as input 
-     * @throws IOException
-     * @throws ParserException
      */
     @Test
-    public void testTwoUnions() throws IOException, ParserException {
-        PigServer pig = new PigServer(ExecType.LOCAL);
+    public void testTwoUnions() throws Exception {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
         String query =
             "  l1 = load '" + INP_FILE_2NUMS + "' as (i : int, j : int);"
             + "l2 = load '" + INP_FILE_2NUMS + "' as (i : long, j : int);"

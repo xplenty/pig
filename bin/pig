@@ -55,8 +55,23 @@ debug=false
 
 remaining=()
 includeHCatalog="";
-addJarString=-Dpig.additional.jars\=;
+addJarString=-Dpig.additional.jars.uris\=;
 additionalJars="";
+prevArgExecType=false;
+isSparkMode=false;
+isSparkLocalMode=false;
+
+#verify the execType is SPARK or SPARK_LOCAL or not
+function processExecType(){
+    execType=$1
+    execTypeUpperCase=$(echo $execType |tr [a-z] [A-Z])
+    if [[ "$execTypeUpperCase" == "SPARK" ]]; then
+       isSparkMode=true
+    elif [[ "$execTypeUpperCase" == "SPARK_LOCAL" ]]; then
+       isSparkLocalMode=true
+    fi
+}
+
 # filter command line parameter
 for f in "$@"; do
      if [[ $f == "-secretDebugCmd" || $f == "-printCmdDebug" ]]; then
@@ -70,6 +85,13 @@ for f in "$@"; do
         includeHCatalog=true;
       elif [[ "$includeHCatalog" == "true" && $f == $addJarString* ]]; then
         additionalJars=`echo $f | sed s/$addJarString//`
+      elif [[ "$f" == "-x" || "$f" == "-exectype" ]]; then
+        prevArgExecType=true;
+        remaining[${#remaining[@]}]="$f"
+      elif [[ "$prevArgExecType" == "true" ]]; then
+        prevArgExecType=false;
+        processExecType $f
+        remaining[${#remaining[@]}]="$f"
       else
         remaining[${#remaining[@]}]="$f"
      fi
@@ -156,13 +178,15 @@ if [ "$includeHCatalog" == "true" ]; then
 
   # hcatalog jar name for 0.4 and earlier
   hcatJarOld=hcatalog-*.jar
-  # hcatalog jar name for 0.5
-  hcatJar=hcatalog-core-*.jar
-  hbaseHCatJar=hbase-storage-handler-*.jar
-  pigHCatJar=hcatalog-pig-adapter-*.jar
+  # hcatalog jar name for 0.5 and newer
+  hcatJar=*hcatalog-core-*.jar
+  hbaseHCatJar=*hbase-storage-handler-*.jar
+  pigHCatJar=*hcatalog-pig-adapter-*.jar
   if [ "$HCAT_HOME" == "" ]; then
     if [ -d "/usr/lib/hcatalog" ]; then
       HCAT_HOME=/usr/lib/hcatalog
+    elif [ -d "/usr/lib/hive-hcatalog" ]; then
+      HCAT_HOME=/usr/lib/hive-hcatalog
     else
       echo "Please initialize HCAT_HOME"
       exit -1
@@ -185,11 +209,12 @@ if [ "$includeHCatalog" == "true" ]; then
   # get the pig storage handler jar
   pigHCatJarPath=`ls $HCAT_HOME/share/hcatalog/${pigHCatJar}`
 
-  ADDITIONAL_CLASSPATHS=$hiveMetaStoreVersion:$thriftVersion:$hiveExecVersion:$fbJarVersion:$jdoECJarVersion:$slfJarVersion:$hbaseHiveVersion:$hcatJarPath:$hbaseHCatJarPath:$pigHCatJarPath
+  HCAT_CLASSPATHS=$hiveMetaStoreVersion:$thriftVersion:$hiveExecVersion:$fbJarVersion:$jdoECJarVersion:$slfJarVersion:$hbaseHiveVersion:$hcatJarPath:$hbaseHCatJarPath:$pigHCatJarPath
+  ADDITIONAL_CLASSPATHS=file://$hiveMetaStoreVersion,file://$thriftVersion,file://$hiveExecVersion,file://$fbJarVersion,file://$jdoECJarVersion,file://$slfJarVersion,file://$hbaseHiveVersion,file://$hcatJarPath,file://$hbaseHCatJarPath,file://$pigHCatJarPath
   if [ "$additionalJars" != "" ]; then
-    ADDITIONAL_CLASSPATHS=$ADDITIONAL_CLASSPATHS:$additionalJars
+    ADDITIONAL_CLASSPATHS=$ADDITIONAL_CLASSPATHS,$additionalJars
   fi
-  CLASSPATH=${CLASSPATH}:$ADDITIONAL_CLASSPATHS:$HIVE_HOME/conf
+  CLASSPATH=${CLASSPATH}:$HCAT_CLASSPATHS:$HIVE_HOME/conf
 fi
 
 # Add user-specified CLASSPATH entries via PIG_CLASSPATH
@@ -282,6 +307,26 @@ if [ -z "$HADOOP_BIN" ]; then
     fi
 fi
 
+# find out the HADOOP_HOME in order to find hadoop jar
+# we use the name of hadoop jar to decide if user is using
+# hadoop 1 or hadoop 2
+if [[ -z "$HADOOP_HOME" && -n "$HADOOP_PREFIX" ]]; then
+    HADOOP_HOME=$HADOOP_PREFIX
+fi
+
+if [[ -z "$HADOOP_HOME" && -n "$HADOOP_BIN" ]]; then
+    HADOOP_HOME=`dirname $HADOOP_BIN`/..
+fi
+
+HADOOP_CORE_JAR=`echo ${HADOOP_HOME}/hadoop-core*.jar`
+
+if [ -z "$HADOOP_CORE_JAR" ]; then
+    HADOOP_VERSION=2
+else
+    echo "Pig requires Hadoop 2 to be present in HADOOP_HOME (currently: $HADOOP_HOME). Please install Hadoop 2.x"
+    exit 1
+fi
+
 # if using HBase, likely want to include HBase jars and config
 HBH=${HBASE_HOME:-"${PIG_HOME}/share/hbase"}
 if [ -d "${HBH}" ]; then
@@ -331,13 +376,51 @@ PIG_OPTS="$PIG_OPTS -Dpig.log.dir=$PIG_LOG_DIR"
 PIG_OPTS="$PIG_OPTS -Dpig.log.file=$PIG_LOGFILE"
 PIG_OPTS="$PIG_OPTS -Dpig.home.dir=$PIG_HOME"
 if [ "$includeHCatalog" == "true" ]; then
-  addJars=`echo $PIG_OPTS | awk '{ for (i=1; i<=NF; i++) print $i; }' | grep "\-Dpig.additional.jars=" | sed s/-Dpig.additional.jars=//`
+  addJars=`echo $PIG_OPTS | awk '{ for (i=1; i<=NF; i++) print $i; }' | grep "\-Dpig.additional.jars.uris=" | sed s/-Dpig.additional.jars.uris=//`
   if [ "$addJars" != "" ]; then
-    ADDITIONAL_CLASSPATHS=$addJars:$ADDITIONAL_CLASSPATHS
-    PIG_OPTS=`echo $PIG_OPTS | sed 's/-Dpig.additional.jars=[^ ]*//'`
+    ADDITIONAL_CLASSPATHS=$addJars,$ADDITIONAL_CLASSPATHS
+    PIG_OPTS=`echo $PIG_OPTS | sed 's/-Dpig.additional.jars.uris=[^ ]*//'`
   fi
-  PIG_OPTS="$PIG_OPTS -Dpig.additional.jars=$ADDITIONAL_CLASSPATHS"
+  PIG_OPTS="$PIG_OPTS -Dpig.additional.jars.uris=$ADDITIONAL_CLASSPATHS"
 fi
+
+################# ADDING SPARK DEPENDENCIES ##################
+# For spark_local mode:
+if [ "$isSparkLocalMode" == "true" ]; then
+#SPARK_MASTER is forced to be "local" in spark_local mode
+        SPARK_MASTER="local"
+    for f in $PIG_HOME/lib/spark/*.jar; do
+            CLASSPATH=${CLASSPATH}:$f;
+    done
+fi
+
+# For spark mode:
+# Please specify SPARK_HOME first so that we can locate $SPARK_HOME/lib/spark-assembly*.jar,
+# we will add spark-assembly*.jar to the classpath.
+if [ "$isSparkMode"  == "true" ]; then
+    if [ -z "$SPARK_HOME" ]; then
+       echo "Error: SPARK_HOME is not set!"
+       exit 1
+    fi
+
+    # Please specify SPARK_JAR which is the hdfs path of spark-assembly*.jar to allow YARN to cache spark-assembly*.jar on nodes so that it doesn't need to be distributed each time an application runs.
+    if [ -z "$SPARK_JAR" ]; then
+       echo "Error: SPARK_JAR is not set, SPARK_JAR stands for the hdfs location of spark-assembly*.jar. This allows YARN to cache spark-assembly*.jar on nodes so that it doesn't need to be distributed each time an application runs."
+       exit 1
+    fi
+
+    if [ -n "$SPARK_HOME" ]; then
+        echo "Using Spark Home: " ${SPARK_HOME}
+        SPARK_ASSEMBLY_JAR=`ls ${SPARK_HOME}/lib/spark-assembly*`
+        CLASSPATH=${CLASSPATH}:$SPARK_ASSEMBLY_JAR
+    fi
+fi
+
+#spark-assembly.jar contains jcl-over-slf4j which would create a LogFactory implementation that is incompatible
+if [ "$isSparkMode"  == "true" ]; then
+    PIG_OPTS="$PIG_OPTS -Dorg.apache.commons.logging.LogFactory=org.apache.commons.logging.impl.LogFactoryImpl"
+fi
+################# ADDING SPARK DEPENDENCIES ##################
 
 # run it
 if [ -n "$HADOOP_BIN" ]; then
@@ -345,42 +428,39 @@ if [ -n "$HADOOP_BIN" ]; then
         echo "Find hadoop at $HADOOP_BIN"
     fi
 
-    if [ -f $PIG_HOME/pig-withouthadoop.jar ]; then
-        PIG_JAR=$PIG_HOME/pig-withouthadoop.jar
-    else
-        PIG_JAR=`echo $PIG_HOME/pig-?.*withouthadoop.jar`
-    fi
+    PIG_JAR=`echo $PIG_HOME/pig*-core-h${HADOOP_VERSION}.jar`
 
     # for deb/rpm package, add pig jar in /usr/share/pig
     if [ -z "$PIG_JAR" ]; then
-        PIG_JAR=`echo $PIG_HOME/share/pig/pig-*withouthadoop.jar`
+        PIG_JAR=`echo $PIG_HOME/share/pig/pig*-core-h${HADOOP_VERSION}.jar`
     fi
 
     if [ -n "$PIG_JAR" ]; then
         CLASSPATH=${CLASSPATH}:$PIG_JAR
     else
-        echo "Cannot locate pig-withouthadoop.jar. do 'ant jar-withouthadoop', and try again"
+        echo "Cannot locate pig-core-h${HADOOP_VERSION}.jar. do 'ant jar', and try again"
         exit 1
     fi
 
+    for f in $PIG_HOME/lib/h${HADOOP_VERSION}/*.jar; do
+        CLASSPATH=${CLASSPATH}:$f;
+    done
+
     export HADOOP_CLASSPATH=$CLASSPATH:$HADOOP_CLASSPATH
-    export HADOOP_OPTS="$JAVA_HEAP_MAX $PIG_OPTS $HADOOP_OPTS"
+    export HADOOP_CLIENT_OPTS="$JAVA_HEAP_MAX $PIG_OPTS $HADOOP_CLIENT_OPTS"
     if [ "$debug" == "true" ]; then
         echo "dry run:"
         echo "HADOOP_CLASSPATH: $HADOOP_CLASSPATH"
         echo "HADOOP_OPTS: $HADOOP_OPTS"
+        echo "HADOOP_CLIENT_OPTS: $HADOOP_CLIENT_OPTS"
         echo "$HADOOP_BIN" jar "$PIG_JAR" "${remaining[@]}"
         echo
     else
         exec "$HADOOP_BIN" jar "$PIG_JAR" "${remaining[@]}"
     fi
 else
-    # fall back to use fat pig.jar
-    if [ -f $PIG_HOME/pig.jar ]; then
-        PIG_JAR=$PIG_HOME/pig.jar
-    else
-        PIG_JAR=`echo $PIG_HOME/pig-?.!(*withouthadoop).jar`
-    fi
+    # use bundled hadoop to run local mode
+    PIG_JAR=`echo $PIG_HOME/pig*-core-h2.jar`
 
     if [ -n "$PIG_JAR" ]; then
         CLASSPATH="${CLASSPATH}:$PIG_JAR"
@@ -389,8 +469,17 @@ else
         exit 1
     fi
 
+    for f in $PIG_HOME/lib/h2/*.jar; do
+        CLASSPATH=${CLASSPATH}:$f;
+    done
+
+    # Add bundled hadoop jars
+    for f in $PIG_HOME/lib/hadoop2-runtime/*.jar; do
+        CLASSPATH=${CLASSPATH}:$f;
+    done
+
     if [ "$debug" == "true" ]; then
-        echo "Cannot find local hadoop installation, using bundled `java -cp $PIG_JAR org.apache.hadoop.util.VersionInfo | head -1`"
+        echo "Cannot find local hadoop installation, using bundled `java -cp $CLASSPATH org.apache.hadoop.util.VersionInfo | head -1`"
     fi
 
     CLASS=org.apache.pig.Main

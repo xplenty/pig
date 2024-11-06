@@ -17,15 +17,19 @@
  */
 package org.apache.pig.backend.hadoop.executionengine.mapReduceLayer;
 
-import com.google.common.collect.Lists;
+import java.util.Collections;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.pig.LoadFunc;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POLoad;
 import org.apache.pig.builtin.PigStorage;
+import org.apache.pig.impl.io.FileSpec;
 import org.apache.pig.test.PigStorageWithStatistics;
 import org.apache.pig.test.TestJobControlCompiler;
 import org.junit.Assert;
 import org.junit.Test;
+
+import com.google.common.collect.Lists;
 
 public class TestInputSizeReducerEstimator {
 
@@ -34,21 +38,26 @@ public class TestInputSizeReducerEstimator {
     @Test
     public void testGetInputSizeFromFs() throws Exception {
         long size = 2L * 1024 * 1024 * 1024;
+        POLoad load1 = createPOLoadWithSize(size, new PigStorage());
+        POLoad load2 = createPOLoadWithSize(size, new PigStorageWithStatistics());
         Assert.assertEquals(size, InputSizeReducerEstimator.getTotalInputFileSize(
-                CONF, Lists.newArrayList(createPOLoadWithSize(size, new PigStorage())),
-                new org.apache.hadoop.mapreduce.Job(CONF)));
+                CONF, Lists.newArrayList(load1), new org.apache.hadoop.mapreduce.Job(CONF)));
 
         Assert.assertEquals(size, InputSizeReducerEstimator.getTotalInputFileSize(
-                CONF,
-                Lists.newArrayList(createPOLoadWithSize(size, new PigStorageWithStatistics())),
-                new org.apache.hadoop.mapreduce.Job(CONF)));
+                CONF, Lists.newArrayList(load2), new org.apache.hadoop.mapreduce.Job(CONF)));
 
         Assert.assertEquals(size * 2, InputSizeReducerEstimator.getTotalInputFileSize(
-                CONF,
-                Lists.newArrayList(
-                        createPOLoadWithSize(size, new PigStorage()),
-                        createPOLoadWithSize(size, new PigStorageWithStatistics())),
-                new org.apache.hadoop.mapreduce.Job(CONF)));
+                CONF, Lists.newArrayList(load1, load2), new org.apache.hadoop.mapreduce.Job(CONF)));
+
+        // Negative test - PIG-3754
+        load1.setLFile(new FileSpec("hbase://users", null));
+
+        Assert.assertEquals(0, InputSizeReducerEstimator.getTotalInputFileSize(
+                CONF, Collections.singletonList(load1), new org.apache.hadoop.mapreduce.Job(CONF)));
+
+        // Skip non-hdfs input - PIG-4679
+        Assert.assertEquals(size, InputSizeReducerEstimator.getTotalInputFileSize(
+                CONF, Lists.newArrayList(load1, load2), new org.apache.hadoop.mapreduce.Job(CONF)));
     }
 
     @Test

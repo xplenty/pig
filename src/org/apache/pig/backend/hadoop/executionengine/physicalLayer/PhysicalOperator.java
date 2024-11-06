@@ -31,6 +31,7 @@ import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
+import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.plan.Operator;
 import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
@@ -65,6 +66,10 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
     private static final Log log = LogFactory.getLog(PhysicalOperator.class);
 
     protected static final long serialVersionUID = 1L;
+    protected static final Result RESULT_EMPTY = new Result(POStatus.STATUS_NULL, null);
+    protected static final Result RESULT_EOP = new Result(POStatus.STATUS_EOP, null);
+    protected static final TupleFactory mTupleFactory = TupleFactory.getInstance();
+    protected static final BagFactory mBagFactory = BagFactory.getInstance();
 
     // The degree of parallelism requested
     protected int requestedParallelism;
@@ -98,7 +103,7 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
     // Will be used by operators to report status or transmit heartbeat
     // Should be set by the backends to appropriate implementations that
     // wrap their own version of a reporter.
-    private static ThreadLocal<PigProgressable> reporter = new ThreadLocal<PigProgressable>();
+    protected static ThreadLocal<PigProgressable> reporter = new ThreadLocal<PigProgressable>();
 
     // Will be used by operators to aggregate warning messages
     // Should be set by the backends to appropriate implementations that
@@ -137,6 +142,21 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
         res = new Result();
     }
 
+    public PhysicalOperator(PhysicalOperator copy) {
+        super (copy.getOperatorKey());
+        this.res = new Result();
+        this.requestedParallelism = copy.requestedParallelism;
+        this.inputs = copy.inputs;
+        this.outputs = copy.outputs;
+        this.resultType = copy.resultType;
+        this.parentPlan = copy.parentPlan;
+        this.inputAttached = copy.inputAttached;
+        this.alias = copy.alias;
+        this.lineageTracer = copy.lineageTracer;
+        this.accum = copy.accum;
+        this.originalLocations = copy.originalLocations;
+    }
+
     @Override
     public void setIllustrator(Illustrator illustrator) {
 	      this.illustrator = illustrator;
@@ -164,6 +184,11 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
 
     protected String getAliasString() {
         return (alias == null) ? "" : (alias + ": ");
+    }
+
+    public void copyAliasFrom(PhysicalOperator op) {
+        this.alias = op.alias;
+        this.originalLocations = op.originalLocations;
     }
 
     public void addOriginalLocation(String alias, SourceLocation sourceLocation) {
@@ -265,28 +290,29 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
      */
     public Result processInput() throws ExecException {
         try {
-        Result res = new Result();
-        if (input == null && (inputs == null || inputs.size()==0)) {
-//            log.warn("No inputs found. Signaling End of Processing.");
-            res.returnStatus = POStatus.STATUS_EOP;
-            return res;
-        }
+            if (input == null && (inputs == null || inputs.size() == 0)) {
+                // log.warn("No inputs found. Signaling End of Processing.");
+                return RESULT_EOP;
+            }
 
-        //Should be removed once the model is clear
-        if(getReporter()!=null) {
-            getReporter().progress();
-        }
+            // Should be removed once the model is clear
+            PigProgressable progRep = getReporter();
+            if (progRep != null) {
+                progRep.progress();
+            }
 
-        if (!isInputAttached()) {
+            if (!isInputAttached()) {
                 return inputs.get(0).getNextTuple();
-        } else {
-            res.result = input;
-            res.returnStatus = (res.result == null ? POStatus.STATUS_NULL: POStatus.STATUS_OK);
-            detachInput();
-            return res;
-        }
+            } else {
+                Result res = new Result();
+                res.result = input;
+                res.returnStatus = POStatus.STATUS_OK;
+                detachInput();
+                return res;
+            }
         } catch (ExecException e) {
-            throw new ExecException("Exception while executing " + this.toString() + ": " + e.toString(), e);
+            throw new ExecException("Exception while executing "
+                    + this.toString() + ": " + e.toString(), e);
         }
     }
 
@@ -380,17 +406,20 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
     }
 
     public Result getNextDataBag() throws ExecException {
-        Result ret = null;
-        DataBag tmpBag = BagFactory.getInstance().newDefaultBag();
-        for(ret = getNextTuple(); ret.returnStatus != POStatus.STATUS_EOP; ret = getNextTuple()){
-            if(ret.returnStatus == POStatus.STATUS_ERR) {
+        Result val = new Result();
+        DataBag tmpBag = mBagFactory.newDefaultBag();
+        for (Result ret = getNextTuple(); ret.returnStatus != POStatus.STATUS_EOP; ret = getNextTuple()) {
+            if (ret.returnStatus == POStatus.STATUS_ERR) {
                 return ret;
+            } else if (ret.returnStatus == POStatus.STATUS_NULL) {
+                continue;
+            } else {
+                tmpBag.add((Tuple) ret.result);
             }
-            tmpBag.add((Tuple)ret.result);
         }
-        ret.result = tmpBag;
-        ret.returnStatus = (tmpBag.size() == 0)? POStatus.STATUS_EOP : POStatus.STATUS_OK;
-        return ret;
+        val.result = tmpBag;
+        val.returnStatus = (tmpBag.size() == 0)? POStatus.STATUS_EOP : POStatus.STATUS_OK;
+        return val;
     }
 
     public Result getNextBigInteger() throws ExecException {
@@ -412,6 +441,10 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
     public void reset() {
     }
 
+    public boolean isEndOfAllInput() {
+        return parentPlan.endOfAllInput;
+    }
+
     /**
      * @return PigProgressable stored in threadlocal
      */
@@ -426,9 +459,17 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
         PhysicalOperator.reporter.set(reporter);
     }
 
+    //@StaticDataCleanup
+    public static void staticDataCleanup() {
+        reporter = new ThreadLocal<PigProgressable>();
+    }
+
     /**
-     * Make a deep copy of this operator. This function is blank, however,
+     * Make a copy of this operator. This function is blank, however,
      * we should leave a place holder so that the subclasses can clone
+     * to make deep copy as this one creates a shallow copy of
+     * non-primitive types (objects, arrays and lists)
+     *
      * @throws CloneNotSupportedException
      */
     @Override
@@ -441,6 +482,14 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
         originalLocations.addAll(op.originalLocations);
     }
 
+    protected static List<PhysicalPlan> clonePlans(List<PhysicalPlan> origPlans) throws CloneNotSupportedException {
+        List<PhysicalPlan> clonePlans = new ArrayList<PhysicalPlan>(origPlans.size());
+        for (PhysicalPlan plan : origPlans) {
+            clonePlans.add(plan.clone());
+        }
+        return clonePlans;
+    }
+
     /**
      * @param physicalPlan
      */
@@ -448,16 +497,20 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
        parentPlan = physicalPlan;
     }
 
+    public PhysicalPlan getParentPlan() {
+        return parentPlan;
+    }
+
     public Log getLogger() {
-    	return log;
+        return log;
     }
 
     public static void setPigLogger(PigLogger logger) {
-    	pigLogger = logger;
+        pigLogger = logger;
     }
 
     public static PigLogger getPigLogger() {
-    	return pigLogger;
+        return pigLogger;
     }
 
     public static class OriginalLocation implements Serializable {
@@ -470,7 +523,7 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
             this.alias = alias;
             this.line = line;
             this.offset = offset;
-}
+        }
 
         public String getAlias() {
             return alias;

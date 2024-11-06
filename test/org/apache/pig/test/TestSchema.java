@@ -20,6 +20,7 @@ package org.apache.pig.test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -28,8 +29,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.UUID;
 
-import org.apache.pig.ExecType;
+import org.apache.pig.PigConfiguration;
 import org.apache.pig.PigServer;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.data.DataType;
@@ -42,9 +44,27 @@ import org.apache.pig.impl.util.Utils;
 import org.apache.pig.newplan.logical.relational.LogicalSchema;
 import org.apache.pig.newplan.logical.relational.LogicalSchema.MergeMode;
 import org.apache.pig.parser.ParserException;
+
+import org.junit.AfterClass;
+import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class TestSchema {
+
+    private static MiniGenericCluster cluster;
+    private static PigServer pigServer;
+
+    @BeforeClass
+    public static void setupTestCluster() throws Exception {
+        cluster = MiniGenericCluster.buildCluster();
+        pigServer = new PigServer(cluster.getExecType(), cluster.getProperties());
+    }
+
+    @AfterClass
+    public static void tearDownTestCluster() throws Exception {
+        cluster.shutDown();
+    }
 
     @Test
     public void testSchemaEqual1() {
@@ -121,6 +141,41 @@ public class TestSchema {
 
         // And check again
         assertFalse(Schema.equals(schema1, schema2, false, false));
+    }
+
+    @Test
+    public void testParsingMapSchemasFromString() throws ParserException {
+        assertNotNull(Utils.getSchemaFromString("b:[(a:int)]"));
+        assertNotNull(Utils.getSchemaFromString("b:[someAlias: (b:int)]"));
+        assertNotNull(Utils.getSchemaFromString("a:map[{bag: (a:int)}]"));
+        assertNotNull(Utils.getSchemaFromString("a:map[someAlias: {bag: (a:int)}]"));
+        assertNotNull(Utils.getSchemaFromString("a:map[chararray]"));
+        assertNotNull(Utils.getSchemaFromString("a:map[someAlias: chararray]"));
+        assertNotNull(Utils.getSchemaFromString("a:map[someAlias: (bar: {bag: (a:int)})]"));
+    }
+
+    @Test
+    public void testMapWithoutAlias() throws FrontendException {
+        List<FieldSchema> innerFields = new ArrayList<FieldSchema>();
+        innerFields.add(new FieldSchema(null, DataType.LONG));
+        List<FieldSchema> fields = new ArrayList<FieldSchema>();
+        fields.add(new FieldSchema("mapAlias", new Schema(innerFields), DataType.MAP));
+
+        Schema inputSchema = new Schema(fields);
+        Schema fromString = Utils.getSchemaFromBagSchemaString(inputSchema.toString());
+        assertTrue(Schema.equals(inputSchema, fromString, false, false));
+    }
+
+    @Test
+    public void testMapWithAlias() throws FrontendException {
+        List<FieldSchema> innerFields = new ArrayList<FieldSchema>();
+        innerFields.add(new FieldSchema("valueAlias", DataType.LONG));
+        List<FieldSchema> fields = new ArrayList<FieldSchema>();
+        fields.add(new FieldSchema("mapAlias", new Schema(innerFields), DataType.MAP));
+
+        Schema inputSchema = new Schema(fields);
+        Schema fromString = Utils.getSchemaFromBagSchemaString(inputSchema.toString());
+        assertTrue(Schema.equals(inputSchema, fromString, false, false));
     }
 
     @Test
@@ -613,6 +668,7 @@ public class TestSchema {
         assertFalse(Schema.equals(bagSchema1, bagSchema2, false, false));
     }
 
+    @Test
     public void testCharArray2Numeric(){
     	byte[] numbericTypes=new byte[]{DataType.DOUBLE,DataType.FLOAT,DataType.LONG,DataType.INTEGER};
     	Schema.FieldSchema inputFieldSchema=new Schema.FieldSchema("",DataType.CHARARRAY);
@@ -622,9 +678,8 @@ public class TestSchema {
     	}
     }
 
+    @Test
     public void testSchemaSerialization() throws IOException {
-        MiniCluster cluster = MiniCluster.buildCluster();
-        PigServer pigServer = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
         String inputFileName = "testSchemaSerialization-input.txt";
         String[] inputData = new String[] { "foo\t1", "hello\t2" };
         Util.createInputFile(cluster, inputFileName, inputData);
@@ -636,7 +691,6 @@ public class TestSchema {
             Tuple t = it.next();
             assertEquals("{a: {(f1: chararray,f2: int)}}", t.get(0));
         }
-        cluster.shutDown();
     }
 
     @Test
@@ -878,10 +932,102 @@ public class TestSchema {
         }
     }
 
-     @Test(expected=ParserException.class)
-     public void testGetStringFromSchemaNegative() throws Exception {
-         String schemaString = "a:int b:long"; // A comma is missing between fields
-         Utils.getSchemaFromString(schemaString);
-         fail("The schema string is invalid, so parsing should fail!");
-     }
+    @Test(expected = ParserException.class)
+    public void testGetStringFromSchemaNegative() throws Exception {
+        String schemaString = "a:int b:long"; // A comma is missing between fields
+        Utils.getSchemaFromString(schemaString);
+        fail("The schema string is invalid, so parsing should fail!");
+    }
+    
+    @Test
+    public void testGetInitialSchemaStringFromSchema() throws ParserException {
+        String[] schemaStrings = {
+                "my_list:{array:(array_element:(num1:int,num2:int))}",
+                "my_list:{array:(array_element:(num1:int,num2:int),c:chararray)}",
+                "bag:{mytuple3:(mytuple2:(mytuple:(f1:int)))}",
+                "bag:{mytuple:(f1:int)}",
+                "{((num1:int,num2:int))}"
+        };
+        for (String schemaString : schemaStrings) {
+            String s1 = Utils.getSchemaFromString(schemaString).toString();
+            //check if we get back the initial schema string
+            String s2 = s1.substring(1, s1.length() - 1).replaceAll("\\s|bag_0:|tuple_0:", "");
+            assertTrue(schemaString.equals(s2));
+        }
+    }
+
+    @Test
+    public void testDisabledDisambiguationContainsNoColons() throws IOException {
+        resetDisambiguationTestPropertyOverride();
+
+        String inputFileName = "testPrepend-input.txt";
+        String[] inputData = new String[]{"apple\t1\tred", "orange\t2\torange", "kiwi\t3\tgreen", "orange\t4\torange"};
+        Util.createInputFile(cluster, inputFileName, inputData);
+
+        String script = "A = LOAD '" + inputFileName + "' AS (fruit:chararray, foo:int, color: chararray);" +
+                "B = LOAD '" + inputFileName + "' AS (id:chararray, bar:int);" +
+                "C = GROUP A BY (fruit,color);" +
+                "D = FOREACH C GENERATE FLATTEN(group), AVG(A.foo);" +
+                "D2 = FOREACH C GENERATE FLATTEN(group), AVG(A.foo) as avgFoo;" +
+                "E = JOIN B BY id, D BY group::fruit;" +
+                "F = UNION ONSCHEMA B, D2;" +
+                "G = CROSS B, D2;";
+
+        Util.registerMultiLineQuery(pigServer, script);
+
+        //Prepending should happen with default settings
+        assertEquals("{B::id: chararray,B::bar: int,D::group::fruit: chararray,D::group::color: chararray,double}", pigServer.dumpSchema("E").toString());
+
+        //Override prepend property setting (check for flatten, join)
+        pigServer.getPigContext().getProperties().setProperty(PigConfiguration.PIG_STORE_SCHEMA_DISAMBIGUATE, "false");
+        assertEquals("{id: chararray,bar: int,fruit: chararray,color: chararray,double}", pigServer.dumpSchema("E").toString());
+        assertTrue(pigServer.openIterator("E").hasNext());
+
+        //Check for union and cross
+        assertEquals("{id: chararray,bar: int,fruit: chararray,color: chararray,avgFoo: double}", pigServer.dumpSchema("F").toString());
+        assertEquals("{id: chararray,bar: int,fruit: chararray,color: chararray,avgFoo: double}", pigServer.dumpSchema("G").toString());
+
+    }
+
+    @Test
+    public void testEnabledDisambiguationPassesForDupeAliases() throws IOException {
+        resetDisambiguationTestPropertyOverride();
+
+        checkForDupeAliases();
+
+        //Should pass with default settings
+        assertEquals("{A::id: chararray,A::val: int,B::id: chararray,B::val: int}", pigServer.dumpSchema("C").toString());
+        assertTrue(pigServer.openIterator("C").hasNext());
+    }
+
+    @Test
+    public void testDisabledDisambiguationFailsForDupeAliases() throws IOException {
+        resetDisambiguationTestPropertyOverride();
+
+        try {
+            checkForDupeAliases();
+            //Should fail with prepending disabled
+            pigServer.getPigContext().getProperties().setProperty(PigConfiguration.PIG_STORE_SCHEMA_DISAMBIGUATE, "false");
+            pigServer.dumpSchema("C");
+        } catch (FrontendException e){
+            Assert.assertEquals("Duplicate schema alias: id in \"fake\"",e.getCause().getMessage());
+        }
+    }
+
+    private static void checkForDupeAliases() throws IOException {
+        String inputFileName = "testPrependFail-input" + UUID.randomUUID().toString() + ".txt";
+        String[] inputData = new String[]{"foo\t1", "bar\t2"};
+        Util.createInputFile(cluster, inputFileName, inputData);
+
+        String script = "A = LOAD '" + inputFileName + "' AS (id:chararray, val:int);" +
+                "B = LOAD '" + inputFileName + "' AS (id:chararray, val:int);" +
+                "C = JOIN A by id, B by id;";
+
+        Util.registerMultiLineQuery(pigServer, script);
+    }
+
+    private static void resetDisambiguationTestPropertyOverride() {
+        //Reset possible overrides
+        pigServer.getPigContext().getProperties().remove(PigConfiguration.PIG_STORE_SCHEMA_DISAMBIGUATE);
+    }
 }

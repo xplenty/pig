@@ -26,8 +26,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
@@ -39,7 +37,7 @@ import org.apache.pig.EvalFunc;
 import org.apache.pig.ExecType;
 import org.apache.pig.ExecTypeProvider;
 import org.apache.pig.backend.executionengine.ExecException;
-import org.apache.pig.backend.hadoop.executionengine.Launcher;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRConfiguration;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.io.BufferedPositionedInputStream;
@@ -78,14 +76,14 @@ public class StreamingUDF extends EvalFunc<Object> {
     private static final int STD_ERR_OUTPUT_PATH = 7; //File for output from when user writes to standard error.
     private static final int CONTROLLER_LOG_FILE_PATH = 8; //Controller log file logs progress through the controller script not user code.
     private static final int IS_ILLUSTRATE = 9; //Controller captures output differently in illustrate vs running.
-    
+
     private String language;
     private String filePath;
     private String funcName;
     private Schema schema;
     private ExecType execType;
     private String isIllustrate;
-    
+
     private boolean initialized = false;
     private ScriptingOutputCapturer soc;
 
@@ -93,7 +91,7 @@ public class StreamingUDF extends EvalFunc<Object> {
     private ProcessErrorThread stderrThread; // thread to get process stderr
     private ProcessInputThread stdinThread; // thread to send input to process
     private ProcessOutputThread stdoutThread; //thread to read output from process
-    
+
     private InputHandler inputHandler;
     private OutputHandler outputHandler;
 
@@ -106,13 +104,13 @@ public class StreamingUDF extends EvalFunc<Object> {
 
     private static final Object ERROR_OUTPUT = new Object();
     private static final Object NULL_OBJECT = new Object(); //BlockingQueue can't have null.  Use place holder object instead.
-    
+
     private volatile StreamingUDFException outerrThreadsError;
-    
+
     public static final String TURN_ON_OUTPUT_CAPTURING = "TURN_ON_OUTPUT_CAPTURING";
 
-    public StreamingUDF(String language, 
-                        String filePath, String funcName, 
+    public StreamingUDF(String language,
+                        String filePath, String funcName,
                         String outputSchemaString, String schemaLineNumber,
                         String execType, String isIllustrate)
                                 throws StreamingUDFOutputSchemaException, ExecException {
@@ -121,7 +119,7 @@ public class StreamingUDF extends EvalFunc<Object> {
         this.funcName = funcName;
         try {
             this.schema = Utils.getSchemaFromString(outputSchemaString);
-            //ExecTypeProvider.fromString doesn't seem to load the ExecTypes in 
+            //ExecTypeProvider.fromString doesn't seem to load the ExecTypes in
             //mapreduce mode so we'll try to figure out the exec type ourselves.
             if (execType.equals("local")) {
                 this.execType = ExecType.LOCAL;
@@ -140,7 +138,7 @@ public class StreamingUDF extends EvalFunc<Object> {
         }
         this.isIllustrate = isIllustrate;
     }
-    
+
     @Override
     public Object exec(Tuple input) throws IOException {
         if (!initialized) {
@@ -173,14 +171,17 @@ public class StreamingUDF extends EvalFunc<Object> {
         String[] command = new String[10];
         Configuration conf = UDFContext.getUDFContext().getJobConf();
 
-        String jarPath = conf.get("mapred.jar");
+        String jarPath = conf.get("mapreduce.job.jar");
+        if (jarPath == null) {
+            jarPath = conf.get(MRConfiguration.JAR);
+        }
         String jobDir;
         if (jarPath != null) {
             jobDir = new File(jarPath).getParent();
         } else {
             jobDir = "";
         }
-        
+
         String standardOutputRootWriteLocation = soc.getStandardOutputRootWriteLocation();
         String controllerLogFileName, outFileName, errOutFileName;
 
@@ -200,16 +201,72 @@ public class StreamingUDF extends EvalFunc<Object> {
         command[PATH_TO_CONTROLLER_FILE] = getControllerPath(jobDir);
         int lastSeparator = filePath.lastIndexOf(File.separator) + 1;
         command[UDF_FILE_NAME] = filePath.substring(lastSeparator);
-        command[UDF_FILE_PATH] = lastSeparator <= 0 ? 
-                "." : 
+        command[UDF_FILE_PATH] = lastSeparator <= 0 ?
+                "." :
                 filePath.substring(0, lastSeparator - 1);
         command[UDF_NAME] = funcName;
-        command[PATH_TO_FILE_CACHE] = "\"" + jobDir + filePath.substring(0, lastSeparator) + "\"";
+        String fileCachePath = jobDir + filePath.substring(0, lastSeparator);
+        command[PATH_TO_FILE_CACHE] = "'" + fileCachePath + "'";
         command[STD_OUT_OUTPUT_PATH] = outFileName;
         command[STD_ERR_OUTPUT_PATH] = errOutFileName;
         command[CONTROLLER_LOG_FILE_PATH] = controllerLogFileName;
         command[IS_ILLUSTRATE] = isIllustrate;
+
+        ensureUserFileAvailable(command, fileCachePath);
+
         return command;
+    }
+
+    /**
+     * Need to make sure the user's file is available. If jar hasn't been
+     * exploded, just copy the udf file to its path relative to the controller
+     * file and update file cache path appropriately.
+     */
+    private void ensureUserFileAvailable(String[] command, String fileCachePath)
+            throws ExecException, IOException {
+
+        File userUdfFile = new File(fileCachePath + command[UDF_FILE_NAME] + getUserFileExtension());
+        if (!userUdfFile.exists()) {
+            String absolutePath = filePath.startsWith("/") ? filePath : "/" + filePath;
+            absolutePath = absolutePath.replaceAll(":", "");
+            String controllerDir = new File(command[PATH_TO_CONTROLLER_FILE]).getParent();
+            String userUdfPath = controllerDir + absolutePath + getUserFileExtension();
+            userUdfFile = new File(userUdfPath);
+            userUdfFile.deleteOnExit();
+            userUdfFile.getParentFile().mkdirs();
+            if (userUdfFile.exists()) {
+                userUdfFile.delete();
+                if (!userUdfFile.createNewFile()) {
+                    throw new IOException("Unable to create file: " + userUdfFile.getAbsolutePath());
+                }
+            }
+            InputStream udfFileStream = this.getClass().getResourceAsStream(
+                    absolutePath + getUserFileExtension());
+            if (udfFileStream == null) {
+                //Try loading the script from other locally available jars (needed for Spark mode)
+                udfFileStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(filePath+getUserFileExtension());
+            }
+            command[PATH_TO_FILE_CACHE] = "\"" + userUdfFile.getParentFile().getAbsolutePath() + "\"";
+
+            try {
+                FileUtils.copyInputStreamToFile(udfFileStream, userUdfFile);
+            }
+            catch (Exception e) {
+                throw new ExecException("Unable to copy user udf file: " + userUdfFile.getName(), e);
+            }
+            finally {
+                udfFileStream.close();
+            }
+        }
+    }
+
+    private String getUserFileExtension() throws ExecException {
+        if (isPython()) {
+            return ".py";
+        }
+        else {
+            throw new ExecException("Unrecognized streamingUDF language: " + language);
+        }
     }
 
     private void createInputHandlers() throws ExecException, FrontendException {
@@ -219,16 +276,16 @@ public class StreamingUDF extends EvalFunc<Object> {
         this.outputHandler = new StreamingUDFOutputHandler(deserializer);
     }
 
-    private void setStreams() throws IOException { 
+    private void setStreams() throws IOException {
         stdout = new DataInputStream(new BufferedInputStream(process
                 .getInputStream()));
         outputHandler.bindTo("", new BufferedPositionedInputStream(stdout),
                 0, Long.MAX_VALUE);
-        
+
         stdin = new DataOutputStream(new BufferedOutputStream(process
                 .getOutputStream()));
-        inputHandler.bindTo(stdin); 
-        
+        inputHandler.bindTo(stdin);
+
         stderr = new DataInputStream(new BufferedInputStream(process
                 .getErrorStream()));
     }
@@ -236,10 +293,10 @@ public class StreamingUDF extends EvalFunc<Object> {
     private void startThreads() {
         stdinThread = new ProcessInputThread();
         stdinThread.start();
-        
+
         stdoutThread = new ProcessOutputThread();
         stdoutThread.start();
-        
+
         stderrThread = new ProcessErrorThread();
         stderrThread.start();
     }
@@ -257,12 +314,12 @@ public class StreamingUDF extends EvalFunc<Object> {
      * @throws IOException
      */
     private String getControllerPath(String jarPath) throws IOException {
-        if (language.toLowerCase().equals("python")) {
+        if (isPython()) {
             String controllerPath = jarPath + PYTHON_CONTROLLER_JAR_PATH;
             File controller = new File(controllerPath);
             if (!controller.exists()) {
                 File controllerFile = File.createTempFile("controller", ".py");
-                InputStream pythonControllerStream = Launcher.class.getResourceAsStream(PYTHON_CONTROLLER_JAR_PATH);
+                InputStream pythonControllerStream = this.getClass().getResourceAsStream(PYTHON_CONTROLLER_JAR_PATH);
                 try {
                     FileUtils.copyInputStreamToFile(pythonControllerStream, controllerFile);
                 } finally {
@@ -271,7 +328,7 @@ public class StreamingUDF extends EvalFunc<Object> {
                 controllerFile.deleteOnExit();
                 File pigUtilFile = new File(controllerFile.getParent() + "/pig_util.py");
                 pigUtilFile.deleteOnExit();
-                InputStream pythonUtilStream = Launcher.class.getResourceAsStream(PYTHON_PIG_UTIL_PATH);
+                InputStream pythonUtilStream = this.getClass().getResourceAsStream(PYTHON_PIG_UTIL_PATH);
                 try {
                     FileUtils.copyInputStreamToFile(pythonUtilStream, pigUtilFile);
                 } finally {
@@ -285,19 +342,8 @@ public class StreamingUDF extends EvalFunc<Object> {
         }
     }
 
-    /**
-     * Returns a list of file names (relative to root of pig jar) of files that need to be
-     * included in the jar shipped to the cluster.
-     *
-     * Will need to be smarter as more languages are added and the controller files are large.
-     *
-     * @return
-     */
-    public static List<String> getResourcesForJar() {
-        List<String> files = new ArrayList<String>();
-        files.add(PYTHON_CONTROLLER_JAR_PATH);
-        files.add(PYTHON_PIG_UTIL_PATH);
-        return files;
+    private boolean isPython() {
+        return language.toLowerCase().startsWith("python");
     }
 
     private Object getOutput(Tuple input) throws ExecException {
@@ -305,7 +351,7 @@ public class StreamingUDF extends EvalFunc<Object> {
             throw new ExecException("Process has already been shut down.  No way to retrieve output for input: " + input);
         }
 
-        if (ScriptingOutputCapturer.isClassCapturingOutput() && 
+        if (ScriptingOutputCapturer.isClassCapturingOutput() &&
                 !soc.isInstanceCapturingOutput()) {
             Tuple t = TupleFactory.getInstance().newTuple(TURN_ON_OUTPUT_CAPTURING);
             try {
@@ -318,7 +364,7 @@ public class StreamingUDF extends EvalFunc<Object> {
 
         try {
             if (this.getInputSchema() == null || this.getInputSchema().size() == 0) {
-                //When nothing is passed into the UDF the tuple 
+                //When nothing is passed into the UDF the tuple
                 //being sent is the full tuple for the relation.
                 //We want it to be nothing (since that's what the user wrote).
                 input = TupleFactory.getInstance().newTuple(0);
@@ -380,10 +426,10 @@ public class StreamingUDF extends EvalFunc<Object> {
             }
         }
     }
-    
+
     private static final int WAIT_FOR_ERROR_LENGTH = 500;
     private static final int MAX_WAIT_FOR_ERROR_ATTEMPTS = 5;
-    
+
     /**
      * The thread which consumes output from process
      */
@@ -418,8 +464,9 @@ public class StreamingUDF extends EvalFunc<Object> {
                         //Only write this if no other error.  Don't want to overwrite
                         //an error from the error thread.
                         if (outerrThreadsError == null) {
-                            outerrThreadsError = new StreamingUDFException(language, "Error deserializing output.  Please check that the declared outputSchema for function " +
-                                                                        funcName + " matches the data type being returned.", e);
+                            outerrThreadsError = new StreamingUDFException(
+                                    language, "Error deserializing output.  Please check that the declared outputSchema for function " +
+                                    funcName + " matches the data type being returned.", e);
                         }
                         outputQueue.put(ERROR_OUTPUT); //Need to wake main thread.
                     } catch(InterruptedException ie) {
@@ -465,13 +512,13 @@ public class StreamingUDF extends EvalFunc<Object> {
                     stderr = null;
                 }
             } catch (IOException e) {
-                log.debug("Process Ended");
+                log.debug("Process Ended", e);
             } catch (Exception e) {
                 log.error("standard error problem", e);
             }
         }
     }
-    
+
     public class ProcessKiller implements Runnable {
         public void run() {
             process.destroy();

@@ -32,7 +32,6 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.newplan.Operator;
@@ -46,12 +45,17 @@ import org.apache.pig.newplan.logical.rules.ColumnMapKeyPrune;
 import org.apache.pig.newplan.logical.rules.MapKeysPruneHelper;
 import org.apache.pig.newplan.optimizer.PlanOptimizer;
 import org.apache.pig.newplan.optimizer.Rule;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TestNewPlanColumnPrune {
     LogicalPlan plan = null;
-    PigContext pc = new PigContext(ExecType.LOCAL, new Properties());
+    PigContext pc;
 
+    @Before
+    public void setUp() throws Exception {
+        pc = new PigContext(Util.getLocalTestMode(), new Properties());
+    }
     private LogicalPlan buildPlan(String query) throws Exception{
         PigServer pigServer = new PigServer( pc );
         return Util.buildLp(pigServer, query);
@@ -445,6 +449,34 @@ public class TestNewPlanColumnPrune {
             LogicalRelationalOperator lro = (LogicalRelationalOperator)o;
             if (lro == null || lro.getAlias() == null) continue;
             if (lro.getAlias().equals("d")) {
+                assertNotNull(lro.getSchema());
+            }
+        }
+    }
+
+    @Test
+    public void testNoAddForeach() throws Exception  {
+        // PIG-5055
+        // Need to make sure that it does not add foreach
+        // that drops all the fields from B2.
+        String query = "A = load 'd.txt' as (a0:int, a1:int, a2:int);" +
+        "B = load 'd.txt' as (b0:int, b1:int, b2:int);" +
+        "B2 = FILTER B by b0 == 0;" +
+        "C = join A by (1), B2 by (1) ;" +
+        "D = FOREACH C GENERATE A::a1, A::a2;" +
+        "store D into 'empty';";
+
+        LogicalPlan newLogicalPlan = buildPlan(query);
+
+        PlanOptimizer optimizer = new MyPlanOptimizer(newLogicalPlan, 3);
+        optimizer.optimize();
+        System.err.println(newLogicalPlan);
+        Iterator<Operator> iter = newLogicalPlan.getOperators();
+        while (iter.hasNext()) {
+            Operator o = iter.next();
+            LogicalRelationalOperator lro = (LogicalRelationalOperator)o;
+            if (lro == null || lro.getAlias() == null) continue;
+            if (lro.getAlias().equals("B2")) {
                 assertNotNull(lro.getSchema());
             }
         }

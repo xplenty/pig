@@ -20,7 +20,7 @@ package org.apache.pig.tools.grunt;
 import java.io.BufferedReader;
 import java.util.ArrayList;
 
-import jline.ConsoleReader;
+import jline.console.ConsoleReader;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -41,22 +41,19 @@ public class Grunt
     PigServer pig;
     GruntParser parser;    
 
-    public Grunt(BufferedReader in, PigContext pigContext) throws ExecException
-    {
+    public Grunt(BufferedReader in, PigContext pigContext) throws ExecException {
         this.in = in;
         this.pig = new PigServer(pigContext);
-        
-        if (in != null)
-        {
-            parser = new GruntParser(in);
-            parser.setParams(pig);    
+
+        if (in != null) {
+            parser = new GruntParser(in, pig);
         }
     }
 
     public void setConsoleReader(ConsoleReader c)
     {
-        c.addCompletor(new PigCompletorAliases(pig));
-        c.addCompletor(new PigCompletor());
+        c.addCompleter(new PigCompletorAliases(pig));
+        c.addCompleter(new PigCompletor());
         parser.setConsoleReader(c);
     }
 

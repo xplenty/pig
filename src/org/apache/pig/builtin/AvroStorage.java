@@ -22,8 +22,6 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
 
@@ -31,8 +29,10 @@ import org.apache.avro.Schema;
 import org.apache.avro.SchemaParseException;
 import org.apache.avro.Schema.Type;
 import org.apache.avro.file.DataFileStream;
+import org.apache.avro.generic.GenericContainer;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericData;
+import org.apache.avro.mapred.AvroInputFormat;
 import org.apache.avro.mapred.AvroOutputFormat;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -46,7 +46,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.PathFilter;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.mapreduce.InputFormat;
 import org.apache.hadoop.mapreduce.InputSplit;
@@ -66,10 +65,13 @@ import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceStatistics;
 import org.apache.pig.StoreFunc;
 import org.apache.pig.StoreFuncInterface;
+import org.apache.pig.StoreResources;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.logicalLayer.FrontendException;
+import org.apache.pig.impl.util.JarManager;
 import org.apache.pig.impl.util.UDFContext;
+import org.apache.pig.impl.util.Utils;
 import org.apache.pig.impl.util.avro.AvroArrayReader;
 import org.apache.pig.impl.util.avro.AvroRecordReader;
 import org.apache.pig.impl.util.avro.AvroRecordWriter;
@@ -78,14 +80,13 @@ import org.apache.pig.impl.util.avro.AvroTupleWrapper;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.primitives.Longs;
 
 /**
  * Pig UDF for reading and writing Avro data.
  *
  */
 public class AvroStorage extends LoadFunc
-    implements StoreFuncInterface, LoadMetadata, LoadPushDown {
+    implements StoreFuncInterface, LoadMetadata, LoadPushDown, StoreResources {
 
   /**
    *  Creates new instance of Pig Storage function, without specifying
@@ -103,7 +104,7 @@ public class AvroStorage extends LoadFunc
     this(sn, null);
   }
 
-  private String schemaName = "record";
+  private String schemaName = "pig_output";
   private String schemaNameSpace = null;
   protected boolean allowRecursive = false;
   protected boolean doubleColonsToDoubleUnderscores = false;
@@ -120,6 +121,8 @@ public class AvroStorage extends LoadFunc
    *  <li><code>-schemafile</code> Specifies URL for avro schema file
    *    from which to read the input schema (can be local file, hdfs,
    *    url, etc).</li>
+   *  <li><code>-schemaclass</code> Specifies fully qualified class name for avro
+   *    class in your classpath which implements GenericContainer.</li>
    *  <li><code>-examplefile</code> Specifies URL for avro data file from
    *    which to copy the input schema (can be local file, hdfs, url, etc).</li>
    *  <li><code>-allowrecursive</code> Option to allow recursive schema
@@ -131,7 +134,7 @@ public class AvroStorage extends LoadFunc
   public AvroStorage(final String sn, final String opts) {
     super();
 
-    if (sn != null) {
+    if (sn != null && sn.length() > 0) {
       try {
         Schema s = (new Schema.Parser()).parse(sn);
         // must be a valid schema
@@ -153,6 +156,9 @@ public class AvroStorage extends LoadFunc
         validOptions.addOption("f", "schemafile", true,
             "Specifies URL for avro schema file from which to read "
             + "the input or output schema");
+        validOptions.addOption("c", "schemaclass", true,
+            "Specifies fully qualified class name for avro "
+            + "class in your classpath which implements GenericContainer.");
         validOptions.addOption("e", "examplefile", true,
             "Specifies URL for avro data file from which to copy "
             + "the output schema");
@@ -169,8 +175,14 @@ public class AvroStorage extends LoadFunc
         if (configuredOptions.hasOption('f')) {
           try {
             Path p = new Path(configuredOptions.getOptionValue('f'));
+            Configuration conf;
+            if (UDFContext.getUDFContext().getJobConf()==null) {
+                conf = new Configuration();
+            } else {
+                conf = UDFContext.getUDFContext().getJobConf();
+            }
             Schema s = new Schema.Parser()
-              .parse((FileSystem.get(p.toUri(), new Configuration()).open(p)));  
+              .parse((FileSystem.get(p.toUri(), conf).open(p)));
             setInputAvroSchema(s);
             setOutputAvroSchema(s);
           } catch (FileNotFoundException fnfe) {
@@ -178,6 +190,25 @@ public class AvroStorage extends LoadFunc
             log.warn("Schema file not found when instantiating AvroStorage. (If the " + 
                 "schema was described in a local file on the front end, and this message " + 
                 "is in the back end log, you can ignore this mesasge.)", fnfe);
+          }
+        } else if (configuredOptions.hasOption('c')) {
+          String schemaClass = configuredOptions.getOptionValue('c');
+          try {
+            Schema s = ((GenericContainer) Class.forName(schemaClass).newInstance()).getSchema();
+            setInputAvroSchema(s);
+            setOutputAvroSchema(s);
+          } catch (ClassNotFoundException | IllegalAccessException cnfe) {
+            System.err.printf("class not found exception\n");
+            log.error("Schema class '" + schemaClass + "' was not found in the classpath.", cnfe);
+            throw new RuntimeException(cnfe);
+          } catch (InstantiationException ie) {
+            System.err.printf("instantiation exception\n");
+            log.error("Schema class '" + schemaClass + "' must have a public empty args constructor.", ie);
+            throw new RuntimeException(ie);
+          } catch (ClassCastException cce) {
+            System.err.printf("class cast exception\n");
+            log.error("Schema class '" + schemaClass + "' must implement org.apache.avro.generic.GenericContainer interface.", cce);
+            throw new RuntimeException(cce);
           }
         } else if (configuredOptions.hasOption('e')) {
           setOutputAvroSchema(
@@ -210,6 +241,7 @@ public class AvroStorage extends LoadFunc
   public final void setUDFContextSignature(final String signature) {
     udfContextSignature = signature;
     super.setUDFContextSignature(signature);
+    updateSchemaFromInputAvroSchema();
   }
 
   /**
@@ -282,16 +314,6 @@ public class AvroStorage extends LoadFunc
   }
 
   /**
-   * A PathFilter that filters out invisible files.
-   */
-  protected static final PathFilter VISIBLE_FILES = new PathFilter() {
-    @Override
-    public boolean accept(final Path p) {
-      return (!(p.getName().startsWith("_") || p.getName().startsWith(".")));
-    }
-  };
-
-  /**
    * Reads the avro schemas at the specified location.
    * @param p Location of file
    * @param job Hadoop job object
@@ -319,7 +341,7 @@ public class AvroStorage extends LoadFunc
       throw new IOException("No path matches pattern " + p.toString());
     }
 
-    Path filePath = depthFirstSearchForFile(statusArray, fs);
+    Path filePath = Utils.depthFirstSearchForFile(statusArray, fs);
 
     if (filePath == null) {
       throw new IOException("No path matches pattern " + p.toString());
@@ -331,59 +353,6 @@ public class AvroStorage extends LoadFunc
     Schema s = avroDataStream.getSchema();
     avroDataStream.close();
     return s;
-  }
-
-  /**
-   * Finds a valid path for a file from a FileStatus object.
-   * @param fileStatus FileStatus object corresponding to a file,
-   * or a directory.
-   * @param fileSystem FileSystem in with the file should be found
-   * @return The first file found
-   * @throws IOException
-   */
-
-  private Path depthFirstSearchForFile(final FileStatus fileStatus,
-      final FileSystem fileSystem) throws IOException {
-    if (fileSystem.isFile(fileStatus.getPath())) {
-      return fileStatus.getPath();
-    } else {
-      return depthFirstSearchForFile(
-          fileSystem.listStatus(fileStatus.getPath(), VISIBLE_FILES),
-          fileSystem);
-    }
-
-  }
-
-  /**
-   * Finds a valid path for a file from an array of FileStatus objects.
-   * @param statusArray Array of FileStatus objects in which to search
-   * for the file.
-   * @param fileSystem FileSystem in which to search for the first file.
-   * @return The first file found.
-   * @throws IOException
-   */
-  protected Path depthFirstSearchForFile(final FileStatus[] statusArray,
-      final FileSystem fileSystem) throws IOException {
-
-    // Most recent files first
-    Arrays.sort(statusArray,
-        new Comparator<FileStatus>() {
-          @Override
-          public int compare(final FileStatus fs1, final FileStatus fs2) {
-              return Longs.compare(fs2.getModificationTime(),fs1.getModificationTime());
-            }
-          }
-    );
-
-    for (FileStatus f : statusArray) {
-      Path p = depthFirstSearchForFile(f, fileSystem);
-      if (p != null) {
-        return p;
-      }
-    }
-
-    return null;
-
   }
 
   /*
@@ -620,16 +589,24 @@ public class AvroStorage extends LoadFunc
    */
   public final Schema getInputAvroSchema() {
     if (schema == null) {
-      String schemaString = getProperties().getProperty(INPUT_AVRO_SCHEMA);
-      if (schemaString != null) {
-        Schema s = new Schema.Parser().parse(schemaString);
-        schema = s;
-      }
+      updateSchemaFromInputAvroSchema();
     }
     return schema;
   }
 
-  /*
+  /**
+   * Utility function that gets the input avro schema from the udf
+   * properties and updates schema for this instance.
+   */
+  private final void updateSchemaFromInputAvroSchema() {
+    String schemaString = getProperties().getProperty(INPUT_AVRO_SCHEMA);
+    if (schemaString != null) {
+      Schema s = new Schema.Parser().parse(schemaString);
+      schema = s;
+    }
+  }
+
+  /**
    * @see org.apache.pig.LoadFunc#getInputFormat()
    */
   @Override
@@ -650,7 +627,11 @@ public class AvroStorage extends LoadFunc
         } else {
           rr = new AvroRecordReader(s);
         }
-        rr.initialize(is, tc);
+        try {
+            rr.initialize(is, tc);
+        } finally {
+            rr.close();
+        }
         tc.setStatus(is.toString());
         return rr;
       }
@@ -731,4 +712,9 @@ public class AvroStorage extends LoadFunc
 
   }
 
+  @Override
+  public List<String> getShipFiles() {
+      Class[] classList = new Class[] {Schema.class, AvroInputFormat.class};
+      return FuncUtils.getShipFiles(classList);
+  }
 }

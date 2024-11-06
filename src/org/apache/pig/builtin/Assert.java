@@ -45,4 +45,9 @@ public class Assert extends EvalFunc<Boolean>
       return true;
     }
   }
+
+  @Override
+  public boolean allowCompileTimeCalculation() {
+      return true;
+  }
 }

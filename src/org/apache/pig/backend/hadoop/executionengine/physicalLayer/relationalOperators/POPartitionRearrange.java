@@ -19,7 +19,6 @@ package org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOp
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -31,7 +30,6 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.ExpressionOperator;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
 import org.apache.pig.backend.hadoop.executionengine.util.MapRedUtil;
-import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
@@ -39,7 +37,6 @@ import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.util.Pair;
 import org.apache.pig.impl.util.Utils;
-
 
 /**
  * The partition rearrange operator is a part of the skewed join
@@ -49,17 +46,13 @@ import org.apache.pig.impl.util.Utils;
  */
 public class POPartitionRearrange extends POLocalRearrange {
 
-    /**
-     *
-     */
     private static final long serialVersionUID = 1L;
 
-    private Integer totalReducers = -1;
+    private transient Integer totalReducers;
     // ReducerMap will store the tuple, max reducer index & min reducer index
-    private static Map<Object, Pair<Integer, Integer> > reducerMap = new HashMap<Object, Pair<Integer, Integer> >();
-    private boolean loaded;
+    private transient Map<Object, Pair<Integer, Integer> > reducerMap;
+    private transient boolean inited;
 
-    protected static final BagFactory mBagFactory = BagFactory.getInstance();
     private PigContext pigContext;
 
     public POPartitionRearrange(OperatorKey k) {
@@ -81,7 +74,7 @@ public class POPartitionRearrange extends POLocalRearrange {
     }
 
     /* Loads the key distribution file obtained from the sampler */
-    private void loadPartitionFile() throws RuntimeException {
+    private void init() throws RuntimeException {
         String keyDistFile = PigMapReduce.sJobConfInternal.get().get("pig.keyDistFile", "");
         if (keyDistFile.isEmpty()) {
             throw new RuntimeException(
@@ -102,7 +95,7 @@ public class POPartitionRearrange extends POLocalRearrange {
 
             // check if the partition file is empty
             totalReducers = (redCnt[0] == null) ? -1 : redCnt[0];
-            loaded = true;
+            inited = true;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -128,12 +121,12 @@ public class POPartitionRearrange extends POLocalRearrange {
         Result res = null;
 
         // Load the skewed join key partitioning file
-        if (!loaded) {
-        	try {
-        		loadPartitionFile();
-        	} catch (Exception e) {
-        		throw new RuntimeException(e);
-        	}
+        if (!inited) {
+            try {
+                init();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
 
         while (true) {
@@ -163,40 +156,40 @@ public class POPartitionRearrange extends POLocalRearrange {
         return inp;
     }
 
-	// Returns bag of tuples
+    // Returns bag of tuples
     protected DataBag constructPROutput(List<Result> resLst, Tuple value) throws ExecException{
-		Tuple t = super.constructLROutput(resLst, null, value);
+        Tuple t = super.constructLROutput(resLst, null, value);
 
         //Construct key
         Object key = t.get(1);
 
-		// Construct an output bag and feed in the tuples
-		DataBag opBag = mBagFactory.newDefaultBag();
+        // Construct an output bag and feed in the tuples
+        DataBag opBag = mBagFactory.newDefaultBag();
 
-		//Put the index, key, and value
-		//in a tuple and return
-		Pair <Integer, Integer> indexes = reducerMap.get(key);	// first -> min, second ->max
+        //Put the index, key, and value
+        //in a tuple and return
+        Pair <Integer, Integer> indexes = reducerMap.get(key);    // first -> min, second ->max
 
-		// For non skewed keys, we set the partition index to be -1
-		if (indexes == null) {
-			indexes = new Pair <Integer, Integer>(-1,0);
-		}
+        // For non skewed keys, we set the partition index to be -1
+        if (indexes == null) {
+            indexes = new Pair <Integer, Integer>(-1,0);
+        }
 
-		for (Integer reducerIdx=indexes.first, cnt=0; cnt <= indexes.second; reducerIdx++, cnt++) {
-			if (reducerIdx >= totalReducers) {
-				reducerIdx = 0;
-			}
-			Tuple opTuple = mTupleFactory.newTuple(4);
-			opTuple.set(0, t.get(0));
-			// set the partition index
-			opTuple.set(1, reducerIdx.intValue());
-			opTuple.set(2, key);
-			opTuple.set(3, t.get(2));
+        for (Integer reducerIdx=indexes.first, cnt=0; cnt <= indexes.second; reducerIdx++, cnt++) {
+            if (reducerIdx >= totalReducers) {
+                reducerIdx = 0;
+            }
+            Tuple opTuple = mTupleFactory.newTuple(4);
+            opTuple.set(0, t.get(0));
+            // set the partition index
+            opTuple.set(1, reducerIdx.intValue());
+            opTuple.set(2, key);
+            opTuple.set(3, t.get(2));
 
-			opBag.add(opTuple);
-		}
+            opBag.add(opTuple);
+        }
 
-		return opBag;
+        return opBag;
     }
 
     /**
@@ -219,8 +212,7 @@ public class POPartitionRearrange extends POLocalRearrange {
      */
     @Override
     public POPartitionRearrange clone() throws CloneNotSupportedException {
-		POPartitionRearrange clone = (POPartitionRearrange) super.clone();
-	    //clone.reducerMap = (HashMap)reducerMap.clone();
+        POPartitionRearrange clone = (POPartitionRearrange) super.clone();
         return clone;
     }
 

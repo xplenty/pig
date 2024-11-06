@@ -17,15 +17,20 @@
  */
 package org.apache.pig.impl;
 
+import com.google.common.base.Splitter;
+import com.google.common.collect.Lists;
+
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.io.StringWriter;
 import java.lang.reflect.Constructor;
@@ -48,12 +53,10 @@ import org.antlr.runtime.tree.Tree;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
 import org.apache.log4j.Level;
 import org.apache.pig.ExecType;
 import org.apache.pig.ExecTypeProvider;
 import org.apache.pig.FuncSpec;
-import org.apache.pig.Main;
 import org.apache.pig.PigException;
 import org.apache.pig.backend.datastorage.DataStorage;
 import org.apache.pig.backend.datastorage.DataStorageException;
@@ -62,9 +65,9 @@ import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.executionengine.ExecutionEngine;
 import org.apache.pig.backend.hadoop.datastorage.ConfigurationUtil;
 import org.apache.pig.backend.hadoop.datastorage.HDataStorage;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRConfiguration;
 import org.apache.pig.impl.streaming.ExecutableManager;
 import org.apache.pig.impl.streaming.StreamingCommand;
-import org.apache.pig.impl.util.JarManager;
 import org.apache.pig.tools.parameters.ParameterSubstitutionPreprocessor;
 import org.apache.pig.tools.parameters.ParseException;
 import org.apache.pig.tools.parameters.PreprocessorContext;
@@ -73,12 +76,12 @@ public class PigContext implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private static final Log log = LogFactory.getLog(PigContext.class);
+    private static Object instantiationLock = new Object();
 
     public static final String JOB_NAME = "jobName";
     public static final String JOB_NAME_PREFIX= "PigLatin";
     public static final String JOB_PRIORITY = "jobPriority";
     public static final String PIG_CMD_ARGS_REMAINDERS = "pig.cmd.args.remainders";
-
 
     /* NOTE: we only serialize some of the stuff
      *
@@ -104,7 +107,9 @@ public class PigContext implements Serializable {
      * Resources for the job (jars, scripting udf files, cached macro abstract syntax trees)
      */
 
-    // extra jar files that are needed to run a job
+    // Jar files that are global to the whole Pig script, includes
+    // 1. registered jars
+    // 2. Jars defined in -Dpig.additional.jars
     transient public List<URL> extraJars = new LinkedList<URL>();
 
     // original paths each extra jar came from
@@ -112,11 +117,10 @@ public class PigContext implements Serializable {
     transient private Map<URL, String> extraJarOriginalPaths = new HashMap<URL, String>();
 
     // jars needed for scripting udfs - jython.jar etc
-    public List<String> scriptJars = new ArrayList<String>(2);
+    transient public List<String> scriptJars = new ArrayList<String>(2);
 
-    // jars that should not be merged in.
-    // (some functions may come from pig.jar and we don't want the whole jar file.)
-    transient public Vector<String> skipJars = new Vector<String>(2);
+    // jars that are predeployed to the cluster and thus should not be merged in at all (even subsets).
+    transient public Vector<String> predeployedJars = new Vector<String>(2);
 
     // script files that are needed to run a job
     @Deprecated
@@ -145,6 +149,9 @@ public class PigContext implements Serializable {
     private static ThreadLocal<ArrayList<String>> packageImportList =
         new ThreadLocal<ArrayList<String>>();
 
+    private static ThreadLocal<Map<String,Class<?>>> classCache =
+        new ThreadLocal<Map<String,Class<?>>>();
+
     private Properties log4jProperties = new Properties();
 
     private Level defaultLogLevel = Level.INFO;
@@ -156,6 +163,9 @@ public class PigContext implements Serializable {
     // existence checks, etc).
     public boolean inExplain = false;
 
+    // Where we are processing a dump schema right now
+    public boolean inDumpSchema = false;
+
     // whether we're processing an ILLUSTRATE right now.
     public boolean inIllustrator = false;
 
@@ -163,6 +173,11 @@ public class PigContext implements Serializable {
 
     // List of paths skipped for automatic shipping
     List<String> skippedShipPaths = new ArrayList<String>();
+
+    //@StaticDataCleanup
+    public static void staticDataCleanup() {
+        packageImportList.set(null);
+    }
 
     /**
      * extends URLClassLoader to allow adding to classpath as new jars
@@ -233,14 +248,14 @@ public class PigContext implements Serializable {
         this(ExecType.MAPREDUCE, new Properties());
     }
 
-        public PigContext(Configuration conf) throws PigException {
-            this(ConfigurationUtil.toProperties(conf));
-        }
-        
-        public PigContext(Properties properties) throws PigException {
-            this(ExecTypeProvider.selectExecType(properties), properties);
-        }
-    
+    public PigContext(Configuration conf) throws PigException {
+        this(ConfigurationUtil.toProperties(conf));
+    }
+
+    public PigContext(Properties properties) throws PigException {
+        this(ExecTypeProvider.selectExecType(properties), properties);
+    }
+
     public PigContext(ExecType execType, Configuration conf) {
         this(execType, ConfigurationUtil.toProperties(conf));
     }
@@ -250,13 +265,6 @@ public class PigContext implements Serializable {
         this.properties = properties;
 
         this.properties.setProperty("exectype", this.execType.name());
-        String pigJar = JarManager.findContainingJar(Main.class);
-        String hadoopJar = JarManager.findContainingJar(FileSystem.class);
-        if (pigJar != null) {
-            skipJars.add(pigJar);
-            if (!pigJar.equals(hadoopJar))
-                skipJars.add(hadoopJar);
-        }
 
         this.executionEngine = execType.getExecutionEngine(this);
 
@@ -267,7 +275,7 @@ public class PigContext implements Serializable {
         skippedShipPaths.add("/sbin");
         skippedShipPaths.add("/usr/sbin");
         skippedShipPaths.add("/usr/local/sbin");
-        
+
         macros = new HashMap<String, Tree>();
         scriptingUDFs = new HashMap<String, String>();
 
@@ -299,28 +307,13 @@ public class PigContext implements Serializable {
     }
 
     public void connect() throws ExecException {
-                executionEngine.init();
-                dfs = executionEngine.getDataStorage();
-                lfs = new HDataStorage(URI.create("file:///"), properties);
-                Runtime.getRuntime().addShutdownHook(new ExecutionEngineKiller());
-
-    }
-
-    class ExecutionEngineKiller extends Thread {
-        public ExecutionEngineKiller() {}
-                
-                @Override
-        public void run() {
-            try {
-                executionEngine.kill();
-            } catch (Exception e) {
-                log.warn("Error in killing Execution Engine: " + e);
-            }
-        }
+        executionEngine.init();
+        dfs = executionEngine.getDataStorage();
+        lfs = new HDataStorage(URI.create("file:///"), properties);
     }
 
     public void setJobtrackerLocation(String newLocation) {
-        executionEngine.setProperty("mapred.job.tracker", newLocation);
+        executionEngine.setProperty(MRConfiguration.JOB_TRACKER, newLocation);
     }
 
     /**
@@ -329,18 +322,7 @@ public class PigContext implements Serializable {
      * @param path
      */
     public void addScriptFile(String path) {
-        if (path != null) {
-            aliasedScriptFiles.put(path.replaceFirst("^/", "").replaceAll(":", ""), new File(path));
-        }
-    }
-
-    public boolean hasJar(String path) {
-        for (URL url : extraJars) {
-            if (extraJarOriginalPaths.get(url).equals(path)) {
-                return true;
-            }
-        }
-        return false;
+        addScriptFile(path, path);
     }
 
     /**
@@ -355,6 +337,12 @@ public class PigContext implements Serializable {
         }
     }
 
+    public void addScriptJar(String path) {
+        if (path != null && !scriptJars.contains(path)) {
+            scriptJars.add(path);
+        }
+    }
+
     public void addJar(String path) throws MalformedURLException {
         if (path != null) {
             URL resource = (new File(path)).toURI().toURL();
@@ -363,11 +351,33 @@ public class PigContext implements Serializable {
     }
 
     public void addJar(URL resource, String originalPath) throws MalformedURLException{
-        if (resource != null) {
+        if (resource != null && !extraJars.contains(resource)) {
             extraJars.add(resource);
             extraJarOriginalPaths.put(resource, originalPath);
             classloader.addURL(resource);
             Thread.currentThread().setContextClassLoader(PigContext.classloader);
+        }
+    }
+
+    public boolean hasJar(String path) {
+        for (URL url : extraJars) {
+            if (extraJarOriginalPaths.get(url).equals(path)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Adds the specified path to the predeployed jars list. These jars will
+     * never be included in generated job jar.
+     * <p>
+     * This can be called for jars that are pre-installed on the Hadoop
+     * cluster to reduce the size of the job jar.
+     */
+    public void markJarAsPredeployed(String path) {
+        if (path != null && !predeployedJars.contains(path)) {
+            predeployedJars.add(path);
         }
     }
 
@@ -391,6 +401,7 @@ public class PigContext implements Serializable {
 
     public String doParamSubstitution(BufferedReader reader) throws IOException {
         try {
+            preprocessorContext.setPigContext(this);
             preprocessorContext.loadParamVal(params, paramFiles);
             ParameterSubstitutionPreprocessor psp
                 = new ParameterSubstitutionPreprocessor(preprocessorContext);
@@ -621,12 +632,30 @@ public class PigContext implements Serializable {
         return new ContextClassLoader(urls, PigContext.class.getClassLoader());
     }
 
+    private static Map<String,Class<?>> getClassCache() {
+        Map<String,Class<?>> c = classCache.get();
+        if (c == null) {
+            c = new HashMap<String,Class<?>>();
+            classCache.set(c);
+        }
+
+        return c;
+    }
+
     @SuppressWarnings("rawtypes")
     public static Class resolveClassName(String name) throws IOException{
+        Map<String,Class<?>> cache = getClassCache();
+
+        Class c = cache.get(name);
+        if (c != null) {
+            return c;
+        }
+
         for(String prefix: getPackageImportList()) {
-            Class c;
             try {
                 c = Class.forName(prefix+name,true, PigContext.classloader);
+                cache.put(name, c);
+
                 return c;
             }
             catch (ClassNotFoundException e) {
@@ -699,26 +728,41 @@ public class PigContext implements Serializable {
             throw new RuntimeException("Cannot instantiate: " + className, ioe) ;
         }
 
-        try {
-            // Do normal instantiation
-            if (args != null && args.length > 0) {
-                Class paramTypes[] = new Class[args.length];
-                for (int i = 0; i < paramTypes.length; i++) {
-                    paramTypes[i] = String.class;
-                }
-                Constructor c = objClass.getConstructor(paramTypes);
-                ret =  c.newInstance((Object[])args);
-            } else {
-                ret = objClass.newInstance();
-            }
-        }
-        catch(NoSuchMethodException nme) {
-            // Second chance. Try with var arg constructor
+        // OptionBuilder is not thread-safe and HBaseStorage, elephantbird SequenceFileConfig, etc
+        // use them in constructor. This leads to NoSuchMethodException, UnrecognizedOptionException etc
+        // when processor, inputs and outputs are initialized in parallel in Tez
+        synchronized (instantiationLock) {
             try {
-                Constructor c = objClass.getConstructor(String[].class);
-                Object[] wrappedArgs = new Object[1] ;
-                wrappedArgs[0] = args ;
-                ret =  c.newInstance(wrappedArgs);
+                // Do normal instantiation
+                if (args != null && args.length > 0) {
+                    Class paramTypes[] = new Class[args.length];
+                    for (int i = 0; i < paramTypes.length; i++) {
+                        paramTypes[i] = String.class;
+                    }
+                    Constructor c = objClass.getConstructor(paramTypes);
+                    ret =  c.newInstance((Object[])args);
+                } else {
+                    ret = objClass.newInstance();
+                }
+            }
+            catch(NoSuchMethodException nme) {
+                // Second chance. Try with var arg constructor
+                try {
+                    Constructor c = objClass.getConstructor(String[].class);
+                    Object[] wrappedArgs = new Object[1] ;
+                    wrappedArgs[0] = args ;
+                    ret =  c.newInstance(wrappedArgs);
+                }
+                catch(Throwable e){
+                    // bad luck
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("could not instantiate '");
+                    sb.append(className);
+                    sb.append("' with arguments '");
+                    sb.append(Arrays.toString(args));
+                    sb.append("'");
+                    throw new RuntimeException(sb.toString(), e);
+                }
             }
             catch(Throwable e){
                 // bad luck
@@ -730,18 +774,8 @@ public class PigContext implements Serializable {
                 sb.append("'");
                 throw new RuntimeException(sb.toString(), e);
             }
+            return ret;
         }
-        catch(Throwable e){
-            // bad luck
-            StringBuilder sb = new StringBuilder();
-            sb.append("could not instantiate '");
-            sb.append(className);
-            sb.append("' with arguments '");
-            sb.append(Arrays.toString(args));
-            sb.append("'");
-            throw new RuntimeException(sb.toString(), e);
-        }
-        return ret;
     }
 
     public static Object instantiateFuncFromSpec(String funcSpec)  {
@@ -833,11 +867,7 @@ public class PigContext implements Serializable {
      * @return error source
      */
     public byte getErrorSource() {
-        if(execType == ExecType.LOCAL || execType == ExecType.MAPREDUCE) {
-            return PigException.REMOTE_ENVIRONMENT;
-        } else {
-            return PigException.BUG;
-        }
+        return PigException.REMOTE_ENVIRONMENT;
     }
 
     public static ArrayList<String> getPackageImportList() {
@@ -872,6 +902,11 @@ public class PigContext implements Serializable {
     {
         defaultLogLevel = l;
     }
+ 
+   public int getDefaultParallel() {
+        return defaultParallel;
+    }
+
     public static ClassLoader getClassLoader() {
         return classloader;
     }
@@ -881,5 +916,5 @@ public class PigContext implements Serializable {
         } else {
             classloader = new ContextClassLoader(cl);
         }
-    }
+   }
 }

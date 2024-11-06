@@ -486,6 +486,11 @@ public class TestQueryParser {
     
     @Test
     public void testFunction2() throws Exception {
+        shouldPass("B = foreach A generate org.apache.pig.builtin.CONCAT(b, c, 'x', 'y');");
+    }
+    
+    @Test
+    public void testFunction3() throws Exception {
         shouldPass("B = foreach A generate flatten(myudfs.Swap(name, age)), gpa;");
     }
     
@@ -646,5 +651,15 @@ public class TestQueryParser {
     @Test
     public void testSplit2() throws Exception {
         shouldPass("SPLIT logs INTO logins IF command == 'login', all_quits IF command == 'quit';");
+    }
+
+    @Test
+    public void testBigDecimalParsing() throws Exception {
+        shouldPass("B = FILTER A BY $1 < 1234567890.123456789BD;");
+    }
+
+    @Test
+    public void testBigIntegerParsing() throws Exception {
+        shouldPass("B = FILTER A BY $1 < 1234567890123456789BI;");
     }
 }

@@ -35,7 +35,6 @@ import org.apache.pig.classification.InterfaceStability;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.io.ReadToEndLoader;
-import org.apache.pig.newplan.Operator;
 
 /**
  * This class encapsulates the runtime statistics of an user specified output.
@@ -52,20 +51,20 @@ public final class OutputStats {
     private boolean success;
 
     private POStore store = null;
-    
+
     private Configuration conf;
 
     private static final Log LOG = LogFactory.getLog(OutputStats.class);
-    
+
     public OutputStats(String location, long bytes, long records, boolean success) {
         this.location = location;
         this.bytes = bytes;
-        this.records = records;        
+        this.records = records;
         this.success = success;
         try {
             this.name = new Path(location).getName();
         } catch (Exception e) {
-            // location is a mal formatted URL 
+            // location is a mal formatted URL
             this.name = location;
         }
     }
@@ -82,6 +81,18 @@ public final class OutputStats {
         return bytes;
     }
 
+    public void setBytes(long bytes) {
+        this.bytes = bytes;
+    }
+
+    public long getRecords() {
+        return records;
+    }
+
+    public void setRecords(long records) {
+        this.records = records;
+    }
+
     public long getNumberRecords() {
         return records;
     }
@@ -95,6 +106,10 @@ public final class OutputStats {
         return success;
     }
 
+    public void setSuccessful(boolean success) {
+        this.success = success;
+    }
+
     public String getAlias() {
         return (store == null) ? null : store.getAlias();
     }
@@ -106,12 +121,12 @@ public final class OutputStats {
     public Configuration getConf() {
         return conf;
     }
-    
-    public String getDisplayString(boolean local) {
+
+    public String getDisplayString() {
         StringBuilder sb = new StringBuilder();
         if (success) {
             sb.append("Successfully stored ");
-            if (!local && records >= 0) {
+            if (records >= 0) {
                 sb.append(records).append(" records ");
             } else {
                 sb.append("records ");
@@ -130,11 +145,11 @@ public final class OutputStats {
     public void setPOStore(POStore store) {
         this.store = store;
     }
-    
+
     public void setConf(Configuration conf) {
         this.conf = conf;
     }
-    
+
     public Iterator<Tuple> iterator() throws IOException {
         final LoadFunc p;
         PigContext pigContext = ScriptState.get().getPigContext();
@@ -155,11 +170,12 @@ public final class OutputStats {
             String msg = "Unable to get results for: " + store.getSFile();
             throw new ExecException(msg, errCode, PigException.BUG, e);
         }
-        
-        return new Iterator<Tuple>() {        
+
+        return new Iterator<Tuple>() {
             Tuple   t;
             boolean atEnd;
 
+            @Override
             public boolean hasNext() {
                 if (atEnd) return false;
                 try {
@@ -174,6 +190,7 @@ public final class OutputStats {
                 return !atEnd;
             }
 
+            @Override
             public Tuple next() {
                 Tuple next = t;
                 if (next != null) {
@@ -190,10 +207,11 @@ public final class OutputStats {
                 return next;
             }
 
+            @Override
             public void remove() {
                 throw new RuntimeException("Removal not supported");
             }
- 
+
         };
     }
 }

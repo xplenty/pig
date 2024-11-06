@@ -25,7 +25,12 @@ fi
 
 source $PIGMIX_HOME/conf/config.sh
 
-pigjar=$PIG_HOME/pig-withouthadoop.jar
+echo "Going to run $HADOOP_HOME/bin/hadoop fs -mkdir -p $hdfsroot"
+$HADOOP_HOME/bin/hadoop fs -mkdir -p $hdfsroot
+
+shopt -s extglob
+pigjar=`echo $PIG_HOME/pig*-h2.jar`
+
 pigmixjar=$PIGMIX_HOME/pigmix.jar
 
 classpath=$pigjar:$pigmixjar
@@ -34,14 +39,6 @@ export HADOOP_CLASSPATH=$classpath
 
 export PIG_OPTS="-Xmx1024m"
 export HADOOP_CLIENT_OPTS="-Xmx1024m"
-
-if [ $HADOOP_VERSION == "23" ]; then
-    echo "Going to run $HADOOP_HOME/bin/hadoop fs -mkdir -p $hdfsroot"
-    $HADOOP_HOME/bin/hadoop fs -mkdir -p $hdfsroot
-else
-    echo "Going to run $HADOOP_HOME/bin/hadoop fs -mkdir $hdfsroot"
-    $HADOOP_HOME/bin/hadoop fs -mkdir $hdfsroot
-fi
 
 if [ $? -ne 0 ]
 then

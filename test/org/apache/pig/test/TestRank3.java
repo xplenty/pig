@@ -23,7 +23,6 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Set;
 
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecException;
@@ -35,7 +34,10 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.ImmutableMultiset;
+import com.google.common.collect.ImmutableSortedSet;
+import com.google.common.collect.TreeMultiset;
+import com.google.common.collect.Multiset;
 
 public class TestRank3 {
     private static PigServer pigServer;
@@ -49,9 +51,16 @@ public class TestRank3 {
     @Before
     public void setUp() throws Exception {
         try {
-            pigServer = new PigServer("local");
+            pigServer = new PigServer(Util.getLocalTestMode());
 
             data = resetData(pigServer);
+            data.set("empty");
+            data.set("testsplit",
+                    tuple(1, 2),
+                    tuple(1, 2),
+                    tuple(3, 1),
+                    tuple(2, 4),
+                    tuple(2, 3));
             data.set(
                     "testcascade",
                     tuple(3,2,3),
@@ -106,7 +115,7 @@ public class TestRank3 {
 
         Util.registerMultiLineQuery(pigServer, query);
 
-        Set<Tuple> expected = ImmutableSet.of(
+        Multiset<Tuple> expected = ImmutableMultiset.of(
                 tf.newTuple(ImmutableList.of(1L,21L,5L,7L,1L,1L,0L,8L,8L)),
                 tf.newTuple(ImmutableList.of(2L,26L,2L,3L,2L,5L,1L,9L,10L)),
                 tf.newTuple(ImmutableList.of(3L,30L,24L,21L,2L,3L,1L,3L,10L)),
@@ -142,10 +151,70 @@ public class TestRank3 {
         verifyExpected(data.get("result"), expected);
     }
 
-    public void verifyExpected(List<Tuple> out, Set<Tuple> expected) {
+    // See PIG-3726
+    @Test
+    public void testRankEmptyRelation() throws Exception {
+      String query = "DATA = LOAD 'empty' USING mock.Storage();"
+        + "A = rank DATA;"
+        + "store A into 'empty_result' using mock.Storage();";
+
+      Util.registerMultiLineQuery(pigServer, query);
+
+      Multiset<Tuple> expected = ImmutableMultiset.of();
+      verifyExpected(data.get("empty_result"), expected);
+    }
+
+    @Test
+    public void testRankWithSplitInMap() throws Exception {
+        String query = "R1 = LOAD 'testsplit' USING mock.Storage() AS (a:int,b:int);"
+            + "R2 = rank R1 by a ;"
+            + "R3 = rank R1 ;"
+            + "R4 = union R2, R3;"
+            + "store R4 into 'R4' using mock.Storage();";
+
+        Util.registerMultiLineQuery(pigServer, query);
+        List<Tuple> expectedResults = Util
+                .getTuplesFromConstantTupleStrings(new String[] { "(1L,1,2)",
+                        "(2L,1,2)", "(3L,3,1)", "(4L,2,4)", "(5L,2,3)", "(1L,1,2)",
+                        "(1L,1,2)", "(3L,2,3)", "(3L,2,4)", "(5L,3,1)" });
+        Util.checkQueryOutputsAfterSort(data.get("R4"), expectedResults);
+    }
+
+    @Test
+    public void testRankWithSplitInReduce() throws Exception {
+        String query = "R1 = LOAD 'testsplit' USING mock.Storage() AS (a:int,b:int);"
+            + "R1 = ORDER R1 by b;"
+            + "R2 = rank R1 by a ;"
+            + "R3 = rank R1;"
+            + "R4 = union R2, R3;"
+            + "store R4 into 'R4' using mock.Storage();";
+
+        Util.registerMultiLineQuery(pigServer, query);
+        List<Tuple> expectedResults = Util
+                .getTuplesFromConstantTupleStrings(new String[] { "(1L,3,1)",
+                        "(2L,1,2)", "(3L,1,2)", "(4L,2,3)", "(5L,2,4)", "(1L,1,2)",
+                        "(1L,1,2)", "(3L,2,4)", "(3L,2,3)", "(5L,3,1)" });
+        Util.checkQueryOutputsAfterSort(data.get("R4"), expectedResults);
+    }
+
+    public void verifyExpected(List<Tuple> out, Multiset<Tuple> expected) {
+        Multiset<Tuple> resultMultiset = TreeMultiset.create();
         for (Tuple tup : out) {
-            assertTrue(expected + " contains " + tup, expected.contains(tup));
+          resultMultiset.add(tup);
         }
+
+        StringBuilder error = new StringBuilder("Result does not match.\nActual result:\n");
+        for (Tuple tup : resultMultiset.elementSet() ) {
+            error.append(tup).append(" x ").append(resultMultiset.count(tup)).append("\n");
+        }
+        error.append("Expceted result:\n");
+        for (Tuple tup : ImmutableSortedSet.copyOf(expected) ) {
+            error.append(tup).append(" x ").append(expected.count(tup)).append("\n");
+        }
+
+        //This one line test should be sufficient but adding the above
+        //for-loop for better error messages
+        assertTrue(error.toString(), resultMultiset.equals(expected));
     }
 
 }

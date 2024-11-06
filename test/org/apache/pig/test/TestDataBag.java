@@ -17,17 +17,38 @@
  */
 package org.apache.pig.test;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
-import java.util.*;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.PriorityQueue;
+import java.util.Random;
+import java.util.TreeSet;
 
-
-import org.apache.pig.data.*;
+import org.apache.pig.backend.executionengine.ExecException;
+import org.apache.pig.data.BagFactory;
+import org.apache.pig.data.DataBag;
+import org.apache.pig.data.DefaultDataBag;
+import org.apache.pig.data.DefaultTuple;
+import org.apache.pig.data.DistinctDataBag;
+import org.apache.pig.data.InternalCachedBag;
+import org.apache.pig.data.InternalDistinctBag;
+import org.apache.pig.data.InternalSortedBag;
+import org.apache.pig.data.LimitedSortedDataBag;
+import org.apache.pig.data.NonSpillableDataBag;
+import org.apache.pig.data.SingleTupleBag;
+import org.apache.pig.data.SortedDataBag;
+import org.apache.pig.data.Tuple;
+import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.util.Spillable;
 import org.junit.After;
 import org.junit.Test;
@@ -36,7 +57,7 @@ import org.junit.Test;
 /**
  * This class will exercise the basic Pig data model and members. It tests for proper behavior in
  * assignment and comparison, as well as function application.
- * 
+ *
  * @author dnm
  */
 public class TestDataBag  {
@@ -590,7 +611,7 @@ public class TestDataBag  {
             }
             mgr.forceSpill();
         }
-        
+
        assertEquals("Size of distinct data bag is incorrect", rightAnswer.size(), b.size());
 
         // Read tuples back, hopefully they come out in the same order.
@@ -719,14 +740,17 @@ public class TestDataBag  {
     @Test
     public void testDefaultBagFactory() throws Exception {
         BagFactory f = BagFactory.getInstance();
-       
+
         DataBag bag = f.newDefaultBag();
         DataBag sorted = f.newSortedBag(null);
+        DataBag limitedSorted = f.newLimitedSortedBag(null, 1);
         DataBag distinct = f.newDistinctBag();
 
         assertTrue("Expected a default bag", (bag instanceof DefaultDataBag));
         assertTrue("Expected a sorted bag", (sorted instanceof SortedDataBag));
-        assertTrue("Expected a distinct bag", (distinct instanceof DistinctDataBag));         
+        assertTrue("Expected a limited sorted bag",
+                (limitedSorted instanceof LimitedSortedDataBag));
+        assertTrue("Expected a distinct bag", (distinct instanceof DistinctDataBag));
     }
 
     @Test
@@ -756,7 +780,7 @@ public class TestDataBag  {
         try {
             BagFactory f = BagFactory.getInstance();
         } catch (RuntimeException re) {
-            assertEquals("Expected does not extend BagFactory message", 
+            assertEquals("Expected does not extend BagFactory message",
                 "Provided factory org.apache.pig.test.TestDataBag does not extend BagFactory!",
                 re.getMessage());
             caughtIt = true;
@@ -775,7 +799,7 @@ public class TestDataBag  {
 
         BagFactory.resetSelf();
     }
-    
+
     @Test
     public void testNonSpillableDataBagEquals1() throws Exception {
         String[][] tupleContents = new String[][] {{"a", "b"},{"c", "d" }, { "e", "f"} };
@@ -789,7 +813,7 @@ public class TestDataBag  {
         }
         assertEquals(bg1, bg2);
     }
-    
+
     @Test
     public void testNonSpillableDataBagEquals2() throws Exception {
         String[][] tupleContents = new String[][] {{"a", "b"},{"c", "d" }, { "e", "f"} };
@@ -804,7 +828,7 @@ public class TestDataBag  {
         }
         assertEquals(bg1, bg2);
     }
-    
+
     @Test
     public void testDefaultDataBagEquals1() throws Exception {
         String[][] tupleContents = new String[][] {{"a", "b"},{"c", "d" }, { "e", "f"} };
@@ -820,7 +844,7 @@ public class TestDataBag  {
         }
         assertEquals(bg1, bg2);
     }
-    
+
     @Test
     public void testDefaultDataBagEquals2() throws Exception {
         String[][] tupleContents = new String[][] {{"a", "b"},{"c", "d" }, { "e", "f"} };
@@ -837,35 +861,35 @@ public class TestDataBag  {
         }
         assertEquals(bg1, bg2);
     }
-    
-    public void testInternalCachedBag() throws Exception {    
+
+    public void testInternalCachedBag() throws Exception {
     	// check adding empty tuple
     	DataBag bg0 = new InternalCachedBag();
     	bg0.add(TupleFactory.getInstance().newTuple());
     	bg0.add(TupleFactory.getInstance().newTuple());
     	assertEquals(bg0.size(), 2);
-    	
+
     	// check equal of bags
     	DataBag bg1 = new InternalCachedBag(1, 0.5f);
     	assertEquals(bg1.size(), 0);
-    	
+
     	String[][] tupleContents = new String[][] {{"a", "b"},{"c", "d" }, { "e", "f"} };
     	for (int i = 0; i < tupleContents.length; i++) {
             bg1.add(Util.createTuple(tupleContents[i]));
         }
-    	
+
     	// check size, and isSorted(), isDistinct()
     	assertEquals(bg1.size(), 3);
     	assertFalse(bg1.isSorted());
     	assertFalse(bg1.isDistinct());
-    	
+
     	tupleContents = new String[][] {{"c", "d" }, {"a", "b"},{ "e", "f"} };
     	DataBag bg2 = new InternalCachedBag(1, 0.5f);
         for (int i = 0; i < tupleContents.length; i++) {
              bg2.add(Util.createTuple(tupleContents[i]));
         }
         assertEquals(bg1, bg2);
-        
+
         // check bag with data written to disk
         DataBag bg3 = new InternalCachedBag(1, 0.0f);
         tupleContents = new String[][] {{ "e", "f"}, {"c", "d" }, {"a", "b"}};
@@ -873,7 +897,7 @@ public class TestDataBag  {
             bg3.add(Util.createTuple(tupleContents[i]));
         }
         assertEquals(bg1, bg3);
-        
+
         // check iterator
         Iterator<Tuple> iter = bg3.iterator();
         DataBag bg4 = new InternalCachedBag(1, 0.0f);
@@ -881,7 +905,7 @@ public class TestDataBag  {
         	bg4.add(iter.next());
         }
         assertEquals(bg3, bg4);
-        
+
         // call iterator methods with irregular order
         iter = bg3.iterator();
         assertTrue(iter.hasNext());
@@ -894,46 +918,46 @@ public class TestDataBag  {
         assertFalse(iter.hasNext());
         assertFalse(iter.hasNext());
         assertEquals(bg3, bg5);
-        
-        
+
+
         bg4.clear();
-        assertEquals(bg4.size(), 0);        
+        assertEquals(bg4.size(), 0);
     }
-    
-    public void testInternalSortedBag() throws Exception {    
-    	
+
+    public void testInternalSortedBag() throws Exception {
+
     	// check adding empty tuple
     	DataBag bg0 = new InternalSortedBag();
     	bg0.add(TupleFactory.getInstance().newTuple());
     	bg0.add(TupleFactory.getInstance().newTuple());
     	assertEquals(bg0.size(), 2);
-    	
+
     	// check equal of bags
     	DataBag bg1 = new InternalSortedBag();
     	assertEquals(bg1.size(), 0);
-    	
+
     	String[][] tupleContents = new String[][] {{ "e", "f"}, {"a", "b"}, {"c", "d" }};
     	for (int i = 0; i < tupleContents.length; i++) {
             bg1.add(Util.createTuple(tupleContents[i]));
         }
-    	
+
     	// check size, and isSorted(), isDistinct()
     	assertEquals(bg1.size(), 3);
     	assertTrue(bg1.isSorted());
     	assertFalse(bg1.isDistinct());
-    	
+
     	tupleContents = new String[][] {{"c", "d" }, {"a", "b"},{ "e", "f"} };
     	DataBag bg2 = new InternalSortedBag();
         for (int i = 0; i < tupleContents.length; i++) {
              bg2.add(Util.createTuple(tupleContents[i]));
         }
         assertEquals(bg1, bg2);
-        
+
         Iterator<Tuple> iter = bg1.iterator();
         iter.next().equals(Util.createTuple(new String[] {"a", "b"}));
         iter.next().equals(Util.createTuple(new String[] {"c", "d"}));
         iter.next().equals(Util.createTuple(new String[] {"e", "f"}));
-        
+
         // check bag with data written to disk
         DataBag bg3 = new InternalSortedBag(1, 0.0f, null);
         tupleContents = new String[][] {{ "e", "f"}, {"c", "d" }, {"a", "b"}};
@@ -941,17 +965,17 @@ public class TestDataBag  {
             bg3.add(Util.createTuple(tupleContents[i]));
         }
         assertEquals(bg1, bg3);
-        
+
         iter = bg3.iterator();
         iter.next().equals(Util.createTuple(new String[] {"a", "b"}));
         iter.next().equals(Util.createTuple(new String[] {"c", "d"}));
-        iter.next().equals(Util.createTuple(new String[] {"e", "f"}));                
-        
+        iter.next().equals(Util.createTuple(new String[] {"e", "f"}));
+
         // call iterator methods with irregular order
         iter = bg3.iterator();
         assertTrue(iter.hasNext());
         assertTrue(iter.hasNext());
-        
+
         DataBag bg4 = new InternalSortedBag(1, 0.0f, null);
         bg4.add(iter.next());
         bg4.add(iter.next());
@@ -959,21 +983,21 @@ public class TestDataBag  {
         bg4.add(iter.next());
         assertFalse(iter.hasNext());
         assertFalse(iter.hasNext());
-        assertEquals(bg3, bg4);        
-        
+        assertEquals(bg3, bg4);
+
         // check clear
         bg3.clear();
         assertEquals(bg3.size(), 0);
-        
+
         // test with all data spill out
-        DataBag bg5 = new InternalSortedBag();        
+        DataBag bg5 = new InternalSortedBag();
         for(int j=0; j<3; j++) {
         	for (int i = 0; i < tupleContents.length; i++) {
         		bg5.add(Util.createTuple(tupleContents[i]));
-        	}     
+        	}
         	bg5.spill();
         }
-        
+
         assertEquals(bg5.size(), 9);
         iter = bg5.iterator();
         for(int i=0; i<3; i++) {
@@ -983,21 +1007,21 @@ public class TestDataBag  {
         	iter.next().equals(Util.createTuple(new String[] {"c", "d"}));
         }
         for(int i=0; i<3; i++) {
-        	iter.next().equals(Util.createTuple(new String[] {"e", "f"}));   
+        	iter.next().equals(Util.createTuple(new String[] {"e", "f"}));
         }
-        
+
         // test with most data spill out, with some data in memory
         // and merge of spill files
-        DataBag bg6 = new InternalSortedBag();        
+        DataBag bg6 = new InternalSortedBag();
         for(int j=0; j<104; j++) {
         	for (int i = 0; i < tupleContents.length; i++) {
         		bg6.add(Util.createTuple(tupleContents[i]));
-        	}        	
+        	}
         	if (j != 103) {
         		bg6.spill();
         	}
         }
-        
+
         assertEquals(bg6.size(), 104*3);
         iter = bg6.iterator();
         for(int i=0; i<104; i++) {
@@ -1007,55 +1031,55 @@ public class TestDataBag  {
         	iter.next().equals(Util.createTuple(new String[] {"c", "d"}));
         }
         for(int i=0; i<104; i++) {
-        	iter.next().equals(Util.createTuple(new String[] {"e", "f"}));   
+        	iter.next().equals(Util.createTuple(new String[] {"e", "f"}));
         }
-        
+
         // check two implementation of sorted bag can compare correctly
-        DataBag bg7 = new SortedDataBag(null);        
+        DataBag bg7 = new SortedDataBag(null);
         for(int j=0; j<104; j++) {
         	for (int i = 0; i < tupleContents.length; i++) {
         		bg7.add(Util.createTuple(tupleContents[i]));
-        	}        	
+        	}
         	if (j != 103) {
         		bg7.spill();
         	}
         }
         assertEquals(bg6, bg7);
     }
-    
-    public void testInternalDistinctBag() throws Exception {    
+
+    public void testInternalDistinctBag() throws Exception {
     	// check adding empty tuple
     	DataBag bg0 = new InternalDistinctBag();
     	bg0.add(TupleFactory.getInstance().newTuple());
     	bg0.add(TupleFactory.getInstance().newTuple());
     	assertEquals(bg0.size(), 1);
-    	
+
     	// check equal of bags
     	DataBag bg1 = new InternalDistinctBag();
     	assertEquals(bg1.size(), 0);
-    	
+
     	String[][] tupleContents = new String[][] {{ "e", "f"}, {"a", "b"}, {"e", "d" }, {"a", "b"}, {"e", "f"}};
     	for (int i = 0; i < tupleContents.length; i++) {
             bg1.add(Util.createTuple(tupleContents[i]));
         }
-    	
+
     	// check size, and isSorted(), isDistinct()
     	assertEquals(bg1.size(), 3);
     	assertFalse(bg1.isSorted());
     	assertTrue(bg1.isDistinct());
-    	
+
     	tupleContents = new String[][] {{"a", "b" }, {"e", "d"}, {"e", "d"}, { "e", "f"} };
     	DataBag bg2 = new InternalDistinctBag();
         for (int i = 0; i < tupleContents.length; i++) {
              bg2.add(Util.createTuple(tupleContents[i]));
         }
         assertEquals(bg1, bg2);
-        
+
         Iterator<Tuple> iter = bg1.iterator();
         iter.next().equals(Util.createTuple(new String[] {"a", "b"}));
         iter.next().equals(Util.createTuple(new String[] {"c", "d"}));
         iter.next().equals(Util.createTuple(new String[] {"e", "f"}));
-        
+
         // check bag with data written to disk
         DataBag bg3 = new InternalDistinctBag(1, 0.0f);
         tupleContents = new String[][] {{ "e", "f"}, {"a", "b"}, {"e", "d" }, {"a", "b"}, {"e", "f"}};
@@ -1064,13 +1088,13 @@ public class TestDataBag  {
         }
         assertEquals(bg2, bg3);
         assertEquals(bg3.size(), 3);
-              
-        
+
+
         // call iterator methods with irregular order
         iter = bg3.iterator();
         assertTrue(iter.hasNext());
         assertTrue(iter.hasNext());
-        
+
         DataBag bg4 = new InternalDistinctBag(1, 0.0f);
         bg4.add(iter.next());
         bg4.add(iter.next());
@@ -1078,73 +1102,73 @@ public class TestDataBag  {
         bg4.add(iter.next());
         assertFalse(iter.hasNext());
         assertFalse(iter.hasNext());
-        assertEquals(bg3, bg4);        
-        
+        assertEquals(bg3, bg4);
+
         // check clear
         bg3.clear();
         assertEquals(bg3.size(), 0);
-        
+
         // test with all data spill out
-        DataBag bg5 = new InternalDistinctBag();        
+        DataBag bg5 = new InternalDistinctBag();
         for(int j=0; j<3; j++) {
         	for (int i = 0; i < tupleContents.length; i++) {
         		bg5.add(Util.createTuple(tupleContents[i]));
-        	}        
+        	}
         	bg5.spill();
         }
-        
+
         assertEquals(bg5.size(), 3);
-    
-        
+
+
         // test with most data spill out, with some data in memory
         // and merge of spill files
-        DataBag bg6 = new InternalDistinctBag();        
+        DataBag bg6 = new InternalDistinctBag();
         for(int j=0; j<104; j++) {
         	for (int i = 0; i < tupleContents.length; i++) {
         		bg6.add(Util.createTuple(tupleContents[i]));
-        	}        	
+        	}
         	if (j != 103) {
         		bg6.spill();
         	}
         }
-        
-        assertEquals(bg6.size(), 3);       
-        
+
+        assertEquals(bg6.size(), 3);
+
         // check two implementation of sorted bag can compare correctly
-        DataBag bg7 = new DistinctDataBag();        
+        DataBag bg7 = new DistinctDataBag();
         for(int j=0; j<104; j++) {
         	for (int i = 0; i < tupleContents.length; i++) {
         		bg7.add(Util.createTuple(tupleContents[i]));
-        	}        	
+        	}
         	if (j != 103) {
         		bg7.spill();
         	}
         }
         assertEquals(bg6, bg7);
     }
-    
+
     // See PIG-1231
     @Test
     public void testDataBagIterIdempotent() throws Exception {
         DataBag bg0 = new DefaultDataBag();
         processDataBag(bg0, true);
-        
+
         DataBag bg1 = new DistinctDataBag();
         processDataBag(bg1, true);
-        
+
         DataBag bg2 = new InternalDistinctBag();
         processDataBag(bg2, true);
-        
+
         DataBag bg3 = new InternalSortedBag();
         processDataBag(bg3, true);
-        
+
         DataBag bg4 = new SortedDataBag(null);
         processDataBag(bg4, true);
-        
+
         DataBag bg5 = new InternalCachedBag(0, 0);
         processDataBag(bg5, false);
     }
-    
+
     // See PIG-1285
     @Test
     public void testSerializeSingleTupleBag() throws Exception {
@@ -1159,7 +1183,7 @@ public class TestDataBag  {
         dfBag.readFields(dis);
         assertTrue(dfBag.equals(stBag));
     }
-    
+
     // See PIG-2550
     static class MyCustomTuple extends DefaultTuple {
         private static final long serialVersionUID = 8156382697467819543L;
@@ -1184,7 +1208,23 @@ public class TestDataBag  {
         Tuple t2 = iter.next();
         assertTrue(t2.equals(t));
     }
-    
+
+    // See PIG-4260
+    @Test
+    public void testSpillArrayBackedList() throws Exception {
+        Tuple[] tuples = new Tuple[2];
+        tuples[0] = TupleFactory.getInstance().newTuple(1);
+        tuples[0].set(0, "first");
+        tuples[1] = TupleFactory.getInstance().newTuple(1);
+        tuples[1].set(0, "second");
+        DefaultDataBag bag = new DefaultDataBag(Arrays.asList(tuples));
+        bag.spill();
+        Iterator<Tuple> iter = bag.iterator();
+        assertEquals(tuples[0], iter.next());
+        assertEquals(tuples[1], iter.next());
+        assertFalse(iter.hasNext());
+    }
+
     void processDataBag(DataBag bg, boolean doSpill) {
         Tuple t = TupleFactory.getInstance().newTuple(new Integer(0));
         bg.add(t);
@@ -1194,9 +1234,44 @@ public class TestDataBag  {
         assertTrue(iter.hasNext());
         iter.next();
         assertFalse(iter.hasNext());
-        assertFalse("hasNext should be idempotent", iter.hasNext());        
+        assertFalse("hasNext should be idempotent", iter.hasNext());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testLimitedSortedBag() throws ExecException {
+        DataBag bag = new LimitedSortedDataBag(null, 2);
+        Tuple t;
+        t = TupleFactory.getInstance().newTuple(1);
+        t.set(0, 2);
+        bag.add(t);
+        t = TupleFactory.getInstance().newTuple(1);
+        t.set(0, 0);
+        bag.add(t);
+        t = TupleFactory.getInstance().newTuple(1);
+        t.set(0, 1);
+        bag.add(t);
+
+        // test size()
+        assertEquals(bag.size(), 2);
+        // test isSorted()
+        assertTrue(bag.isSorted());
+        // test isDistinct()
+        assertFalse(bag.isDistinct());
+        // test iterator()
+        Iterator<Tuple> it = bag.iterator();
+        assertEquals(it.next().get(0), 0);
+        assertEquals(it.next().get(0), 1);
+        assertEquals(it.hasNext(), false);
+        // test addAll()
+        DataBag bag1 = new LimitedSortedDataBag(null, 1);
+        bag1.addAll(bag);
+        assertEquals(bag1.size(), 1);
+        // test compareTo()
+        assertEquals(bag.compareTo(bag), 0);
+        assertEquals(bag.compareTo(bag1), 1);
+        // test clear()
+        bag1.clear();
+        assertEquals(bag1.size(), 0);
     }
 }
-
-
-

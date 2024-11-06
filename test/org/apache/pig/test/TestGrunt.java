@@ -24,15 +24,20 @@ import static org.junit.Assert.fail;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
+import java.io.FilenameFilter;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringReader;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Properties;
 
@@ -40,30 +45,39 @@ import org.apache.log4j.Appender;
 import org.apache.log4j.FileAppender;
 import org.apache.log4j.Level;
 import org.apache.log4j.PatternLayout;
+import org.apache.pig.EvalFunc;
 import org.apache.pig.ExecType;
+import org.apache.pig.PigConfiguration;
 import org.apache.pig.PigException;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.executionengine.ExecJob;
 import org.apache.pig.backend.executionengine.ExecJob.JOB_STATUS;
+import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.logicalLayer.FrontendException;
+import org.apache.pig.impl.util.JavaCompilerHelper;
 import org.apache.pig.test.Util.ProcessReturnInfo;
 import org.apache.pig.tools.grunt.Grunt;
 import org.apache.pig.tools.pigscript.parser.ParseException;
+import org.apache.pig.tools.pigstats.JobStats;
+import org.apache.pig.tools.pigstats.JobStats.JobState;
+import org.apache.pig.tools.pigstats.PigStats;
+import org.apache.pig.tools.pigstats.PigStats.JobGraph;
 import org.junit.AfterClass;
+import org.junit.Assume;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class TestGrunt {
-
-    static MiniCluster cluster = MiniCluster.buildCluster();
+    static MiniGenericCluster cluster = MiniGenericCluster.buildCluster();
     private String basedir = "test/org/apache/pig/test/data";
 
     @BeforeClass
     public static void oneTimeSetup() throws Exception {
-        cluster.setProperty("opt.multiquery","true");
+        cluster.setProperty(PigConfiguration.PIG_OPT_MULTIQUERY,"true");
     }
 
     @AfterClass
@@ -71,10 +85,15 @@ public class TestGrunt {
         cluster.shutDown();
     }
 
+    @Before
+    public void setup() {
+        Util.resetStateForExecModeSwitch();
+    }
+
 
     @Test
     public void testCopyFromLocal() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "copyFromLocal README.txt sh_copy ;";
@@ -90,7 +109,7 @@ public class TestGrunt {
 
     @Test
     public void testDefine() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "define myudf org.apache.pig.builtin.AVG();\n";
@@ -110,7 +129,7 @@ public class TestGrunt {
 
     @Test
     public void testBagSchema() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'input1' as (b: bag{t:(i: int, c:chararray, f: float)});\n";
@@ -125,7 +144,7 @@ public class TestGrunt {
 
     @Test
     public void testBagSchemaFail() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'input1'as (b: bag{t:(i: int, c:chararray, f: float)});\n";
@@ -146,7 +165,7 @@ public class TestGrunt {
 
     @Test
     public void testBagConstant() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'input1'; b = foreach a generate {(1, '1', 0.4f),(2, '2', 0.45)};\n";
@@ -161,7 +180,7 @@ public class TestGrunt {
 
     @Test
     public void testBagConstantWithSchema() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'input1'; b = foreach a generate "
@@ -178,7 +197,7 @@ public class TestGrunt {
 
     @Test
     public void testBagConstantInForeachBlock() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'input1'; "
@@ -194,7 +213,7 @@ public class TestGrunt {
 
     @Test
     public void testBagConstantWithSchemaInForeachBlock() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'input1'; "
@@ -211,7 +230,7 @@ public class TestGrunt {
 
     @Test
     public void testParsingAsInForeachBlock() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast); "
@@ -228,7 +247,7 @@ public class TestGrunt {
 
     @Test
     public void testParsingAsInForeachWithOutBlock() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast); "
@@ -244,7 +263,7 @@ public class TestGrunt {
 
     @Test
     public void testParsingWordWithAsInForeachBlock() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast); "
@@ -260,7 +279,7 @@ public class TestGrunt {
 
     @Test
     public void testParsingWordWithAsInForeachWithOutBlock() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast); "
@@ -276,7 +295,7 @@ public class TestGrunt {
 
     @Test
     public void testParsingWordWithAsInForeachWithOutBlock2() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "cash = load 'foo' as (foo, fast); "
@@ -293,7 +312,7 @@ public class TestGrunt {
 
     @Test
     public void testParsingGenerateInForeachBlock() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate); "
@@ -309,7 +328,7 @@ public class TestGrunt {
 
     @Test
     public void testParsingGenerateInForeachWithOutBlock() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate); "
@@ -325,7 +344,7 @@ public class TestGrunt {
 
     @Test
     public void testParsingAsGenerateInForeachBlock() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate); "
@@ -344,7 +363,7 @@ public class TestGrunt {
 
     @Test
     public void testParsingAsGenerateInForeachWithOutBlock() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate); "
@@ -363,7 +382,7 @@ public class TestGrunt {
 
     @Test
     public void testRunStatment() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate);"
@@ -380,7 +399,7 @@ public class TestGrunt {
 
     @Test
     public void testExecStatment() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
         boolean caught = false;
 
@@ -404,7 +423,7 @@ public class TestGrunt {
 
     @Test
     public void testRunStatmentNested() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate); run "
@@ -420,7 +439,7 @@ public class TestGrunt {
 
     @Test
     public void testExecStatmentNested() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
         boolean caught = false;
 
@@ -443,7 +462,7 @@ public class TestGrunt {
 
     @Test
     public void testErrorLineNumber() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "A = load 'x' as ( u:int, v:chararray );\n" +
@@ -468,7 +487,7 @@ public class TestGrunt {
 
     @Test
     public void testExplainEmpty() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate); run "
@@ -484,7 +503,7 @@ public class TestGrunt {
 
     @Test
     public void testExplainScript() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate); explain -script "
@@ -509,7 +528,7 @@ public class TestGrunt {
      */
     @Test
     public void testExplainScriptIsEachStatementValidated() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate);" +
@@ -647,7 +666,7 @@ public class TestGrunt {
     @Test
     public void testExplainScript2() throws Throwable {
 
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "explain -script "
@@ -692,7 +711,7 @@ public class TestGrunt {
 
     @Test
     public void testExplainBrief() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate); explain -brief -script "
@@ -708,7 +727,7 @@ public class TestGrunt {
 
     @Test
     public void testExplainDot() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate); explain -dot -script "
@@ -724,7 +743,7 @@ public class TestGrunt {
 
     @Test
     public void testExplainOut() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "a = load 'foo' as (foo, fast, regenerate); explain -out /tmp -script "
@@ -740,7 +759,7 @@ public class TestGrunt {
 
     @Test
     public void testPartialExecution() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
         FileLocalizer.setInitialized(false);
 
@@ -761,7 +780,7 @@ public class TestGrunt {
 
     @Test
     public void testFileCmds() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd =
@@ -792,7 +811,7 @@ public class TestGrunt {
 
     @Test
     public void testCD() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd =
@@ -817,7 +836,7 @@ public class TestGrunt {
 
     @Test
     public void testDump() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd =
@@ -841,7 +860,8 @@ public class TestGrunt {
 
     @Test
     public void testIllustrate() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        Assume.assumeTrue("Skip this test for TEZ. See PIG-3993", Util.isMapredExecType(cluster.getExecType()));
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd =
@@ -865,7 +885,8 @@ public class TestGrunt {
 
     @Test
     public void testKeepGoing() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        Assume.assumeTrue("Skip this test for TEZ", Util.isMapredExecType(cluster.getExecType()));
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
 
         PigContext context = server.getPigContext();
 
@@ -895,7 +916,16 @@ public class TestGrunt {
 
     @Test
     public void testKeepGoigFailed() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        // in mr mode, the output file 'baz' will be automatically deleted if the mr job fails
+        // when "cat baz;" is executed, it throws "Encountered IOException. Directory baz does not exist"
+        // in GruntParser#processCat() and variable "caught" is true
+        // in spark mode, the output file 'baz' will not be automatically deleted even the job fails(see SPARK-7953)
+        // when "cat baz;" is executed, it does not throw exception and the variable "caught" is false
+        // TODO: Enable this for Spark when SPARK-7953 is resolved
+        Assume.assumeTrue(
+            "Skip this test for Spark until SPARK-7953 is resolved!",
+            !Util.isSparkExecType(cluster.getExecType()));
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
         Util.copyFromLocalToCluster(cluster, "test/org/apache/pig/test/data/passwd", "passwd");
         String strCmd =
@@ -916,7 +946,6 @@ public class TestGrunt {
         InputStreamReader reader = new InputStreamReader(cmd);
 
         Grunt grunt = new Grunt(new BufferedReader(reader), context);
-
         boolean caught = false;
         try {
             grunt.exec();
@@ -952,9 +981,11 @@ public class TestGrunt {
 
     @Test
     public void testStopOnFailure() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        Assume.assumeFalse("Skip this test for Spark", Util.isSparkExecType(cluster.getExecType()));
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
         context.getProperties().setProperty("stop.on.failure", ""+true);
+        context.getProperties().setProperty("mapreduce.map.maxattempts", "2");
 
         String strCmd =
             "rmf bar;\n"
@@ -965,6 +996,10 @@ public class TestGrunt {
             + Util.generateURI("file:test/org/apache/pig/test/data/passwd", context) + "';\n"
             +"B = stream A through `false`;\n"
             +"store B into 'bar' using BinStorage();\n"
+            +"A1 = load '"
+            + Util.generateURI("file:test/org/apache/pig/test/data/passwd", context) + "';\n"
+            + "A1 = foreach A1 generate org.apache.pig.test.TestGrunt$SleepUDF();\n"
+            +"store A1 into 'bar1' using BinStorage();\n"
             +"A = load 'bar';\n"
             +"store A into 'foo';\n"
             +"cp pre done;\n";
@@ -979,17 +1014,84 @@ public class TestGrunt {
             grunt.exec();
         } catch (PigException e) {
             caught = true;
-            assertTrue(e.getErrorCode() == 6017);
+            if (!Util.isSparkExecType(cluster.getExecType())) {
+                assertTrue(e.getErrorCode() == 6017);
+            } else {
+                //In spark mode, We wrap ExecException to RunTimeException and is thrown out in JobGraphBuilder#sparkOperToRDD,
+                //So unwrap the exception here
+                assertTrue(((ExecException) e.getCause()).getErrorCode() == 6017);
+            }
         }
 
+        if (Util.isMapredExecType(cluster.getExecType())) {
+            JobGraph jobGraph = PigStats.get().getJobGraph();
+            List<JobStats> failedJobs = jobGraph.getFailedJobs();
+            assertEquals(2, failedJobs.size());
+            for (JobStats stats : failedJobs) {
+                if (stats.getAlias().equals("A,B")) {
+                    // Job with alias A,B should have failed because of streaming error
+                    assertTrue(stats.getException().getMessage().contains(
+                            "Received Error while processing the map plan: "
+                            + "'false (stdin-org.apache.pig.builtin.PigStreaming/stdout-org.apache.pig.builtin.PigStreaming)'"
+                            + " failed with exit status: 1"));
+                } else {
+                    // Job with alias A1 with sleep should be killed as a result of stop on failure
+                    assertTrue(stats.getErrorMessage().startsWith("Failing running job for -stop_on_failure"));
+                }
+            }
+
+            // Third job which is dependent on alias A,B should not have started
+            assertEquals(1, getUnknownJobs(jobGraph).size());
+        } else {
+            // Tez
+            JobGraph jobGraph = PigStats.get().getJobGraph();
+            List<JobStats> failedJobs = jobGraph.getFailedJobs();
+            assertEquals(1, failedJobs.size());
+            // First job should have failed because of streaming error. Sleep is also part of same job
+            assertTrue(failedJobs.get(0).getException().getMessage().contains(
+                    "Received Error while processing the map plan: "
+                    + "'false (stdin-org.apache.pig.builtin.PigStreaming/stdout-org.apache.pig.builtin.PigStreaming)'"
+                    + " failed with exit status: 1"));
+            // Second job which is dependent on first should not have started
+            assertEquals(1, getUnknownJobs(jobGraph).size());
+        }
+
+        // Parallel job (sleep udf) should have not succeeded and been killed
+        assertFalse(server.existsFile("bar1"));
+        // fs cp command at the end should not have been executed
         assertFalse(server.existsFile("done"));
         assertTrue(caught);
+    }
+
+    private ArrayList<JobStats> getUnknownJobs(JobGraph jobGraph) {
+        ArrayList<JobStats> unknown = new ArrayList<JobStats>();
+        Iterator<JobStats> iter = jobGraph.iterator();
+        while (iter.hasNext()) {
+            JobStats js = iter.next();
+            if (js.getState() == JobState.UNKNOWN) {
+                unknown.add(js);
+            }
+        }
+        return unknown;
+    }
+
+    public static class SleepUDF extends EvalFunc<Integer> {
+
+        @Override
+        public Integer exec(Tuple input) throws IOException {
+            try {
+                Thread.sleep(50000);
+            } catch (InterruptedException e) {
+                throw new IOException(e);
+            }
+            return null;
+        }
     }
 
     @Test
     public void testFsCommand() throws Throwable {
 
-        PigServer server = new PigServer(ExecType.MAPREDUCE,cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(),cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd =
@@ -1003,7 +1105,8 @@ public class TestGrunt {
                         +"store a into 'baz';"
                         +"cd /;"
                         +"fs -ls .;"
-                        +"fs -rmr /fstmp/foo/baz;";
+                        +"fs -rmr /fstmp/foo/baz;"
+                        +"cd";
 
         ByteArrayInputStream cmd = new ByteArrayInputStream(strCmd.getBytes());
         InputStreamReader reader = new InputStreamReader(cmd);
@@ -1017,7 +1120,7 @@ public class TestGrunt {
     public void testShellCommand(){
 
         try {
-            PigServer server = new PigServer(ExecType.MAPREDUCE,cluster.getProperties());
+            PigServer server = new PigServer(cluster.getExecType(),cluster.getProperties());
             PigContext context = server.getPigContext();
 
             String strRemoveFile = "rm";
@@ -1069,14 +1172,10 @@ public class TestGrunt {
             assertFalse(new File("tempShFileToTestShCommand").exists());
 
             if (Util.WINDOWS) {
-               //FIXME
-               // We need to fix this because there is a race condition with pipes.
-               // dir command can potentially run before the TouchedFileInsideGrunt_61 is written
-               // Solved for linux/unix below using xargs
-               strCmd = "sh echo foo > TouchedFileInsideGrunt_61 | dir /B | findstr TouchedFileInsideGrunt_61 > fileContainingTouchedFileInsideGruntShell_71";
+               strCmd = "sh echo foo > TouchedFileInsideGrunt_61 && dir /B | findstr TouchedFileInsideGrunt_61 > fileContainingTouchedFileInsideGruntShell_71";
             }
             else {
-               strCmd = "sh touch TouchedFileInsideGrunt_61 | ls | grep TouchedFileInsideGrunt_61 > fileContainingTouchedFileInsideGruntShell_71";
+               strCmd = "sh touch TouchedFileInsideGrunt_61 && ls | grep TouchedFileInsideGrunt_61 > fileContainingTouchedFileInsideGruntShell_71";
             }
 
             cmd = new ByteArrayInputStream(strCmd.getBytes());
@@ -1146,7 +1245,7 @@ public class TestGrunt {
 
     @Test
     public void testSetPriority() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "set job.priority high\n";
@@ -1162,7 +1261,7 @@ public class TestGrunt {
 
     @Test
     public void testSetWithQuotes() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "set job.priority 'high'\n";
@@ -1178,10 +1277,11 @@ public class TestGrunt {
 
     @Test
     public void testRegisterWithQuotes() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
+        String jarName = Util.findPigJarName();
 
-        String strCmd = "register 'pig-withouthadoop.jar'\n";
+        String strCmd = "register '" + jarName + "'\n";
 
         ByteArrayInputStream cmd = new ByteArrayInputStream(strCmd.getBytes());
         InputStreamReader reader = new InputStreamReader(cmd);
@@ -1190,15 +1290,16 @@ public class TestGrunt {
 
         grunt.exec();
         assertEquals(context.extraJars+ " of size 1", 1, context.extraJars.size());
-        assertTrue(context.extraJars.get(0)+" ends with /pig-withouthadoop.jar", context.extraJars.get(0).toString().endsWith("/pig-withouthadoop.jar"));
+        assertTrue(context.extraJars.get(0)+" ends with /" + jarName, context.extraJars.get(0).toString().endsWith("/" + jarName));
     }
 
     @Test
     public void testRegisterWithoutQuotes() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
+        String jarName = Util.findPigJarName();
 
-        String strCmd = "register pig-withouthadoop.jar\n";
+        String strCmd = "register " + jarName + "\n";
 
         ByteArrayInputStream cmd = new ByteArrayInputStream(strCmd.getBytes());
         InputStreamReader reader = new InputStreamReader(cmd);
@@ -1207,7 +1308,7 @@ public class TestGrunt {
 
         grunt.exec();
         assertEquals(context.extraJars+ " of size 1", 1, context.extraJars.size());
-        assertTrue(context.extraJars.get(0)+" ends with /pig-withouthadoop.jar", context.extraJars.get(0).toString().endsWith("/pig-withouthadoop.jar"));
+        assertTrue(context.extraJars.get(0)+" ends with /" + jarName, context.extraJars.get(0).toString().endsWith("/" + jarName));
     }
 
     @Test
@@ -1221,7 +1322,7 @@ public class TestGrunt {
 
         Util.createLocalInputFile( "testRegisterScripts.py", script);
 
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String strCmd = "register testRegisterScripts.py using jython as pig\n";
@@ -1259,7 +1360,7 @@ public class TestGrunt {
     // than an unrelated EOF error message
     @Test
     public void testBlockErrMessage() throws Throwable {
-        PigServer server = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer server = new PigServer(cluster.getExecType(), cluster.getProperties());
         PigContext context = server.getPigContext();
 
         String script = "A = load 'inputdata' using PigStorage() as ( curr_searchQuery );\n" +
@@ -1352,6 +1453,39 @@ public class TestGrunt {
         validate(query, false, msgs.toArray(new String[0]));
     }
 
+    @Test
+    public void testWithInlineOp() throws Throwable {
+        // specifying schema inside inline-op makes PigScriptParser.jj to read
+        // to the end of file
+        String query = "a = load 'i1' as (f1:chararray);" +
+               "b = foreach (foreach a generate f1 as b1) generate b1; " +
+               "dump b; ";
+
+        ArrayList<String> msgs = new ArrayList<String>();                //
+        validate(query, true, msgs.toArray(new String[0]));
+    }
+
+    /*
+     * Following test currently fails.  Insead of making further changes to
+     * PigScriptParser.jj, leaving it till we move out of javacc in PIG-2597
+
+    @Test
+    public void testWithInlineOpWithNestedForeach() throws Throwable {
+        // This one currently fails because "{}" is treated as
+        // IN_BLOCK in PigScriptParser.jj which jumps to PIG_END and ignore
+        // ") generate *; " part of the code.
+        // In order to support this test, we need to add parenthesis matching
+        // everywhere in PigScriptParser.jj (or stop using it)
+        //
+        String query = "a = load 'i1' as (f1:chararray);" +
+               "b = group a ALL; " +
+               "c = foreach ( foreach b {b1 = limit a 3; generate 1, b1;} ) generate *; " +
+               "dump c;";
+        ArrayList<String> msgs = new ArrayList<String>();                //
+        validate(query, true, msgs.toArray(new String[0]));
+    }
+    */
+
 
 
     private void validate(String query, boolean syntaxOk,
@@ -1386,6 +1520,14 @@ public class TestGrunt {
         new Grunt(new BufferedReader(reader), pc).exec();
 
         assertEquals("my.arbitrary.value",  pc.getProperties().getProperty("my.arbitrary.key"));
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(baos));
+        strCmd = "set my.arbitrary.key\n";
+        reader = new InputStreamReader(new ByteArrayInputStream(strCmd.getBytes()));
+        new Grunt(new BufferedReader(reader), pc).exec();
+
+        assertEquals(baos.toString(), "my.arbitrary.key=my.arbitrary.value\n");
     }
 
     @Test
@@ -1416,6 +1558,24 @@ public class TestGrunt {
     }
 
     @Test
+    public void testScriptWithSingleQuoteInsideCommentInGenerate() throws Throwable {
+        //the query has not store or dump, but in when -check is used
+        // all statements should be validated
+        String query = "a = load 'foo.pig' as (s1:chararray, s2:chararray);\n" +
+        "b = foreach a generate s1,\n" +
+        "--comment should be ignored even it has single quote ' in the line \n"  +
+        " s2;\n";
+        ArrayList<String> msgs = new ArrayList<String>();                //
+        validate(query, true, msgs.toArray(new String[0]));
+        query = "a = load 'foo.pig' as (s1:chararray, s2:chararray);\n" +
+        "b = foreach a generate s1,\n" +
+        "/* comment should be ignored even it has single quote ' in the line \n"  +
+        "*/ \n" +
+        " s2;\n";
+        validate(query, true, msgs.toArray(new String[0]));
+    }
+
+    @Test
     public void testDebugOn() throws Throwable {
 
         String strCmd = "set debug on\n";
@@ -1435,5 +1595,80 @@ public class TestGrunt {
         new Grunt(new BufferedReader(reader), pc).exec();
 
         assertEquals(Level.INFO.toString(),  pc.getLog4jProperties().getProperty("log4j.logger.org.apache.pig"));
+    }
+
+    @Test
+    public void testAutoShipUDFContainingJar() throws Throwable {
+
+        String FILE_SEPARATOR = System.getProperty("file.separator");
+        File tmpDir = File.createTempFile("test", "");
+        tmpDir.delete();
+        tmpDir.mkdir();
+
+        File udfDir = new File(tmpDir.getAbsolutePath() + FILE_SEPARATOR + "com" + FILE_SEPARATOR
+                + "xxx" + FILE_SEPARATOR + "udf");
+        udfDir.mkdirs();
+
+        String udfSrc = new String("package com.xxx.udf;\n" +
+                "import java.io.IOException;\n" +
+                "import org.apache.pig.EvalFunc;\n" +
+                "import org.apache.pig.data.Tuple;\n" +
+                "public class TestUDF extends EvalFunc<Integer>{\n" +
+                "public Integer exec(Tuple input) throws IOException {\n" +
+                "return 1;}\n" +
+                "}");
+
+        // compile
+        JavaCompilerHelper javaCompilerHelper = new JavaCompilerHelper();
+        javaCompilerHelper.compile(tmpDir.getAbsolutePath(),
+                new JavaCompilerHelper.JavaSourceFromString("com.xxx.udf.TestUDF", udfSrc));
+
+        String jarName = "TestUDFJar.jar";
+        String jarFile = tmpDir.getAbsolutePath() + FILE_SEPARATOR + jarName;
+        int status = Util.executeJavaCommand("jar -cf " + jarFile +
+                " -C " + tmpDir.getAbsolutePath() + " " + "com");
+        assertEquals(0, status);
+
+        Util.createInputFile(cluster, "table_testAutoShipUDFContainingJar", new String[] { "1" });
+        File scriptFile = Util.createFile(new String[] {
+                "a = load 'table_testAutoShipUDFContainingJar' as (a0:int);" +
+                "b = foreach a generate com.xxx.udf.TestUDF(a0);" +
+                "store b into 'output_testAutoShipUDFContainingJar';"
+                });
+        String scriptFileName = scriptFile.getAbsolutePath();
+        String execTypeOptions = "-x " + cluster.getExecType() + " ";
+        String cmd = "java -cp " + System.getProperty("java.class.path") + File.pathSeparator + jarFile +
+                " org.apache.pig.Main " + execTypeOptions + scriptFileName;
+        ProcessReturnInfo  pri  = Util.executeJavaCommandAndReturnInfo(cmd);
+        assertEquals(pri.exitCode, 0);
+        String[] lines = pri.stderrContents.split("\n");
+        boolean found = false;
+        for (String line : lines) {
+            if (line.matches(".*Added jar .*" + jarName + ".*")) {
+                // MR and Spark mode
+                found = true;
+            } else if (line.matches(".*Local resource.*" + jarName + ".*")) {
+                // Tez mode
+                found = true;
+            }
+        }
+        assertTrue(found);
+    }
+
+    @Test
+    public void testGruntUtf8() throws Throwable {
+        String command = "mkdir 测试\n" +
+                "quit\n";
+        System.setProperty("jline.WindowsTerminal.directConsole", "false");
+        System.setIn(new ByteArrayInputStream(command.getBytes()));
+        org.apache.pig.PigRunner.run(new String[] {"-x", "local"}, null);
+        File[] partFiles = new File(".").listFiles(new FilenameFilter() {
+            @Override
+            public boolean accept(File dir, String name) {
+            return name.equals("测试");
+        }
+        });
+        assertEquals(partFiles.length, 1);
+        new File("测试").delete();
     }
 }

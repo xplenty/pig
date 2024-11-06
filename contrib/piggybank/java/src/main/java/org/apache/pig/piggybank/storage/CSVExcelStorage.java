@@ -103,6 +103,7 @@ public class CSVExcelStorage extends PigStorage implements StoreFuncInterface, L
     public static enum Headers { DEFAULT, READ_INPUT_HEADER, SKIP_INPUT_HEADER, WRITE_OUTPUT_HEADER, SKIP_OUTPUT_HEADER }
 
     protected final static byte LINEFEED = '\n';
+    protected final static byte CARRIAGE_RETURN = '\r';
     protected final static byte DOUBLE_QUOTE = '"';
     protected final static byte RECORD_DEL = LINEFEED;
 
@@ -293,6 +294,7 @@ public class CSVExcelStorage extends PigStorage implements StoreFuncInterface, L
 
         ArrayList<Object> mProtoTuple = new ArrayList<Object>();
         int embeddedNewlineIndex = -1;
+        int embeddedCarriageReturn = -1;
         String fieldStr = null;
         // For good debug messages:
         int fieldCounter = -1;
@@ -303,6 +305,7 @@ public class CSVExcelStorage extends PigStorage implements StoreFuncInterface, L
 
             // Substitute a null value with an empty string. See PIG-2470.
             if (field == null) {
+                fieldStr = null;
                 mProtoTuple.add("");
                 continue;
             }
@@ -315,13 +318,15 @@ public class CSVExcelStorage extends PigStorage implements StoreFuncInterface, L
             // If any field delimiters are in the field, or if we did replace
             // any double quotes with a pair of double quotes above,
             // or if the string includes a newline character (LF:\n:0x0A)
+            //               or includes a carriage return (CR:\r:0x0D)
             // and we are to allow newlines in fields,
             // then the entire field must be enclosed in double quotes:
             embeddedNewlineIndex =  fieldStr.indexOf(LINEFEED);
+            embeddedCarriageReturn = fieldStr.indexOf(CARRIAGE_RETURN);
             
             if ((fieldStr.indexOf(fieldDelimiter) != -1) || 
                 (fieldStr.indexOf(DOUBLE_QUOTE) != -1) ||
-                (multilineTreatment == Multiline.YES) && (embeddedNewlineIndex != -1))  {
+                (multilineTreatment == Multiline.YES) && (embeddedNewlineIndex != -1 || embeddedCarriageReturn != -1))  {
                 fieldStr = "\"" + fieldStr + "\"";
             }
             
@@ -367,7 +372,8 @@ public class CSVExcelStorage extends PigStorage implements StoreFuncInterface, L
         // further records to it. If they are the same (this would 
         // happen if multiple small files each with a header were combined
         // into one split), we know to skip the duplicate header record as well.
-        if (loadingFirstRecord && headerTreatment == Headers.SKIP_INPUT_HEADER && splitIndex == 0) {
+        if (loadingFirstRecord && headerTreatment == Headers.SKIP_INPUT_HEADER &&
+                (splitIndex == 0 || splitIndex == -1)) {
             try {
                 if (!in.nextKeyValue())
                     return null;
@@ -574,7 +580,7 @@ public class CSVExcelStorage extends PigStorage implements StoreFuncInterface, L
                 }
             } else if (b == DOUBLE_QUOTE) {
                 // Does a double quote immediately follow?                  
-                if ((i < recordLen-1) && (buf[i+1] == DOUBLE_QUOTE)) {
+                if ((i < recordLen-1) && (buf[i+1] == DOUBLE_QUOTE) && (fieldBuffer.position() != 0)) {
                     fieldBuffer.put(b);
                     nextTupleSkipChar = true;
                     continue;
@@ -661,6 +667,11 @@ public class CSVExcelStorage extends PigStorage implements StoreFuncInterface, L
 
     @Override
     public void setUDFContextSignature(String signature) {
+        this.udfContextSignature = signature; 
+    }
+
+    @Override
+    public void setStoreFuncUDFContextSignature(String signature) {
         this.udfContextSignature = signature; 
     }
 

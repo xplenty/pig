@@ -1,8 +1,8 @@
 #!/usr/local/bin/perl -w
 
-if(scalar(@ARGV) < 6 )
+if(scalar(@ARGV) < 6)
 {
-    print STDERR "Usage: $0 <pig_home> <pig_bin> <pigmix_jar> <hadoop_home> <hadoop_bin> <pig mix scripts dir> <hdfs_root> <pigmix_output> [parallel] [numruns] [runmapreduce] \n";
+    print STDERR "Usage: $0 <pig_home> <pig_bin> <pigmix_jar> <hadoop_home> <hadoop_bin> <pig mix scripts dir> [hdfs_root] [pigmix_output] [parallel] [numruns] [runmapreduce] [cleanup_after_test]\n";
     exit(-1);
 }
 my $pighome = shift;
@@ -16,7 +16,14 @@ my $pigmixoutput = shift;
 my $parallel = shift;
 my $runs = shift;
 my $runmapreduce = shift;
+my $cleanup_after_test = shift;
 my $pigjar = "$pighome/pig-withouthadoop.jar";
+if(!defined($hdfsroot)) {
+    $hdfsroot = '/user/pig/tests/data/pigmix';
+}
+if(!defined($pigmixoutput)) {
+    $pigmixoutput = 'output';
+}
 if(!defined($parallel)) {
     $parallel = 40;
 }
@@ -25,6 +32,9 @@ if(!defined($runs)) {
 }
 if(!defined($runmapreduce)) {
     $runmapreduce = 1;
+}
+if(!defined($cleanup_after_test)) {
+    $cleanup_after_test = 0;
 }
 
 $ENV{'HADOOP_HOME'} = $hadoophome;
@@ -50,7 +60,8 @@ for(my $i = 1; $i <= 17; $i++) {
         print STDERR `$cmd 2>&1`;
         my $e = time();
         $pig_times += $e - $s;
-        cleanup($i);
+        my $output="$pigmixoutput/pig";
+        cleanup($output,$i);
     }
     # find avg
     $pig_times = $pig_times/$runs;
@@ -72,7 +83,8 @@ for(my $i = 1; $i <= 17; $i++) {
             print STDERR `$cmd 2>&1`;
             my $e = time();
             $mr_times += $e - $s;
-            cleanup($i);
+            my $output="$pigmixoutput/mapreduce";
+            cleanup($output,$i);
         }
         # find avg
         $mr_times = $mr_times/$runs;
@@ -80,7 +92,11 @@ for(my $i = 1; $i <= 17; $i++) {
         $mr_times = int($mr_times + 0.5);
         $total_mr_times = $total_mr_times + $mr_times;
 
-        my $multiplier = $pig_times/$mr_times;
+
+        my $multiplier=0;
+        if ($mr_times!=0) {
+            $multiplier = $pig_times/$mr_times;
+        }
         print "PigMix_$i pig run time: $pig_times, java run time: $mr_times, multiplier: $multiplier\n";
     }
 }
@@ -94,17 +110,20 @@ else {
 }
 
 sub cleanup {
+    my $output = shift;
     my $suffix = shift;
     my $cmd;
-    $cmd = "$pigbin -e rmf L".$suffix."out";
-    print STDERR `$cmd 2>&1`;
-    $cmd = "$pigbin -e rmf highest_value_page_per_user";
-    print STDERR `$cmd 2>&1`;
-    $cmd = "$pigbin -e rmf total_timespent_per_term";
-    print STDERR `$cmd 2>&1`;
-    $cmd = "$pigbin -e rmf queries_per_action";
-    print STDERR `$cmd 2>&1`;
-    $cmd = "$pigbin -e rmf tmp";
-    print STDERR `$cmd 2>&1`;
+    if ($cleanup_after_test) {
+        $cmd = "$pigbin -e rmf $output/L".$suffix."out";
+        print STDERR `$cmd 2>&1`;
+        $cmd = "$pigbin -e rmf $output/highest_value_page_per_user";
+        print STDERR `$cmd 2>&1`;
+        $cmd = "$pigbin -e rmf $output/total_timespent_per_term";
+        print STDERR `$cmd 2>&1`;
+        $cmd = "$pigbin -e rmf $output/queries_per_action";
+        print STDERR `$cmd 2>&1`;
+        $cmd = "$pigbin -e rmf tmp";
+        print STDERR `$cmd 2>&1`;
+    }
 }
 

@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.List;
 
 import org.apache.pig.FuncSpec;
+import org.apache.pig.PigConfiguration;
 import org.apache.pig.StoreFuncInterface;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.io.FileLocalizer;
@@ -94,13 +95,16 @@ public class ScalarVisitor extends AllExpressionVisitor {
                     StoreFuncInterface stoFunc = (StoreFuncInterface)PigContext.instantiateFuncFromSpec(interStorageFuncSpec);
                     String sig = LogicalPlanBuilder.newOperatorKey(scope);
                     stoFunc.setStoreFuncUDFContextSignature(sig);
-                    store = new LOStore(lp, fileSpec, stoFunc, sig);
+                    boolean disambiguationEnabled = Boolean.parseBoolean(pigContext.getProperties().
+                            getProperty(PigConfiguration.PIG_STORE_SCHEMA_DISAMBIGUATE,PigConfiguration.PIG_STORE_SCHEMA_DISAMBIGUATE_DEFAULT));
+
+                    store = new LOStore(lp, fileSpec, stoFunc, sig, disambiguationEnabled);
                     store.setTmpStore(true);
                     lp.add( store );
                     lp.connect( refOp, store );
-                    expr.setImplicitReferencedOperator(store);
                 }
-
+                
+                expr.setImplicitReferencedOperator(store);
                 filenameConst.setValue( store.getOutputSpec().getFileName() );
                 
                 if( lp.getSoftLinkSuccessors( store ) == null || 

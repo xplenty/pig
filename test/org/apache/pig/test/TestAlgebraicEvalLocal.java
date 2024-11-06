@@ -26,7 +26,6 @@ import java.util.Iterator;
 import java.util.Properties;
 import java.util.Random;
 
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.builtin.PigStorage;
 import org.apache.pig.data.DataType;
@@ -42,7 +41,7 @@ public class TestAlgebraicEvalLocal {
 
     @Before
     public void setUp() throws Exception {
-        pig = new PigServer(ExecType.LOCAL, new Properties());
+        pig = new PigServer(Util.getLocalTestMode(), new Properties());
     }
 
     Boolean[] nullFlags = new Boolean[]{ false, true};
@@ -92,7 +91,7 @@ public class TestAlgebraicEvalLocal {
                 ps.close();
             }
             pig.registerQuery(" a = group (load '"
-                    + Util.generateURI(Util.encodeEscape(tmpFile.toString()), pig.getPigContext())
+                    + Util.generateURI(tmpFile.toString(), pig.getPigContext())
                     + "') by ($0,$1);");
             pig.registerQuery("b = foreach a generate flatten(group), SUM($1.$2);");
             Iterator<Tuple> it = pig.openIterator("b");
@@ -141,7 +140,7 @@ public class TestAlgebraicEvalLocal {
             PrintStream ps = new PrintStream(new FileOutputStream(tmpFile));
             generateInput(ps, nullFlags[i]);
             String query = "myid =  foreach (group (load '"
-                    + Util.generateURI(Util.encodeEscape(tmpFile.toString()), pig.getPigContext())
+                    + Util.generateURI(tmpFile.toString(), pig.getPigContext())
                     + "') all) generate COUNT($1);";
             System.out.println(query);
             pig.registerQuery(query);
@@ -163,7 +162,7 @@ public class TestAlgebraicEvalLocal {
             PrintStream ps = new PrintStream(new FileOutputStream(tmpFile));
             generateInput(ps, nullFlags[i]);
             String query = "myid = foreach (group (load '"
-                    + Util.generateURI(Util.encodeEscape(tmpFile.toString()), pig.getPigContext())
+                    + Util.generateURI(tmpFile.toString(), pig.getPigContext())
                     + "') all) generate group, COUNT($1) ;";
             System.out.println(query);
             pig.registerQuery(query);
@@ -184,7 +183,7 @@ public class TestAlgebraicEvalLocal {
             PrintStream ps = new PrintStream(new FileOutputStream(tmpFile));
             generateInput(ps, nullFlags[i]);
             String query = "myid = foreach (group (load '"
-                    + Util.generateURI(Util.encodeEscape(tmpFile.toString()), pig.getPigContext())
+                    + Util.generateURI(tmpFile.toString(), pig.getPigContext())
                     + "') all) generate COUNT($1), group ;";
             System.out.println(query);
             pig.registerQuery(query);
@@ -227,7 +226,7 @@ public class TestAlgebraicEvalLocal {
             }
             ps.close();
             String query = "myid = foreach (group (load '"
-                    + Util.generateURI(Util.encodeEscape(tmpFile.toString()), pig.getPigContext())
+                    + Util.generateURI(tmpFile.toString(), pig.getPigContext())
                     + "' using " + PigStorage.class.getName()
                     + "(':')) by $0) generate group, COUNT($1.$1) ;";
             System.out.println(query);
@@ -278,7 +277,7 @@ public class TestAlgebraicEvalLocal {
             }
             ps.close();
             String query = "myid = foreach (group (load '"
-                    + Util.generateURI(Util.encodeEscape(tmpFile.toString()), pig.getPigContext())
+                    + Util.generateURI(tmpFile.toString(), pig.getPigContext())
                     + "' using "
                     + PigStorage.class.getName()
                     + "(':')) by $0) generate group, COUNT($1.$1), COUNT($1.$0) ;";

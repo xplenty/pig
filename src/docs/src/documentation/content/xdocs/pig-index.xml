@@ -136,15 +136,23 @@
 <br></br>&nbsp;&nbsp;&nbsp; <a href="basic.html#bag-schema">and schemas</a>
 <br></br>&nbsp;&nbsp;&nbsp; <a href="func.html#tobag">and TOBAG function</a>
 <br></br>&nbsp;&nbsp;&nbsp; <a href="basic.html#type-construction">and type construction operators</a>
+<br></br>&nbsp;&nbsp;&nbsp; <a href="func.html#bagtostring">converting to string</a>
+<br></br>&nbsp;&nbsp;&nbsp; <a href="func.html#bagtotuple">converting to tuple</a>
 <br></br>&nbsp;&nbsp;&nbsp; <a href="basic.html#schema-multi">schemas for multiple types</a>
 <br></br>&nbsp;&nbsp;&nbsp; <a href="basic.html#bag">syntax</a>
 </p>
+
+<p><a href="func.html#bagtostring">BagToString</a> function</p>
+
+<p><a href="func.html#bagtotuple">BagToTuple</a> function</p>
 
 <p><a href="start.html#batch-mode">batch mode</a>. <em>See also</em> memory management</p>
 
 <p><a href="basic.html#arithmetic">bincond operator</a> ( ?: )</p>
 
 <p><a href="func.html#binstorage">BinStorage</a> function</p>
+
+<p><a href="perf.html#bloom-joins">Bloom</a> join</p>
 
 <p><a href="basic.html#bexp">Boolean expressions</a></p>
 
@@ -179,6 +187,8 @@
 <p><a href="func.html#cbrt">CBRT</a> function</p>
 
 <p><a href="func.html#ceil">CEIL</a> function</p>
+
+<p>chararray functions (see <a href="func.html#string-functions">String Functions</a>)</p>
 
 <p><a href="udf.html#checkschema">checkSchema</a> method</p>
 
@@ -396,7 +406,6 @@
 <p>Hadoop
 <br></br>&nbsp;&nbsp;&nbsp; <a href="cmds.html#fs">FsShell commands</a>
 <br></br>&nbsp;&nbsp;&nbsp; <a href="basic.html#load-glob">Hadoop globbing</a>
-<br></br>&nbsp;&nbsp;&nbsp; <a href="test.html#hadoop-job-history-loader">HadoopJobHistoryLoader</a>
 <br></br>&nbsp;&nbsp;&nbsp; hadoop partitioner. <em>See</em> PARTITION BY
 <br></br>&nbsp;&nbsp;&nbsp; <a href="start.html#hadoop-properties">Hadoop properties</a>
 <br></br>&nbsp;&nbsp;&nbsp; <a href="start.html#req">versions supported</a>
@@ -418,6 +427,8 @@
 
 
 <p><a href="cont.html#import-macros">IMPORT (macros)</a> operator</p>
+
+<p><a href="func.html#in">IN</a> function</p>
 
 <p><a href="func.html#indexof">INDEXOF</a> function</p>
 
@@ -484,6 +495,7 @@
 <p><a href="basic.html#join-outer">JOIN (outer)</a> operator</p>
 
 <p>joins
+<br></br>&nbsp;&nbsp;&nbsp; <a href="perf.html#bloom-joins">bloom joins</a>
 <br></br>&nbsp;&nbsp;&nbsp; <a href="basic.html#join-inner">inner joins</a>
 <br></br>&nbsp;&nbsp;&nbsp; <a href="perf.html#join-optimizations">join optimizations</a>
 <br></br>&nbsp;&nbsp;&nbsp; <a href="perf.html#merge-joins">merge joins</a>
@@ -581,8 +593,6 @@
 
 <p><a href="start.html#execution-modes">mapreduce mode</a></p>
 
-<p><a href="basic.html#mapreduce">MAPREDUCE</a> operator</p>
-
 <p>maps (data type)
 <br></br>&nbsp;&nbsp;&nbsp; <a href="basic.html#map-schema">and schemas</a>
 <br></br>&nbsp;&nbsp;&nbsp; <a href="basic.html#schema-multi">schemas for multiple types</a>
@@ -618,6 +628,10 @@
 <p id="n-index"><strong>N</strong> (<a href="#top">top</a>) ----------------------------------------------</p>
 
 <p>names (for fields, relations). <em>See</em> referencing.</p>
+
+<p><a href="basic.html#native">NATIVE</a> operator</p>
+
+<p><a href="udf.html#nonfsloadfunc">NonFSLoadFunc</a> interface </p>
 
 <p><a href="basic.html#nested-block">nested blocks</a> (FOREACH operator) </p>
 
@@ -814,7 +828,9 @@
 
 <p><a href="func.html#regex-extract-all">REGEX_EXTRACT_ALL</a> function</p>
 
-<p><a href="basic.html#register">REGISTER</a> statement</p>
+<p><a href="func.html#regex-search">REGEX_SEARCH</a> function</p>
+
+<p><a href="basic.html#register-jar">REGISTER</a> statement</p>
 
 <p>regular expressions. <em>See</em> pattern matching</p>
 
@@ -837,6 +853,8 @@
 <p id="reserved-keywords"><a href="basic.html#reserved-keywords">reserved keywords</a></p>
 
 <p><a href="func.html#round">ROUND</a> function</p>
+
+<p><a href="func.html#round_to">ROUND_TO</a> function</p>
 
 <p><a href="func.html#rtrim">RTRIM</a> function</p>
 
@@ -918,6 +936,8 @@
 
 <p><a href="perf.html#splits">splits</a> (implicit, explicit)</p>
 
+<p><a href="func.html#sprintf">SPRINTF</a> function</p>
+
 <p><a href="func.html#sqrt">SQRT</a> function</p>
 
 <p><a href="basic.html#sexp">star expression</a> ( * )</p>
@@ -954,6 +974,8 @@
 <p><a href="func.html#string-functions">string functions</a></p>
 
 <p><a href="func.html#strsplit">STRSPLIT</a> function</p>
+
+<p><a href="func.html#strsplittobag">STRSPLITTOBAG</a> function</p>
 
 <p><a href="func.html#substring">SUBSTRING</a> function</p>
 
@@ -1056,8 +1078,9 @@
    
 <!-- ==== Z ================================================================== -->
 <p></p>
-<p id="z-index"><strong>Z</strong> (<a href="#top">top</a>)</p>   
+<p id="z-index"><strong>Z</strong> (<a href="#top">top</a>)</p>
 
+<p><a href="v_editors.html#zeppelin">Zeppelin</a></p>
 
   </body>
 </document>

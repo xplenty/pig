@@ -22,13 +22,14 @@ import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.OutputFormat;
 import org.apache.hadoop.mapreduce.RecordWriter;
 import org.apache.pig.data.Tuple;
+import org.apache.pig.impl.util.Utils;
 import org.junit.Test;
 
 import java.io.IOException;
 import java.util.LinkedList;
 import java.util.NoSuchElementException;
 
-import static junit.framework.Assert.assertNotNull;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -111,8 +112,15 @@ public class TestStoreFuncWrapper {
         private LinkedList<String> methodCalls = new LinkedList<String>();
 
         public String getLastMethodCalled() { return methodCalls.pop(); }
-        protected void setLastMethodCalled() {
-            methodCalls.push(Thread.currentThread().getStackTrace()[2].getMethodName());
+        protected void setLastMethodCalled() {            
+            StackTraceElement e[] = Thread.currentThread().getStackTrace();                   
+            int index;
+            if (Utils.isVendorIBM()) {
+              index = 3;
+            } else {
+              index = 2;
+            }
+            methodCalls.push(e[index].getMethodName());
         }
 
         @Override

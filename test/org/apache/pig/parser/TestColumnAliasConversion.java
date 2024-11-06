@@ -20,7 +20,7 @@ package org.apache.pig.parser;
 
 import java.io.IOException;
 
-import junit.framework.Assert;
+import org.junit.Assert;
 
 import org.antlr.runtime.RecognitionException;
 import org.apache.pig.impl.logicalLayer.FrontendException;
@@ -154,6 +154,22 @@ public class TestColumnAliasConversion {
         try {
             validate( query );
         } catch(PlanValidationException ex) {
+            return;
+        }
+        Assert.fail( "Query should fail to validate." );
+    }
+
+    @Test
+    public void testInvalidNestedProjection() throws Exception {
+        String query = "A = load 'x' as (field);" +
+                       "B = foreach A {" +
+                       "  C = LIMIT invalidName 1;" +
+                       "  generate C.foo;" +
+                       "};";
+        try {
+            validate( query );
+        } catch(PlanValidationException ex) {
+            System.out.println(ex.getMessage());
             return;
         }
         Assert.fail( "Query should fail to validate." );
