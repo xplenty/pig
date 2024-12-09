@@ -29,7 +29,7 @@
           http://ibiblio.lsu.edu/main/pub/packages/maven2
           http://www.ibiblio.net/pub/packages/maven2
   -->
-  <property name="repo.maven.org" value="${mvnrepo}" override="true"/>
+  <property name="repo.maven.org" value="https://repo1.maven.org/maven2/" override="true"/>
   <property name="repo.jboss.org" value="http://repository.jboss.com/nexus/content/groups/public/" override="false"/>
   <property name="repo.apache.snapshots" value="http://repository.apache.org/content/groups/snapshots-group/" override="false"/>
   <property name="repo.dir" value="${user.home}/.m2/repository" override="false"/>
