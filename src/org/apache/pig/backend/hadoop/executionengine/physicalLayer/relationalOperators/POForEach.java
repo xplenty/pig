@@ -22,9 +22,11 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.pig.PigException;
 import org.apache.pig.backend.executionengine.ExecException;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.UDFEndOfAllInputNeededVisitor;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
@@ -41,6 +43,7 @@ import org.apache.pig.data.SchemaTupleFactory;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 import org.apache.pig.data.TupleMaker;
+import org.apache.pig.data.UnlimitedNullTuple;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.plan.DependencyOrderWalker;
 import org.apache.pig.impl.plan.NodeIdGenerator;
@@ -53,28 +56,16 @@ import org.apache.pig.pen.util.LineageTracer;
 @SuppressWarnings("unchecked")
 public class POForEach extends PhysicalOperator {
     private static final long serialVersionUID = 1L;
+    private static final Result UNLIMITED_NULL_RESULT = new Result(POStatus.STATUS_OK, new UnlimitedNullTuple());
 
     protected List<PhysicalPlan> inputPlans;
+
     protected List<PhysicalOperator> opsToBeReset;
-    //Since the plan has a generate, this needs to be maintained
-    //as the generate can potentially return multiple tuples for
-    //same call.
-    protected boolean processingPlan = false;
 
-    //its holds the iterators of the databags given by the input expressions which need flattening.
-    transient protected Iterator<Tuple> [] its = null;
-
-    //This holds the outputs given out by the input expressions of any datatype
-    protected Object [] bags = null;
-
-    //This is the template whcih contains tuples and is flattened out in createTuple() to generate the final output
-    protected Object[] data = null;
+    protected PhysicalOperator[] planLeafOps;
 
     // store result types of the plan leaves
-    protected byte[] resultTypes = null;
-
-    // store whether or not an accumulative UDF has terminated early
-    protected BitSet earlyTermination = null;
+    protected byte[] resultTypes;
 
     // array version of isToBeFlattened - this is purely
     // for optimization - instead of calling isToBeFlattened.get(i)
@@ -83,14 +74,39 @@ public class POForEach extends PhysicalOperator {
     // so we can also save on the Boolean.booleanValue() calls
     protected boolean[] isToBeFlattenedArray;
 
-    ExampleTuple tIn = null;
     protected int noItems;
 
-    protected PhysicalOperator[] planLeafOps = null;
+    //Since the plan has a generate, this needs to be maintained
+    //as the generate can potentially return multiple tuples for
+    //same call.
+    protected transient boolean processingPlan;
+
+    //its holds the iterators of the databags given by the input expressions which need flattening.
+    protected transient Iterator<Tuple> [] its = null;
+
+    //This holds the outputs given out by the input expressions of any datatype
+    protected transient Object[] bags ;
+
+    //This is the template whcih contains tuples and is flattened out in createTuple() to generate the final output
+    protected transient Object[] data;
+
+    // store whether or not an accumulative UDF has terminated early
+    protected transient BitSet earlyTermination;
+
+    protected transient ExampleTuple tIn;
+
 
     protected transient AccumulativeTupleBuffer buffer;
 
-    protected Tuple inpTuple;
+    protected transient Tuple inpTuple;
+
+    protected transient boolean endOfAllInputProcessed;
+
+    // Indicate the foreach statement can only in map side
+    // Currently only used in MR cross (See PIG-4175)
+    protected boolean mapSideOnly = false;
+
+    protected Boolean endOfAllInputProcessing = false;
 
     private Schema schema;
 
@@ -240,12 +256,20 @@ public class POForEach extends PhysicalOperator {
             //read
             while (true) {
                 inp = processInput();
-                if (inp.returnStatus == POStatus.STATUS_EOP ||
-                        inp.returnStatus == POStatus.STATUS_ERR) {
+
+                if (inp.returnStatus == POStatus.STATUS_ERR) {
                     return inp;
                 }
                 if (inp.returnStatus == POStatus.STATUS_NULL) {
                     continue;
+                }
+                if (inp.returnStatus == POStatus.STATUS_EOP) {
+                    if (parentPlan!=null && parentPlan.endOfAllInput && !endOfAllInputProcessed && endOfAllInputProcessing) {
+                        // continue pull one more output
+                        inp = UNLIMITED_NULL_RESULT;
+                    } else {
+                        return inp;
+                    }
                 }
 
                 attachInputToPlans((Tuple) inp.result);
@@ -274,8 +298,9 @@ public class POForEach extends PhysicalOperator {
                                 throw new ExecException(e);
                             }
                         }else{
-                            inpTuple = ((POPackage.POPackageTupleBuffer) buffer).illustratorMarkup(null, inpTuple, 0);
-                            //                       buffer.clear();
+                            if (buffer instanceof POPackage.POPackageTupleBuffer) {
+                                inpTuple = ((POPackage.POPackageTupleBuffer) buffer).illustratorMarkup(null, inpTuple, 0);
+                            }
                             setAccumEnd();
                         }
 
@@ -293,7 +318,7 @@ public class POForEach extends PhysicalOperator {
                             break;
                         }
                     }
-
+                    buffer.clear();
                 } else {
                     res = processPlan();
                 }
@@ -352,6 +377,9 @@ public class POForEach extends PhysicalOperator {
 
 
         if(its == null) {
+            if (endOfAllInputProcessed) {
+                return RESULT_EOP;
+            }
             //getNext being called for the first time OR starting with a set of new data from inputs
             its = new Iterator[noItems];
             bags = new Object[noItems];
@@ -415,9 +443,14 @@ public class POForEach extends PhysicalOperator {
 
                 if(inputData.result instanceof DataBag && isToBeFlattenedArray[i]) {
                     its[i] = ((DataBag)bags[i]).iterator();
+                } else if (inputData.result instanceof Map && isToBeFlattenedArray[i]) {
+                    its[i] = ((Map)bags[i]).entrySet().iterator();
                 } else {
                     its[i] = null;
                 }
+            }
+            if (parentPlan!=null && parentPlan.endOfAllInput && endOfAllInputProcessing) {
+                endOfAllInputProcessed = true;
             }
         }
 
@@ -437,16 +470,16 @@ public class POForEach extends PhysicalOperator {
                 //we instantiate the template array and start populating it with data
                 data = new Object[noItems];
                 for(int i = 0; i < noItems; ++i) {
-                    if(isToBeFlattenedArray[i] && bags[i] instanceof DataBag) {
+                    if(isToBeFlattenedArray[i] && (bags[i] instanceof DataBag || bags[i] instanceof Map)) {
                         if(its[i].hasNext()) {
                             data[i] = its[i].next();
                         } else {
-                            //the input set is null, so we return with EOP.  This is
+                            //the input set is null, so we return.  This is
                             // caught above and this function recalled with
                             // new inputs.
                             its = null;
                             data = null;
-                            res.returnStatus = POStatus.STATUS_EOP;
+                            res.returnStatus = POStatus.STATUS_NULL;
                             return res;
                         }
                     } else {
@@ -478,7 +511,11 @@ public class POForEach extends PhysicalOperator {
                             // when the first index which needs to be flattened has reached the
                             // last element in its iterator, we won't come here - instead, we reset
                             // all iterators at the beginning of this method.
-                            its[index] = ((DataBag)bags[index]).iterator();
+                            if(bags[index] instanceof DataBag) {
+                                its[index] = ((DataBag)bags[index]).iterator();
+                            } else { // if (bags[i] instanceof Map)) {
+                                its[index] = ((Map)bags[index]).entrySet().iterator();
+                            }
                             data[index] = its[index].next();
                         }
                     }
@@ -510,6 +547,15 @@ public class POForEach extends PhysicalOperator {
                     } else {
                     out.append(t.get(j));
                 }
+                }
+            } else if (isToBeFlattenedArray[i] && in instanceof Map.Entry) {
+                Map.Entry entry = (Map.Entry)in;
+                if (knownSize) {
+                    out.set(idx++, entry.getKey());
+                    out.set(idx++, entry.getValue());
+                } else {
+                    out.append(entry.getKey());
+                    out.append(entry.getValue());
                 }
             } else {
                 if (knownSize) {
@@ -653,16 +699,13 @@ public class POForEach extends PhysicalOperator {
             }
         }
 
-        List<PhysicalOperator> ops = new ArrayList<PhysicalOperator>(opsToBeReset.size());
-        for (PhysicalOperator op : opsToBeReset) {
-            ops.add(op);
-        }
         POForEach clone = new POForEach(new OperatorKey(mKey.scope,
                 NodeIdGenerator.getGenerator().getNextNodeId(mKey.scope)),
                 requestedParallelism, plans, flattens);
-        clone.setOpsToBeReset(ops);
         clone.setResultType(getResultType());
         clone.addOriginalLocation(alias, getOriginalLocations());
+        clone.endOfAllInputProcessing = endOfAllInputProcessing;
+        clone.mapSideOnly = mapSideOnly;
         return clone;
     }
 
@@ -712,9 +755,12 @@ public class POForEach extends PhysicalOperator {
             opsToBeReset.add(sort);
         }
 
-        /* (non-Javadoc)
-         * @see org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor#visitProject(org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POProject)
-         */
+        @Override
+        public void visitCross(POCross c) throws VisitorException {
+            // FIXME: add only if limit is present
+            opsToBeReset.add(c);
+        }
+
         @Override
         public void visitProject(POProject proj) throws VisitorException {
             if(proj instanceof PORelationToExprProject) {
@@ -779,6 +825,35 @@ public class POForEach extends PhysicalOperator {
             return tOut;
         } else {
             return (Tuple) out;
+        }
+    }
+
+    public PhysicalOperator[] getPlanLeafOps() {
+        return planLeafOps;
+    }
+
+    public void setMapSideOnly(boolean mapSideOnly) {
+        this.mapSideOnly = mapSideOnly;
+    }
+
+    public boolean isMapSideOnly() {
+        return mapSideOnly;
+    }
+
+    public boolean needEndOfAllInputProcessing() throws ExecException {
+        try {
+            for (PhysicalPlan innerPlan : inputPlans) {
+                UDFEndOfAllInputNeededVisitor endOfAllInputNeededVisitor
+                     = new UDFEndOfAllInputNeededVisitor(innerPlan);
+                endOfAllInputNeededVisitor.visit();
+                if (endOfAllInputNeededVisitor.needEndOfAllInputProcessing()) {
+                    endOfAllInputProcessing = true;
+                    return true;
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            throw new ExecException(e);
         }
     }
 }

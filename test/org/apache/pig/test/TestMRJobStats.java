@@ -23,20 +23,25 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.io.RandomAccessFile;
 import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Properties;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.mapred.JobClient;
-import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.JobID;
 import org.apache.hadoop.mapred.TaskReport;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.pig.FuncSpec;
+import org.apache.pig.PigConfiguration;
+import org.apache.pig.PigServer;
 import org.apache.pig.StoreFuncInterface;
+import org.apache.pig.backend.executionengine.ExecJob;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.FileBasedOutputSizeReader;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigStatsOutputSizeReader;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POStore;
@@ -97,7 +102,7 @@ public class TestMRJobStats {
         try {
             Constructor<MRJobStats> con = MRJobStats.class.getDeclaredConstructor(String.class, JobGraph.class);
             con.setAccessible(true);
-            MRJobStats jobStats = (MRJobStats) con.newInstance(name, plan);
+            MRJobStats jobStats = con.newInstance(name, plan);
             return jobStats;
         } catch (Exception e) {
             return null;
@@ -112,8 +117,6 @@ public class TestMRJobStats {
 
     @Test
     public void testMedianMapReduceTime() throws Exception {
-
-        JobConf jobConf = new JobConf();
         JobClient jobClient = Mockito.mock(JobClient.class);
 
         // mock methods to return the predefined map and reduce task reports
@@ -125,10 +128,10 @@ public class TestMRJobStats {
         getJobStatsMethod("setId", JobID.class).invoke(jobStats, jobID);
         jobStats.setSuccessful(true);
 
-        getJobStatsMethod("addMapReduceStatistics", JobClient.class, Configuration.class)
-            .invoke(jobStats, jobClient, jobConf);
-        String msg = (String)getJobStatsMethod("getDisplayString", boolean.class)
-            .invoke(jobStats, false);
+        getJobStatsMethod("addMapReduceStatistics", Iterator.class, Iterator.class)
+            .invoke(jobStats, Arrays.asList(mapTaskReports).iterator(), Arrays.asList(reduceTaskReports).iterator());
+        String msg = (String)getJobStatsMethod("getDisplayString")
+            .invoke(jobStats);
 
         System.out.println(JobStats.SUCCESS_HEADER);
         System.out.println(msg);
@@ -150,21 +153,15 @@ public class TestMRJobStats {
         Mockito.when(reduceTaskReports[0].getStartTime()).thenReturn(500L * ONE_THOUSAND);
         Mockito.when(reduceTaskReports[0].getFinishTime()).thenReturn(700L * ONE_THOUSAND);
 
-        JobConf jobConf = new JobConf();
-        JobClient jobClient = Mockito.mock(JobClient.class);
-
-        Mockito.when(jobClient.getMapTaskReports(jobID)).thenReturn(mapTaskReports);
-        Mockito.when(jobClient.getReduceTaskReports(jobID)).thenReturn(reduceTaskReports);
-
         PigStats.JobGraph jobGraph = new PigStats.JobGraph();
         MRJobStats jobStats = createJobStats("JobStatsTest", jobGraph);
         getJobStatsMethod("setId", JobID.class).invoke(jobStats, jobID);
         jobStats.setSuccessful(true);
 
-        getJobStatsMethod("addMapReduceStatistics", JobClient.class, Configuration.class)
-            .invoke(jobStats, jobClient, jobConf);
-        String msg = (String)getJobStatsMethod("getDisplayString", boolean.class)
-            .invoke(jobStats, false);
+        getJobStatsMethod("addMapReduceStatistics", Iterator.class, Iterator.class)
+            .invoke(jobStats, Arrays.asList(mapTaskReports).iterator(), Arrays.asList(reduceTaskReports).iterator());
+        String msg = (String)getJobStatsMethod("getDisplayString")
+            .invoke(jobStats);
         System.out.println(JobStats.SUCCESS_HEADER);
         System.out.println(msg);
 
@@ -190,7 +187,7 @@ public class TestMRJobStats {
          * @param sto POStore
          */
         @Override
-        public boolean supports(POStore sto) {
+        public boolean supports(POStore sto, Configuration conf) {
             return true;
         }
 
@@ -205,14 +202,49 @@ public class TestMRJobStats {
         }
     }
 
-    private static POStore createPOStoreForFileBasedSystem(long size, StoreFuncInterface storeFunc,
-            Configuration conf) throws Exception {
+    private POStore createPOStoreForFileBasedSystemWithSubDirectories(long size, StoreFuncInterface storeFunc, Configuration conf) throws Exception {
+        File root = createTmpDirectory("outputRoot", null);
+        File dir1 = createTmpDirectory("dir1", root);
+        File dir2 = createTmpDirectory("dir2", root);
+        createTmpFile("tempFile1", size, dir1);
+        createTmpFile("tempFile2", size, dir2);
 
-        File file = File.createTempFile("tempFile", ".tmp");
+        storeFunc.setStoreLocation(root.getAbsolutePath(), new Job(conf));
+        FuncSpec funcSpec = new FuncSpec(storeFunc.getClass().getCanonicalName());
+        POStore poStore = new POStore(new OperatorKey());
+        poStore.setSFile(new FileSpec(root.getAbsolutePath(), funcSpec));
+        poStore.setStoreFunc(storeFunc);
+        poStore.setUp();
+
+        return poStore;
+    }
+
+    private static File createTmpDirectory(String name, File root) throws Exception {
+        File directory = File.createTempFile(name, "", root);
+
+        if (!(directory.delete())) {
+            throw new IOException("Could not delete temp file: " + directory.getAbsolutePath());
+        }
+
+        if (!(directory.mkdir())) {
+            throw new IOException("Could not create temp directory: " + directory.getAbsolutePath());
+        }
+
+        return directory;
+    }
+
+    private static File createTmpFile(String name, long size, File directory) throws Exception {
+        File file = directory == null ? File.createTempFile(name, ".tmp") : File.createTempFile(name, ".tmp", directory);
         file.deleteOnExit();
         RandomAccessFile f = new RandomAccessFile(file, "rw");
         f.setLength(size);
         f.close();
+        return file;
+    }
+
+    private static POStore createPOStoreForFileBasedSystem(long size, StoreFuncInterface storeFunc,
+            Configuration conf) throws Exception {
+        File file = createTmpFile("tempFile", size, null);
 
         storeFunc.setStoreLocation(file.getAbsolutePath(), new Job(conf));
         FuncSpec funcSpec = new FuncSpec(storeFunc.getClass().getCanonicalName());
@@ -239,36 +271,47 @@ public class TestMRJobStats {
     }
 
     @Test
-    public void testGetOuputSizeUsingFileBasedStorage() throws Exception {
+    public void testGetOutputSizeUsingFileBasedStorage() throws Exception {
         // By default, FileBasedOutputSizeReader is used to compute the size of output.
         Configuration conf = new Configuration();
 
         long size = 2L * 1024 * 1024 * 1024;
-        Method getOutputSize = getJobStatsMethod("getOutputSize", POStore.class, Configuration.class);
-        long outputSize = (Long) getOutputSize.invoke(
-                null, createPOStoreForFileBasedSystem(size, new PigStorageWithStatistics(), conf), conf);
+        long outputSize = JobStats.getOutputSize(
+                createPOStoreForFileBasedSystem(size, new PigStorageWithStatistics(), conf), conf);
 
         assertEquals("The returned output size is expected to be the same as the file size",
                 size, outputSize);
     }
 
     @Test
-    public void testGetOuputSizeUsingNonFileBasedStorage1() throws Exception {
+    public void testGetOutputSizeUsingFileBasedStorageWithSubDirectories() throws Exception {
+        // By default, FileBasedOutputSizeReader is used to compute the size of output.
+        Configuration conf = new Configuration();
+
+        long size = 2L * 1024 * 1024 * 1024;
+        long outputSize = JobStats.getOutputSize(
+                createPOStoreForFileBasedSystemWithSubDirectories(size, new PigStorageWithStatistics(), conf), conf);
+
+        assertEquals("The returned output size is expected to be sum of file sizes in the sub-directories",
+                2 * size, outputSize);
+    }
+
+    @Test
+    public void testGetOutputSizeUsingNonFileBasedStorage1() throws Exception {
         // By default, FileBasedOutputSizeReader is used to compute the size of output.
         Configuration conf = new Configuration();
 
         // ClientSystemProps is needed to instantiate HBaseStorage
         UDFContext.getUDFContext().setClientSystemProps(new Properties());
-        Method getOutputSize = getJobStatsMethod("getOutputSize", POStore.class, Configuration.class);
-        long outputSize = (Long) getOutputSize.invoke(
-                null, createPOStoreForNonFileBasedSystem(new HBaseStorage("colName"), conf), conf);
+        long outputSize = JobStats.getOutputSize(
+                createPOStoreForNonFileBasedSystem(new HBaseStorage("colName"), conf), conf);
 
         assertEquals("The default output size reader returns -1 for a non-file-based uri",
                 -1, outputSize);
     }
 
     @Test
-    public void testGetOuputSizeUsingNonFileBasedStorage2() throws Exception {
+    public void testGetOutputSizeUsingNonFileBasedStorage2() throws Exception {
         // Register a custom output size reader in configuration
         Configuration conf = new Configuration();
         conf.set(PigStatsOutputSizeReader.OUTPUT_SIZE_READER_KEY,
@@ -276,16 +319,15 @@ public class TestMRJobStats {
 
         // ClientSystemProps is needed to instantiate HBaseStorage
         UDFContext.getUDFContext().setClientSystemProps(new Properties());
-        Method getOutputSize = getJobStatsMethod("getOutputSize", POStore.class, Configuration.class);
-        long outputSize = (Long) getOutputSize.invoke(
-                null, createPOStoreForNonFileBasedSystem(new HBaseStorage("colName"), conf), conf);
+        long outputSize = JobStats.getOutputSize(
+                createPOStoreForNonFileBasedSystem(new HBaseStorage("colName"), conf), conf);
 
         assertEquals("The dummy output size reader always returns " + DummyOutputSizeReader.SIZE,
                 DummyOutputSizeReader.SIZE, outputSize);
     }
 
-    @Test(expected = InvocationTargetException.class)
-    public void testGetOuputSizeUsingNonFileBasedStorage3() throws Exception {
+    @Test(expected = RuntimeException.class)
+    public void testGetOutputSizeUsingNonFileBasedStorage3() throws Exception {
         // Register an invalid output size reader in configuration, and verify
         // that an exception is thrown at run-time.
         Configuration conf = new Configuration();
@@ -293,14 +335,12 @@ public class TestMRJobStats {
 
         // ClientSystemProps is needed to instantiate HBaseStorage
         UDFContext.getUDFContext().setClientSystemProps(new Properties());
-        Method getOutputSize = getJobStatsMethod("getOutputSize", POStore.class, Configuration.class);
-
-        getOutputSize.invoke(
-                null, createPOStoreForNonFileBasedSystem(new HBaseStorage("colName"), conf), conf);
+        JobStats.getOutputSize(
+                createPOStoreForNonFileBasedSystem(new HBaseStorage("colName"), conf), conf);
     }
 
     @Test
-    public void testGetOuputSizeUsingNonFileBasedStorage4() throws Exception {
+    public void testGetOutputSizeUsingNonFileBasedStorage4() throws Exception {
         // Register a comma-separated list of readers in configuration, and
         // verify that the one that supports a non-file-based uri is used.
         Configuration conf = new Configuration();
@@ -310,11 +350,86 @@ public class TestMRJobStats {
 
         // ClientSystemProps needs to be initialized to instantiate HBaseStorage
         UDFContext.getUDFContext().setClientSystemProps(new Properties());
-        Method getOutputSize = getJobStatsMethod("getOutputSize", POStore.class, Configuration.class);
-        long outputSize = (Long) getOutputSize.invoke(
-                null, createPOStoreForNonFileBasedSystem(new HBaseStorage("colName"), conf), conf);
+        long outputSize = JobStats.getOutputSize(
+                createPOStoreForNonFileBasedSystem(new HBaseStorage("colName"), conf), conf);
 
         assertEquals("The dummy output size reader always returns " + DummyOutputSizeReader.SIZE,
                 DummyOutputSizeReader.SIZE, outputSize);
+    }
+
+    @Test
+    public void testGetOutputSizeUsingNonFileBasedStorage5() throws Exception {
+        Configuration conf = new Configuration();
+
+        long size = 2L * 1024 * 1024 * 1024;
+        long outputSize = JobStats.getOutputSize(
+                createPOStoreForFileBasedSystem(size, new PigStorageWithStatistics(), conf), conf);
+
+        // By default, FileBasedOutputSizeReader is used to compute the size of output.
+        assertEquals("The returned output size is expected to be the same as the file size",
+                size, outputSize);
+
+        // Now add PigStorageWithStatistics to the unsupported store funcs list, and
+        // verify that JobStats.getOutputSize() returns -1.
+        conf.set(PigStatsOutputSizeReader.OUTPUT_SIZE_READER_UNSUPPORTED,
+                PigStorageWithStatistics.class.getName());
+
+        outputSize = JobStats.getOutputSize(
+                createPOStoreForFileBasedSystem(size, new PigStorageWithStatistics(), conf), conf);
+        assertEquals("The default output size reader returns -1 for unsupported store funcs",
+                -1, outputSize);
+    }
+
+    // See PIG-4043
+    @Test
+    public void testNoTaskReportProperty() throws IOException{
+        MiniGenericCluster cluster = MiniGenericCluster.buildCluster(MiniGenericCluster.EXECTYPE_MR);
+        Properties properties = cluster.getProperties();
+
+        String inputFile = "input";
+        PrintWriter pw = new PrintWriter(Util.createInputFile(cluster, inputFile));
+        pw.println("100\tapple");
+        pw.println("200\torange");
+        pw.close();
+
+        // Enable task reports in job statistics
+        properties.setProperty(PigConfiguration.PIG_NO_TASK_REPORT, "false");
+        PigServer pigServer = new PigServer(cluster.getExecType(), properties);
+        pigServer.setBatchOn();
+
+        // Launch a map-only job
+        pigServer.registerQuery("A = load '" + inputFile + "' as (id:int, fruit:chararray);");
+        pigServer.registerQuery("store A into 'task_reports';");
+        List<ExecJob> jobs = pigServer.executeBatch();
+        PigStats pigStats = jobs.get(0).getStatistics();
+        MRJobStats jobStats = (MRJobStats) pigStats.getJobGraph().getJobList().get(0);
+
+        // Make sure JobStats includes TaskReports information
+        long minMapTime = jobStats.getMinMapTime();
+        long maxMapTime = jobStats.getMaxMapTime();
+        long avgMapTime = jobStats.getAvgMapTime();
+        assertTrue("TaskReports are enabled, so minMapTime shouldn't be -1", minMapTime != -1l);
+        assertTrue("TaskReports are enabled, so maxMapTime shouldn't be -1", maxMapTime != -1l);
+        assertTrue("TaskReports are enabled, so avgMapTime shouldn't be -1", avgMapTime != -1l);
+
+        // Disable task reports in job statistics
+        properties.setProperty(PigConfiguration.PIG_NO_TASK_REPORT, "true");
+
+        // Launch another map-only job
+        pigServer.registerQuery("B = load '" + inputFile + "' as (id:int, fruit:chararray);");
+        pigServer.registerQuery("store B into 'no_task_reports';");
+        jobs = pigServer.executeBatch();
+        pigStats = jobs.get(0).getStatistics();
+        jobStats = (MRJobStats) pigStats.getJobGraph().getJobList().get(0);
+
+        // Make sure JobStats doesn't include any TaskReports information
+        minMapTime = jobStats.getMinMapTime();
+        maxMapTime = jobStats.getMaxMapTime();
+        avgMapTime = jobStats.getAvgMapTime();
+        assertEquals("TaskReports are disabled, so minMapTime should be -1", -1l, minMapTime);
+        assertEquals("TaskReports are disabled, so maxMapTime should be -1", -1l, maxMapTime);
+        assertEquals("TaskReports are disabled, so avgMapTime should be -1", -1l, avgMapTime);
+
+        cluster.shutDown();
     }
 }

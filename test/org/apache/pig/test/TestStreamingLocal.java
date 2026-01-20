@@ -17,9 +17,8 @@
  */
 package org.apache.pig.test;
 
-import static org.junit.Assert.assertTrue;
-
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 
@@ -51,7 +50,7 @@ public class TestStreamingLocal {
 
     @Before
     public void setUp() throws Exception {
-        pigServer = new PigServer(ExecType.LOCAL);
+        pigServer = new PigServer(Util.getLocalTestMode());
     }
 
     @After
@@ -98,7 +97,7 @@ public class TestStreamingLocal {
 
             // Pig query to run
             pigServer.registerQuery("IP = load '" +
-                    Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext()) +
+                    Util.generateURI(input.toString(), pigServer.getPigContext()) +
                     "' using " + PigStorage.class.getName() + "(',');");
             pigServer.registerQuery("FILTERED_DATA = filter IP by $1 > '3';");
             pigServer.registerQuery("S1 = stream FILTERED_DATA through `" +
@@ -141,7 +140,7 @@ public class TestStreamingLocal {
             }
             // Pig query to run
             pigServer.registerQuery("IP = load '" +
-                    Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext()) +
+                    Util.generateURI(input.toString(), pigServer.getPigContext()) +
                     "' using " + PigStorage.class.getName() + "(',');");
             pigServer.registerQuery("FILTERED_DATA = filter IP by $1 > '3';");
             if(withTypes[i] == true) {
@@ -183,7 +182,7 @@ public class TestStreamingLocal {
 
             // Pig query to run
             pigServer.registerQuery("IP = load '" +
-                    Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext()) +
+                    Util.generateURI(input.toString(), pigServer.getPigContext()) +
                     "' using " + PigStorage.class.getName() + "(',');");
             pigServer.registerQuery("FILTERED_DATA = filter IP by $1 > '3';");
             pigServer.registerQuery("GROUPED_DATA = group FILTERED_DATA by $0;");
@@ -232,7 +231,7 @@ public class TestStreamingLocal {
 
         // Pig query to run
         pigServer.registerQuery("IP = load '" +
-                Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext()) +
+                Util.generateURI(input.toString(), pigServer.getPigContext()) +
                 "' using " + PigStorage.class.getName() + "(',');");
         pigServer.registerQuery("FILTERED_DATA = filter IP by $1 > '3';");
         pigServer.registerQuery("S1 = stream FILTERED_DATA through `" +
@@ -280,7 +279,7 @@ public class TestStreamingLocal {
             pigServer.registerQuery("define CMD `" + simpleEchoStreamingCommand +
                     " | " + simpleEchoStreamingCommand + "`;");
             pigServer.registerQuery("IP = load '" +
-                    Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext()) +
+                    Util.generateURI(input.toString(), pigServer.getPigContext()) +
                     "' using " + PigStorage.class.getName() + "(',');");
             if(withTypes[i] == true) {
                 pigServer.registerQuery("OP = stream IP through CMD as (f0:chararray, f1:int);");
@@ -310,11 +309,11 @@ public class TestStreamingLocal {
         expected.set(3, 0);
 
         pigServer.registerQuery("A = load '" +
-                Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext()) +
+                Util.generateURI(input.toString(), pigServer.getPigContext()) +
                 "' using " + PigStorage.class.getName() + "(',') as (a0, a1);");
         pigServer.registerQuery("B = stream A through `head -1` as (a0, a1);");
         pigServer.registerQuery("C = load '" +
-                Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext()) +
+                Util.generateURI(input.toString(), pigServer.getPigContext()) +
                 "' using " + PigStorage.class.getName() + "(',') as (a0, a1);");
         pigServer.registerQuery("D = stream C through `head -1` as (a0, a1);");
         pigServer.registerQuery("E = join B by a0, D by a0;");
@@ -330,7 +329,7 @@ public class TestStreamingLocal {
 
     @Test
     public void testLocalNegativeLoadStoreOptimization() throws Exception {
-        testNegativeLoadStoreOptimization(ExecType.LOCAL);
+        testNegativeLoadStoreOptimization(Util.getLocalTestMode());
     }
 
     private void testNegativeLoadStoreOptimization(ExecType execType)
@@ -359,7 +358,7 @@ public class TestStreamingLocal {
             pigServer.registerQuery("define CMD `"+ simpleEchoStreamingCommand +
             "` input(stdin);");
             pigServer.registerQuery("IP = load '" +
-                    Util.generateURI(Util.encodeEscape(input.toString()), pigServer.getPigContext()) +
+                    Util.generateURI(input.toString(), pigServer.getPigContext()) +
                     "' using " + PigStorage.class.getName() + "(',');");
             pigServer.registerQuery("FILTERED_DATA = filter IP by $1 > '3';");
             if(withTypes[i] == true) {
@@ -374,4 +373,41 @@ public class TestStreamingLocal {
             Util.checkQueryOutputs(pigServer.openIterator("OP"), expectedResults);
         }
     }
+
+    @Test
+    // Perl script with a syntax error, See PIG-4976
+    public void testNegativeScriptSyntaxError() throws IOException {
+
+        for( int numinput : new int [] {10, 9999} ) {
+            String[] inputStrings = new String[numinput];
+            for (int i=0;i<numinput;i++) {
+                inputStrings[i] = Integer.toString(i);
+            }
+            File input = Util.createInputFile("tmp", "", inputStrings);
+            // Perl script
+            String[] script =
+                new String[] {
+                              "#!/usr/bin/perl",
+                              "syntax error",
+                             };
+            File command1 = Util.createInputFile("script", "pl", script);
+            String query =
+                    "define CMD `perl " + command1.getName() + "` output('foo')" +
+                    "ship ('" + Util.encodeEscape(command1.toString()) + "');";
+            boolean succeeded=true;
+            try {
+                pigServer.registerQuery( query );
+                pigServer.registerQuery("A = load '"
+                        + Util.generateURI(input.toString(),
+                                pigServer.getPigContext())
+                        + "' using PigStorage();");
+                pigServer.registerQuery("B = stream A through CMD;");
+                pigServer.openIterator("B");
+            } catch(Exception ex) {
+                succeeded=false;
+            }
+           Assert.assertFalse("Job with " + numinput + " lines input did not fail.", succeeded);
+        }
+    }
+
 }

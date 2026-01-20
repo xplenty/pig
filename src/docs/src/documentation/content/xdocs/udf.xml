@@ -71,10 +71,10 @@ DUMP B;
 </source>
 
 <p>The command below can be used to run the script. Note that all examples in this document run in local mode for simplicity 
-but the examples can also run in Hadoop mode. For more information on how to run Pig, please see the PigTutorial. </p>
+but the examples can also run in Tez local/Mapreduce/ Tez mode. For more information on how to run Pig, please see the PigTutorial. </p>
 
 <source>
-java -cp pig.jar org.apache.pig.Main -x local myscript.pig
+pig -x local myscript.pig
 </source>
 
 <p>The first line of the script provides the location of the <code>jar&nbsp;file</code> that contains the UDF. 
@@ -441,6 +441,38 @@ Java Class
 </tr>
 <tr>
 <td>
+<p> boolean </p>
+</td>
+<td>
+<p> Boolean </p>
+</td>
+</tr>
+<tr>
+<td>
+<p> datetime </p>
+</td>
+<td>
+<p> DateTime </p>
+</td>
+</tr>
+<tr>
+<td>
+<p> bigdecimal </p>
+</td>
+<td>
+<p> BigDecimal </p>
+</td>
+</tr>
+<tr>
+<td>
+<p> biginteger </p>
+</td>
+<td>
+<p> BigInteger </p>
+</td>
+</tr>
+<tr>
+<td>
 <p> tuple </p>
 </td>
 <td>
@@ -583,8 +615,11 @@ public class DataType {
     public static final byte LONG      =  15;
     public static final byte FLOAT     =  20;
     public static final byte DOUBLE    =  25;
+    public static final byte DATETIME  =  30;
     public static final byte BYTEARRAY =  50;
     public static final byte CHARARRAY =  55;
+    public static final byte BIGINTEGER =  65;
+    public static final byte BIGDECIMAL =  70;
     public static final byte MAP       = 100;
     public static final byte TUPLE     = 110;
     public static final byte BAG       = 120;
@@ -807,9 +842,63 @@ A = LOAD 'student_data' AS (name, age, gpa);
 B = FOREACH A GENERATE myudfs.UPPER(name);
 DUMP B;
 </source>
-
+<p>Variable-length arguments: </p>
+<p>The last input schema field in <code>getArgToFuncMapping()</code> can be marked as vararg, which enables UDF writers to create UDFs that take variable length arguments. This is done by overriding
+the <code>getSchemaType()</code> method:
+</p>
+<source>
+@Override
+public SchemaType getSchemaType() {
+    return SchemaType.VARARG;
+}
+</source>
+<p>For an example see <a href="http://svn.apache.org/viewvc/pig/trunk/src/org/apache/pig/builtin/CONCAT.java?view=markup">CONCAT</a>.</p>
 </section>
 
+<section id="counters">
+<title>Using Counters</title>
+<p>Hadoop counters are easily accessible within EvalFunc by using PigStatusReporter object. Here is one example:</p>
+<source>
+public class UPPER extends EvalFunc&lt;String&gt;
+{
+        public String exec(Tuple input) throws IOException {
+                if (input == null || input.size() == 0) {
+                    PigStatusReporter reporter = PigStatusReporter.getInstance();
+                    if (reporter != null) {
+                       reporter.incrCounter(PigWarning.UDF_WARNING_1, 1);
+                    }
+                    return null;
+                }
+                try{
+                        String str = (String)input.get(0);
+                        return str.toUpperCase();
+                }catch(Exception e){
+                    throw new IOException("Caught exception processing input row ", e);
+                }
+        }
+}
+</source>
+</section>
+<section id="access-input-schema">
+        <title>Access input schema inside EvalFunc</title>
+        <p>Not only inside outputSchema at compile time, input schema is also accessible in exec at runtime. For example:</p>
+<source>
+public class AddSchema extends EvalFunc&lt;String&gt;
+{
+        public String exec(Tuple input) throws IOException {
+                if (input == null || input.size() == 0)
+                    return null;
+                String result = "";
+                for (int i=0;i&lt;input.size();i++) {
+                    result += getInputSchema().getFields().get(i).alias;
+                    result += ":";
+                    result += input.get(i);
+                }
+                return result;
+        }
+}
+</source>
+</section>
 <!-- +++++++++++++++++++++++++++++++++++++++++++++++++ -->
 <section id="reporting-progress">
 <title>Reporting Progress</title>
@@ -839,21 +928,32 @@ public class UPPER extends EvalFunc&lt;String&gt;
 <!-- +++++++++++++++++++++++++++++++++++++++++++++++++ -->
 <section id="distributed-cache">
 	<title>Using Distributed Cache</title>
-	<p>Use getCacheFiles, an EvalFunc method, to return a list of HDFS files that need to be shipped to distributed cache. Inside exec method, you can assume that these files already exist in distributed cache. For example:</p>
+	<p>Use getCacheFiles or getShipFiles to return a list of HDFS files or local files that need to be shipped to distributed cache. Inside exec method, you can assume that these files already exist in distributed cache. For example:</p>
 <source>
 public class Udfcachetest extends EvalFunc&lt;String&gt; { 
 
     public String exec(Tuple input) throws IOException { 
-        FileReader fr = new FileReader("./smallfile"); 
-        BufferedReader d = new BufferedReader(fr); 
-        return d.readLine(); 
+        String concatResult = "";
+        FileReader fr = new FileReader("./smallfile1"); 
+        BufferedReader d = new BufferedReader(fr);
+        concatResult +=d.readLine();
+        fr = new FileReader("./smallfile2");
+        d = new BufferedReader(fr);
+        concatResult +=d.readLine();
+        return concatResult;
     } 
 
     public List&lt;String&gt; getCacheFiles() { 
         List&lt;String&gt; list = new ArrayList&lt;String&gt;(1); 
-        list.add("/user/pig/tests/data/small#smallfile"); 
+        list.add("/user/pig/tests/data/small#smallfile1");  // This is hdfs file
         return list; 
     } 
+
+    public List&lt;String&gt; getShipFiles() {
+        List&lt;String&gt; list = new ArrayList&lt;String&gt;(1);
+        list.add("/home/hadoop/pig/smallfile2");  // This local file
+        return list;
+    }
 } 
 
 a = load '1.txt'; 
@@ -861,7 +961,53 @@ b = foreach a generate Udfcachetest(*);
 dump b;
 </source>
 </section>
+<section id="compile-time-eval">
+        <title>Compile time evaluation</title>
+        <p>If the parameters of the EvalFunc are all constants, Pig could evaluate the result at compile time. The benefit of evaluating at compile time is performance optimization, and enable certain other optimizations at front end (such as partition pruning, which only allow constant not UDF in filter condition). By default, compile time evaluation is disabled in EvalFunc to prevent potential side effect. To enable it, override allowCompileTimeCalculation. For example:</p>
+<source>
+public class CurrentTime extends EvalFunc&lt;DateTime&gt; {
+    public String exec(Tuple input) throws IOException {
+        return new DateTime();
+    }
+    @Override
+    public boolean allowCompileTimeCalculation() {
+        return true;
+    }
+}
+</source>
+</section>
+<section id="udf-loadcaster">
+<title>Typecasting from bytearrays</title>
+<p>Just like <a href="#load-functions">Load Function</a> and <a href="basic.html#pig-streaming-input-output">Streaming</a>,
+Java UDF has a getLoadCaster() method that returns
+<a href="http://svn.apache.org/viewvc/pig/trunk/src/org/apache/pig/LoadCaster.java?view=markup">LoadCaster</a>
+to convert byte arrays to specific types. A UDf implementation should implement this if casts (implicit or explicit) from DataByteArray fields to other types need to be supported. Default implementation returns null and Pig will determine if all parameters passed to the UDF have identical loadcaster and use it when true. </p>
+</section>
 
+<section id="tez-jvm-reuse">
+        <title>Clean up static variable in Tez</title>
+        <p>In Tez, jvm could reuse for other tasks. It is important to cleanup static variable to make sure there is no side effect. Here is one example:</p>
+<source>
+public class UPPER extends EvalFunc&lt;String&gt;
+{
+        static boolean initialized = false;
+        static {
+            JVMReuseManager.getInstance().registerForStaticDataCleanup(UPPER.class);
+        }
+        public String exec(Tuple input) throws IOException {
+            if (!initialized) {
+                init();
+                initialized = true;
+            }
+            ......
+        }
+        @StaticDataCleanup
+        public static void staticDataCleanup() {
+            initialized = false;
+        }
+}
+</source>
+</section>
 </section>
 
 <!-- =============================================================== -->
@@ -897,6 +1043,12 @@ has methods to push operations from Pig runtime into loader implementations. Cur
 
 <li id="loadcaster"><a href="http://svn.apache.org/viewvc/pig/trunk/src/org/apache/pig/LoadCaster.java?view=markup">LoadCaster</a> 
 has methods to convert byte arrays to specific types. A loader implementation should implement this if casts (implicit or explicit) from DataByteArray fields to other types need to be supported. </li>
+
+<li id="loadpredicatepushdown"><a href="http://svn.apache.org/viewvc/pig/trunk/src/org/apache/pig/LoadPredicatePushdown.java?view=markup">LoadPredicatePushdown</a> 
+ has the methods to push predicates to the loader. It is different than LoadMetadata.setPartitionFilter in that loader may load records which does not satisfy the predicates. In other words, predicates is only a hint. Note this interface is still in development and might change in next version. Currently only OrcStorage implements this interface.</li>
+
+<li id="nonfsloadfunc"><a href="http://svn.apache.org/viewvc/pig/trunk/src/org/apache/pig/NonFSLoadFunc.java?view=markup">NonFSLoadFunc</a> 
+ is a marker interface to indicate that a LoadFunc implementation is not a filesystem loader. This is useful for LoadFunc classes that for example supply queries instead of filesystem pathes to the LOAD operator.</li>
 </ul>
 
  <p>The LoadFunc abstract class is the main class to extend for implementing a loader. The methods which need to be overridden are explained below:</p>
@@ -917,6 +1069,10 @@ has methods to convert byte arrays to specific types. A loader implementation sh
  <li id="setUdfContextSignature">setUdfContextSignature(): This method will be called by Pig both in the front end and back end to pass a unique signature to the Loader. The signature can be used to store into the UDFContext any information which the Loader needs to store between various method invocations in the front end and back end. A use case is to store RequiredFieldList passed to it in LoadPushDown.pushProjection(RequiredFieldList) for use in the back end before returning tuples in getNext(). The default implementation in LoadFunc has an empty body. This method will be called before other methods. </li>
  
  <li id="relativeToAbsolutePath">relativeToAbsolutePath(): Pig runtime will call this method to allow the Loader to convert a relative load location to an absolute location. The default implementation provided in LoadFunc handles this for FileSystem locations. If the load source is something else, loader implementation may choose to override this.</li>
+
+ <li id="getCacheFiles">getCacheFiles(): Return a list of hdfs files to ship to distributed cache.</li>
+
+ <li id="getShipFiles">getShipFiles(): Return a list of local files to ship to distributed cache.</li>
  </ul>
 
 <p><strong>Example Implementation</strong></p>
@@ -1045,6 +1201,10 @@ abstract class has the main methods for storing data and for most use cases it s
 <ul>
 <li id="storemetadata"><a href="http://svn.apache.org/viewvc/pig/trunk/src/org/apache/pig/StoreMetadata.java?view=markup">StoreMetadata:</a> 
 This interface has methods to interact with metadata systems to store schema and store statistics. This interface is optional and should only be implemented if metadata needs to stored. </li>
+<li id="storeresources"><a href="http://svn.apache.org/viewvc/pig/trunk/src/org/apache/pig/StoreResources.java?view=markup">StoreResources:</a> 
+This interface has methods to put hdfs files or local files to distributed cache. </li>
+<li id="errorhandling"><a href="http://svn.apache.org/viewvc/pig/trunk/src/org/apache/pig/ErrorHandling.java?view=markup">ErrorHandling:</a> 
+This interface allow you to skip bad records in the storer so the storer will not throw exception and terminate the job. You can implement your own error handler by overriding <a href="http://svn.apache.org/viewvc/pig/trunk/src/org/apache/pig/ErrorHandler.java?view=markup">ErrorHandler</a> interface, or use predefined error handler: <a href="http://svn.apache.org/viewvc/pig/trunk/src/org/apache/pig/CounterBasedErrorHandler.java?view=markup">CounterBasedErrorHandler</a>. ErrorHandling can be turned on by setting the property pig.error-handling.enabled to true in pig.properties. Default is false.  CounterBasedErrorHandler uses two settings - pig.error-handling.min.error.records (the minimum number of errors to trigger error handling) and pig.error-handling.error.threshold (percentage of the number of records as a fraction exceeding which error is thrown).</li>
 </ul>
 
 <p id="storefunc-override">The methods which need to be overridden in StoreFunc are explained below: </p>
@@ -1605,7 +1765,7 @@ function helloworld() {
     return 'Hello, World';
 }
     
-complex.outputSchema = "word:chararray,num:long";
+complex.outputSchema = "(word:chararray,num:long)";
 function complex(word){
     return {word:word, num:word.length};
 }
@@ -1613,8 +1773,8 @@ function complex(word){
  
 <p>This Pig script registers the JavaScript UDF (udf.js).</p>
 <source>
- register ‘udf.js’ using javascript as myfuncs; 
-A = load ‘data’ as (a0:chararray, a1:int);
+register 'udf.js' using javascript as myfuncs; 
+A = load 'data' as (a0:chararray, a1:int);
 B = foreach A generate myfuncs.helloworld(), myfuncs.complex(a0);
 ... ... 
 </source>
@@ -1807,9 +1967,9 @@ outputSchema "t:(m:[], t:(name:chararray, age:int, gpa:double), b:{t:(name:chara
 </source>
 <p>@OutputSchemaFunction annotation - Defines the name of a function which will return the schema at runtime according to the input schema.</p>
 <source>
-import org.apache.pig.scripting.groovy.OutputSchemaFunction;",
+import org.apache.pig.scripting.groovy.OutputSchemaFunction;
 
-class GroovyUDFs {",
+class GroovyUDFs {
   @OutputSchemaFunction('squareSchema')
   public static square(x) {
     return x * x;
@@ -1943,7 +2103,6 @@ class GroovyUDFs {
 <section id="python-udfs">
 <title>Writing Python UDFs</title>
 <p>Here Python UDFs means C Python UDFs. It uses python command line to run the Python UDFs. It is different than Jython, which relies on Jython library. Instead, it streams the data in and out of the python process. The implementation mechanism is completely different than Jython.</p>
-<p><strong>Note:</strong> <em>Python UDFs are an experimental feature. It does not work with Hadoop 2.</em></p>
 
 <!-- ++++++++++++++++++++++++++++++++++++++++++++++++ -->
 <section id="register-python">

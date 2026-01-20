@@ -23,10 +23,13 @@ import java.util.Iterator;
 import java.util.List;
 
 import org.apache.pig.EvalFunc;
-import org.apache.pig.FuncSpec;
 import org.apache.pig.PigException;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.builtin.AVG;
+import org.apache.pig.builtin.BigDecimalAvg;
+import org.apache.pig.builtin.BigDecimalMax;
+import org.apache.pig.builtin.BigDecimalMin;
+import org.apache.pig.builtin.BigDecimalSum;
 import org.apache.pig.builtin.COUNT;
 import org.apache.pig.builtin.DoubleAvg;
 import org.apache.pig.builtin.DoubleMax;
@@ -54,6 +57,7 @@ import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
+import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
 
 /**
  * Given an aggregate function, a bag, and possibly a window definition,
@@ -73,23 +77,27 @@ import org.apache.pig.impl.logicalLayer.schema.Schema;
  *           <li>sum(int)</li>
  *           <li>sum(long)</li>
  *           <li>sum(bytearray)</li>
+ *           <li>sum(bigdecimal)</li>
  *           <li>avg(double)</li>
  *           <li>avg(float)</li>
  *           <li>avg(long)</li>
  *           <li>avg(int)</li>
  *           <li>avg(bytearray)</li>
+ *           <li>avg(bigdecimal)</li>
  *           <li>min(double)</li>
  *           <li>min(float)</li>
  *           <li>min(long)</li>
  *           <li>min(int)</li>
  *           <li>min(chararray)</li>
  *           <li>min(bytearray)</li>
+ *           <li>min(bigdecimal)</li>
  *           <li>max(double)</li>
  *           <li>max(float)</li>
  *           <li>max(long)</li>
  *           <li>max(int)</li>
  *           <li>max(chararray)</li>
  *           <li>max(bytearray)</li>
+ *           <li>max(bigdecimal)</li>
  *           <li>row_number</li>
  *           <li>first_value</li>
  *           <li>last_value</li>
@@ -131,29 +139,51 @@ import org.apache.pig.impl.logicalLayer.schema.Schema;
  *
  * <p>Example Usage:
  * <p>To do a cumulative sum:
- * <p><pre> A = load 'T';
- * B = group A by si
- * C = foreach B {
- *     C1 = order A by d;
- *     generate flatten(Stitch(C1, Over(C1.f, 'sum(float)')));
+ * <p><pre> A = load 'T' AS (si:chararray, i:int, d:long, f:float, s:chararray);
+ * C = foreach (group A by si) {
+ *     Aord = order A by d;
+ *     generate flatten(Stitch(Aord, Over(Aord.f, 'sum(float)')));
  * }
- * D = foreach C generate s, $9;</pre>
+ * D = foreach C generate s, $5;</pre>
  * <p> This is equivalent to the SQL statement
  * <p><tt>select s, sum(f) over (partition by si order by d) from T;</tt>
  *
  * <p>To find the record 3 ahead of the current record, using a window between
  * the current row and 3 records ahead and a default value of 0.
- * <p><pre> A = load 'T';
- * B = group A by si;
- * C = foreach B {
- *     C1 = order A by i;
- *     generate flatten(Stitch(C1, Over(C1.i, 'lead', 0, 3, 3, 0)));
+ * <p><pre> A = load 'T' AS (si:chararray, i:int, d:long, f:float, s:chararray);
+ * C = foreach (group A by si) {
+ *     Aord = order A by i;
+ *     generate flatten(Stitch(Aord, Over(Aord.i, 'lead', 0, 3, 3, 0)));
  * }
  * D = foreach C generate s, $9;</pre>
  * <p> This is equivalent to the SQL statement
  * <p><tt>select s, lead(i, 3, 0) over (partition by si order by i rows between
-         * current row and 3 following) over T;</tt>
+ * current row and 3 following) over T;</tt>
  *
+ * <p>Over accepts a constructor argument specifying the name and type,
+ * colon-separated, of its return schema. If the argument option is 'true' use the inner-search,
+ * take the name and type of bag and return a schema with alias+'_over' and the same type</p>
+ *
+ * <p><pre>
+ * DEFINE IOver org.apache.pig.piggybank.evaluation.Over('state_rk:int');
+ * cities = LOAD 'cities' AS (city:chararray, state:chararray, pop:int);
+ * -- Decorate each city with its population rank within the state it belongs to:
+ * ranked = FOREACH(GROUP cities BY state) {
+ *   c_ord = ORDER cities BY pop DESC;
+ *   GENERATE FLATTEN(Stitch(c_ord,
+ *     IOver(c_ord, 'rank', -1, -1, 2))); -- beginning (-1) to end (-1) on third field (2)
+ * };
+ * DESCRIBE ranked;
+ * -- ranked: {stitched::city: chararray,stitched::state: chararray,stitched::pop: int,stitched::state_rk: int}
+ * DUMP ranked;
+ * -- ...
+ * -- (Nashville,Tennessee,609644,2)
+ * -- (Houston,Texas,2145146,1)
+ * -- (San Antonio,Texas,1359758,2)
+ * -- (Dallas,Texas,1223229,3)
+ * -- (Austin,Texas,820611,4)
+ * -- ...
+ * </pre></p>
  */
 public class Over extends EvalFunc<DataBag> {
 
@@ -165,19 +195,33 @@ public class Over extends EvalFunc<DataBag> {
     private boolean initialized;
     private EvalFunc<? extends Object> func;
     private Object[] udfArgs;
-    private byte returnType;
+    private byte   returnType;
+    private String returnName;
+    private boolean searchInnerType;
 
     public Over() {
         initialized = false;
         udfArgs = null;
         func = null;
         returnType = DataType.UNKNOWN;
+        searchInnerType = false;
     }
 
-    public Over(String returnType) {
+    public Over(String typespec) {
         this();
-        this.returnType = DataType.findTypeByName(returnType);
+        if (typespec.contains(":")) {
+            String[] fn_tn = typespec.split(":", 2);
+            this.returnName = fn_tn[0];
+            this.returnType = DataType.findTypeByName(fn_tn[1]);
+        } else if(Boolean.parseBoolean(typespec)) {
+            searchInnerType = Boolean.parseBoolean(typespec);
+        }else{
+            this.returnName = "result";
+            this.returnType = DataType.findTypeByName(typespec);
+        }       
     }
+
+
 
     @Override
     public DataBag exec(Tuple input) throws IOException {
@@ -226,15 +270,42 @@ public class Over extends EvalFunc<DataBag> {
     @Override
     public Schema outputSchema(Schema inputSch) {
         try {
-            if (returnType == DataType.UNKNOWN) {
+            FieldSchema field;
+
+            if (searchInnerType) {
+                field = new FieldSchema(inputSch.getField(0));
+                while (searchInnerType) {
+                    if (field.schema != null
+                            && field.schema.getFields().size() > 1) {
+                        searchInnerType = false;
+                    } else {
+                        if (field.type == DataType.TUPLE
+                                || field.type == DataType.BAG) {
+                            field = new FieldSchema(field.schema.getField(0));
+                        } else {
+                            field.alias = field.alias + "_over";
+                            searchInnerType = false;
+                        }
+                    }
+                }
+
+                searchInnerType = true;
+            } else if (returnType == DataType.UNKNOWN) {
                 return Schema.generateNestedSchema(DataType.BAG, DataType.NULL);
             } else {
-                return Schema.generateNestedSchema(DataType.BAG, returnType);
+                field = new Schema.FieldSchema(returnName, returnType);
             }
+
+            Schema outputTupleSchema = new Schema(field);
+            return new Schema(new Schema.FieldSchema(getSchemaName(this
+                    .getClass().getName().toLowerCase(), inputSch),
+                    outputTupleSchema, DataType.BAG));
+
         } catch (FrontendException fe) {
             throw new RuntimeException("Unable to create nested schema", fe);
         }
     }
+    
 
     private void init(Tuple input) throws IOException {
         initialized = true;
@@ -296,6 +367,8 @@ public class Over extends EvalFunc<DataBag> {
             func = new LongSum();
         } else if ("sum(bytearray)".equalsIgnoreCase(agg)) {
             func = new SUM();
+        } else if ("sum(bigdecimal)".equalsIgnoreCase(agg)) {
+            func = new BigDecimalSum();
         } else if ("avg(double)".equalsIgnoreCase(agg)) {
             func = new DoubleAvg();
         } else if ("avg(float)".equalsIgnoreCase(agg)) {
@@ -306,6 +379,8 @@ public class Over extends EvalFunc<DataBag> {
             func = new IntAvg();
         } else if ("avg(bytearray)".equalsIgnoreCase(agg)) {
             func = new AVG();
+        } else if ("avg(bigdecimal)".equalsIgnoreCase(agg)) {
+            func = new BigDecimalAvg();
         } else if ("min(double)".equalsIgnoreCase(agg)) {
             func = new DoubleMin();
         } else if ("min(float)".equalsIgnoreCase(agg)) {
@@ -318,6 +393,8 @@ public class Over extends EvalFunc<DataBag> {
             func = new StringMin();
         } else if ("min(bytearray)".equalsIgnoreCase(agg)) {
             func = new MIN();
+        } else if ("min(bigdecimal)".equalsIgnoreCase(agg)) {
+            func = new BigDecimalMin();
         } else if ("max(double)".equalsIgnoreCase(agg)) {
             func = new DoubleMax();
         } else if ("max(float)".equalsIgnoreCase(agg)) {
@@ -330,6 +407,8 @@ public class Over extends EvalFunc<DataBag> {
             func = new StringMax();
         } else if ("max(bytearray)".equalsIgnoreCase(agg)) {
             func = new MAX();
+        } else if ("max(bigdecimal)".equalsIgnoreCase(agg)) {
+            func = new BigDecimalMax();
         } else if ("row_number".equalsIgnoreCase(agg)) {
             func = new RowNumber();
         } else if ("first_value".equalsIgnoreCase(agg)) {
@@ -349,7 +428,8 @@ public class Over extends EvalFunc<DataBag> {
         } else if ("percent_rank".equalsIgnoreCase(agg)) {
             func = new PercentRank(udfArgs);
         } else if ("cume_dist".equalsIgnoreCase(agg)) {
-            func = new CumeDist(udfArgs);
+            //func = new CumeDist(udfArgs);
+            func = new CumeDist();
         } else if ("debug".equalsIgnoreCase(agg)) {
             func = new Debug();
         } else {
@@ -755,6 +835,7 @@ public class Over extends EvalFunc<DataBag> {
         }
     }
 
+    /*
     private static class CumeDist extends BaseRank<Double> {
         CumeDist(Object[] args) throws IOException {
             super(args);
@@ -768,6 +849,20 @@ public class Over extends EvalFunc<DataBag> {
             return ((double)lastRankUsed) / (double)iter.tuples.size();
         }
     }
+    */
+
+    private static class CumeDist extends ResetableEvalFunc<Double> {
+
+        @Override
+        public Double exec(Tuple input) throws IOException {
+            DataBag inbag = (DataBag)input.get(0);
+            OverBag.OverBagIterator iter =
+                (OverBag.OverBagIterator)inbag.iterator();
+
+            return ((double)++currentRow)/(double)iter.tuples.size();
+        }
+    }
+
 
 
 

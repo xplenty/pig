@@ -30,7 +30,7 @@ jobs:
       - name: Build with Ant
         run: |
           export JRE_HOME=${JAVA_HOME}
-          ant jar -Dhadoopversion=23 -Dhbaseversion=95
+          ant jar -Dhadoopversion=2 -Dhbaseversion=1
 
       - name: Verify JAR was built
         run: |
@@ -75,7 +75,7 @@ jobs:
       - name: Build with Ant
         run: |
           export JRE_HOME=${JAVA_HOME}
-          ant jar -Dhadoopversion=23 -Dhbaseversion=95
+          ant jar -Dhadoopversion=2 -Dhbaseversion=1
 
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4

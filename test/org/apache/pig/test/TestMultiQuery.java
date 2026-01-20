@@ -25,11 +25,15 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Properties;
 
-import org.apache.pig.ExecType;
+import org.apache.pig.PigConfiguration;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecJob;
+import org.apache.pig.builtin.mock.Storage;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.PigContext;
+import org.apache.pig.impl.logicalLayer.schema.Schema;
+import org.apache.pig.tools.pigstats.InputStats;
+
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -50,17 +54,25 @@ public class TestMultiQuery {
         Util.copyFromLocalToLocal(
                 "test/org/apache/pig/test/data/passwd2", "passwd2");
         Properties props = new Properties();
-        props.setProperty("opt.multiquery", ""+true);
-        myPig = new PigServer(ExecType.LOCAL, props);
+        props.setProperty(PigConfiguration.PIG_OPT_MULTIQUERY, ""+true);
+        myPig = new PigServer(Util.getLocalTestMode(), props);
     }
-    
+
     @AfterClass
     public static void tearDownAfterClass() throws Exception {
-        Util.deleteFile(new PigContext(ExecType.LOCAL, new Properties()), "passwd");
-        Util.deleteFile(new PigContext(ExecType.LOCAL, new Properties()), "passwd2");
+        Util.deleteFile(new PigContext(Util.getLocalTestMode(), new Properties()), "passwd");
+        Util.deleteFile(new PigContext(Util.getLocalTestMode(), new Properties()), "passwd2");
         deleteOutputFiles();
     }
-    
+
+    private static final String simpleEchoStreamingCommand;
+    static {
+        if (Util.WINDOWS)
+            simpleEchoStreamingCommand = "perl -ne 'print \\\"$_\\\"'";
+        else
+            simpleEchoStreamingCommand = "perl -ne 'print \"$_\"'";
+    }
+
     @Before
     public void setUp() throws Exception {
         deleteOutputFiles();
@@ -75,9 +87,9 @@ public class TestMultiQuery {
     public void testMultiQueryJiraPig1438() throws Exception {
 
         // test case: merge multiple distinct jobs
-        
+
         String INPUT_FILE = "abc";
-        
+
         String[] inputData = {
                 "1\t2\t3",
                 "2\t3\t4",
@@ -85,9 +97,9 @@ public class TestMultiQuery {
                 "2\t3\t4",
                 "1\t2\t3"
         };
-        
+
         Util.createLocalInputFile(INPUT_FILE, inputData);
-       
+
         myPig.setBatchOn();
 
         myPig.registerQuery("A = load '" + INPUT_FILE + "' as (col1:int, col2:int, col3:int);");
@@ -98,110 +110,97 @@ public class TestMultiQuery {
         myPig.registerQuery("D1 = foreach C1 generate col1, col2;");
         myPig.registerQuery("D2 = foreach C2 generate col2, col3;");
         myPig.registerQuery("store D1 into 'output1';");
-        myPig.registerQuery("store D2 into 'output2';");            
-        
+        myPig.registerQuery("store D2 into 'output2';");
+
         myPig.executeBatch();
-        
-        myPig.registerQuery("E = load 'output1' as (a:int, b:int);");            
+
+        myPig.registerQuery("E = load 'output1' as (a:int, b:int);");
         Iterator<Tuple> iter = myPig.openIterator("E");
 
-        List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
-                new String[] { 
+        String[] expectedResults = new String[]{
                         "(1,2)",
                         "(2,3)"
-                });
-        
-        int counter = 0;
-        while (iter.hasNext()) {
-            assertEquals(expectedResults.get(counter++).toString(), iter.next().toString());      
-        }
-        assertEquals(expectedResults.size(), counter);
-                    
-        myPig.registerQuery("E = load 'output2' as (a:int, b:int);");            
+        };
+        Schema s = myPig.dumpSchema("E");
+        Util.checkQueryOutputs(iter, expectedResults, org.apache.pig.newplan.logical.Util.translateSchema(s), Util
+                .isSparkExecType(Util.getLocalTestMode()));
+
+
+        myPig.registerQuery("E = load 'output2' as (a:int, b:int);");
         iter = myPig.openIterator("E");
 
-        expectedResults = Util.getTuplesFromConstantTupleStrings(
-                new String[] { 
+        expectedResults = new String[]{
                         "(2,3)",
                         "(3,4)"
-                });
-        
-        counter = 0;
-        while (iter.hasNext()) {
-            assertEquals(expectedResults.get(counter++).toString(), iter.next().toString());      
-        }
-
-        assertEquals(expectedResults.size(), counter);
+        };
+        s = myPig.dumpSchema("E");
+        Util.checkQueryOutputs(iter, expectedResults, org.apache.pig.newplan.logical.Util.translateSchema(s), Util
+                .isSparkExecType(Util.getLocalTestMode()));
     }
-    
+
     @Test
     public void testMultiQueryJiraPig1252() throws Exception {
 
         // test case: Problems with secondary key optimization and multiquery
         // diamond optimization
-        
+
         String INPUT_FILE = "abc";
-        
+
         String[] inputData = {
             "1\t2\t3",
             "2\t3\t4",
             "3\t\t5",
             "5\t6\t6",
-            "6\t\t7"       
+            "6\t\t7"
         };
-        
+
         Util.createLocalInputFile(INPUT_FILE, inputData);
 
         myPig.setBatchOn();
 
         myPig.registerQuery("A = load '" + INPUT_FILE + "' as (col1, col2, col3);");
         myPig.registerQuery("B = foreach A generate (chararray) col1, " +
-        		"(chararray) ((col2 is not null) ?  " +
-        		"col2 : (col3 < 6 ? col3 : '')) as splitcond;");
+                "(chararray) ((col2 is not null) ?  " +
+                "col2 : (col3 < 6 ? col3 : '')) as splitcond;");
         myPig.registerQuery("split B into C if splitcond !=  '', D if splitcond == '';");
         myPig.registerQuery("E = group C by splitcond;");
         myPig.registerQuery("F = foreach E { orderedData = order C by $1, $0; generate flatten(orderedData); };");
-   
+
         Iterator<Tuple> iter = myPig.openIterator("F");
 
-        List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
-                new String[] { 
+        String[] expectedResults = new String[]{
                         "(1,2)",
                         "(2,3)",
                         "(3,5)",
                         "(5,6)"
-                });
-        
-        int counter = 0;
-        while (iter.hasNext()) {
-            assertEquals(expectedResults.get(counter++).toString(), iter.next().toString());                  
-        }
-
-        assertEquals(expectedResults.size(), counter);
+        };
+        Schema s = myPig.dumpSchema("F");
+        Util.checkQueryOutputs(iter, expectedResults, org.apache.pig.newplan.logical.Util.translateSchema(s), Util
+                .isSparkExecType(Util.getLocalTestMode()));
     }
 
     @Test
     public void testMultiQueryJiraPig1169() throws Exception {
 
         // test case: Problems with some top N queries
-        
+
         String INPUT_FILE = "abc";
-        
+
         String[] inputData = {
                 "1\t2\t3",
                 "2\t3\t4",
                 "3\t4\t5",
                 "5\t6\t7",
-                "6\t7\t8"       
+                "6\t7\t8"
         };
-        
+
         Util.createLocalInputFile(INPUT_FILE, inputData);
-       
+
         myPig.setBatchOn();
 
-        myPig.registerQuery("A = load '" + INPUT_FILE 
+        myPig.registerQuery("A = load '" + INPUT_FILE
                 + "' as (a:int, b, c);");
-        myPig.registerQuery("A1 = Order A by a desc parallel 3;");
+        myPig.registerQuery("A1 = Order A by a desc;");
         myPig.registerQuery("A2 = limit A1 2;");
         myPig.registerQuery("store A1 into 'output1';");
         myPig.registerQuery("store A2 into 'output2';");
@@ -209,114 +208,109 @@ public class TestMultiQuery {
         myPig.executeBatch();
 
         myPig.registerQuery("B = load 'output2' as (a:int, b, c);");
-        
+
         Iterator<Tuple> iter = myPig.openIterator("B");
 
         List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
-                new String[] { 
+                new String[] {
                         "(6,7,8)",
                         "(5,6,7)"
                 });
-        
+
         int counter = 0;
         while (iter.hasNext()) {
-            assertEquals(expectedResults.get(counter++).toString(), iter.next().toString());      
+            assertEquals(expectedResults.get(counter++).toString(), iter.next().toString());
         }
 
         assertEquals(expectedResults.size(), counter);
     }
-  
+
     @Test
     public void testMultiQueryJiraPig1171() throws Exception {
 
         // test case: Problems with some top N queries
-        
+
         String INPUT_FILE = "abc";
-        
+
         String[] inputData = {
             "1\tapple\t3",
             "2\torange\t4",
-            "3\tpersimmon\t5"    
+            "3\tpersimmon\t5"
         };
-        
+
         Util.createLocalInputFile(INPUT_FILE, inputData);
 
         myPig.setBatchOn();
 
-        myPig.registerQuery("A = load '" + INPUT_FILE 
+        myPig.registerQuery("A = load '" + INPUT_FILE
                 + "' as (a:long, b, c);");
         myPig.registerQuery("A1 = Order A by a desc;");
         myPig.registerQuery("A2 = limit A1 1;");
-        myPig.registerQuery("B = load '" + INPUT_FILE 
+        myPig.registerQuery("B = load '" + INPUT_FILE
                 + "' as (a:long, b, c);");
         myPig.registerQuery("B1 = Order B by a desc;");
         myPig.registerQuery("B2 = limit B1 1;");
-        
+
         myPig.registerQuery("C = cross A2, B2;");
-        
+
         Iterator<Tuple> iter = myPig.openIterator("C");
 
         List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
-                new String[] { 
+                new String[] {
                         "(3L,'persimmon',5,3L,'persimmon',5)"
                 });
-        
+
         int counter = 0;
         while (iter.hasNext()) {
-            assertEquals(expectedResults.get(counter++).toString(), iter.next().toString());      
+            assertEquals(expectedResults.get(counter++).toString(), iter.next().toString());
         }
 
         assertEquals(expectedResults.size(), counter);
     }
-    
+
     @Test
     public void testMultiQueryJiraPig1157() throws Exception {
 
         // test case: Sucessive replicated joins do not generate Map Reduce plan and fails due to OOM
-        
+
         String INPUT_FILE = "abc";
         String INPUT_FILE_1 = "abc";
-        
+
         String[] inputData = {
                 "1\tapple\t3",
                 "2\torange\t4",
-                "3\tpersimmon\t5"    
+                "3\tpersimmon\t5"
         };
-            
+
         Util.createLocalInputFile(INPUT_FILE, inputData);
 
         myPig.setBatchOn();
 
-        myPig.registerQuery("A = load '" + INPUT_FILE 
+        myPig.registerQuery("A = load '" + INPUT_FILE
                 + "' as (a:long, b, c);");
         myPig.registerQuery("A1 = FOREACH A GENERATE a;");
         myPig.registerQuery("B = GROUP A1 BY a;");
-        myPig.registerQuery("C = load '" + INPUT_FILE_1 
+        myPig.registerQuery("C = load '" + INPUT_FILE_1
                 + "' as (x:long, y);");
-        myPig.registerQuery("D = JOIN C BY x, B BY group USING 'replicated';");  
-        myPig.registerQuery("E = JOIN A BY a, D by x USING 'replicated';");  
-        
+        myPig.registerQuery("D = JOIN C BY x, B BY group USING 'replicated';");
+        myPig.registerQuery("E = JOIN A BY a, D by x USING 'replicated';");
+
         Iterator<Tuple> iter = myPig.openIterator("E");
 
-        List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
-                new String[] { 
-                        "(1L,'apple',3,1L,'apple',1L,{(1L)})",
-                        "(2L,'orange',4,2L,'orange',2L,{(2L)})",
-                        "(3L,'persimmon',5,3L,'persimmon',3L,{(3L)})"
-                });
-        
-        int counter = 0;
-        while (iter.hasNext()) {
-            assertEquals(expectedResults.get(counter++).toString(), iter.next().toString());                  
-        }
-
-        assertEquals(expectedResults.size(), counter);
+        String[] expectedResults = new String[]{
+                "(1L,apple,3,1L,apple,1L,{(1L)})",
+                "(2L,orange,4,2L,orange,2L,{(2L)})",
+                "(3L,persimmon,5,3L,persimmon,3L,{(3L)})"
+        };
+        Schema s = myPig.dumpSchema("E");
+        Util.checkQueryOutputs(iter, expectedResults, org.apache.pig.newplan.logical.Util.translateSchema(s), Util
+                .isSparkExecType(Util.getLocalTestMode()));
     }
 
     @Test
     public void testMultiQueryJiraPig1068() throws Exception {
 
-        // test case: COGROUP fails with 'Type mismatch in key from map: 
+        // test case: COGROUP fails with 'Type mismatch in key from map:
         // expected org.apache.pig.impl.io.NullableText, recieved org.apache.pig.impl.io.NullableTuple'
 
         String INPUT_FILE = "pig-1068.txt";
@@ -324,39 +318,34 @@ public class TestMultiQuery {
         String[] inputData = {
             "10\tapple\tlogin\tjar",
             "20\torange\tlogin\tbox",
-            "30\tstrawberry\tquit\tbot"    
+            "30\tstrawberry\tquit\tbot"
         };
-            
+
         Util.createLocalInputFile(INPUT_FILE, inputData);
 
         myPig.setBatchOn();
 
-        myPig.registerQuery("logs = load '" + INPUT_FILE 
+        myPig.registerQuery("logs = load '" + INPUT_FILE
                 + "' as (ts:int, id:chararray, command:chararray, comments:chararray);");
         myPig.registerQuery("SPLIT logs INTO logins IF command == 'login', all_quits IF command == 'quit';");
-        myPig.registerQuery("login_info = FOREACH logins { GENERATE id as id, comments AS client; };");  
+        myPig.registerQuery("login_info = FOREACH logins { GENERATE id as id, comments AS client; };");
         myPig.registerQuery("logins_grouped = GROUP login_info BY (id, client);");
         myPig.registerQuery("count_logins_by_client = FOREACH logins_grouped "
                 + "{ generate group.id AS id, group.client AS client, COUNT($1) AS count; };");
         myPig.registerQuery("all_quits_grouped = GROUP all_quits BY id; ");
         myPig.registerQuery("quits = FOREACH all_quits_grouped { GENERATE FLATTEN(all_quits); };");
         myPig.registerQuery("joined_session_info = COGROUP quits BY id, count_logins_by_client BY id;");
-        
+
         Iterator<Tuple> iter = myPig.openIterator("joined_session_info");
 
-        List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
-                new String[] { 
-                        "('apple',{},{('apple','jar',1L)})",
-                        "('orange',{},{('orange','box',1L)})",
-                        "('strawberry',{(30,'strawberry','quit','bot')},{})"
-                });
-        
-        int counter = 0;
-        while (iter.hasNext()) {
-            assertEquals(expectedResults.get(counter++).toString(), iter.next().toString());                
-        }
+        String[] expectedResults = new String[]{
+                "(apple,{},{(apple,jar,1L)})",
+                "(orange,{},{(orange,box,1L)})",
+                "(strawberry,{(30,strawberry,quit,bot)},{})"};
 
-        assertEquals(expectedResults.size(), counter);
+        Schema s = myPig.dumpSchema("joined_session_info");
+        Util.checkQueryOutputs(iter, expectedResults, org.apache.pig.newplan.logical.Util.translateSchema(s), Util
+                .isSparkExecType(Util.getLocalTestMode()));
     }
 
     @Test
@@ -364,22 +353,22 @@ public class TestMultiQuery {
 
         myPig.setBatchOn();
 
-        myPig.registerQuery("a = load 'passwd' " 
+        myPig.registerQuery("a = load 'passwd' "
                 + "using PigStorage(':') as (uname:chararray, passwd:chararray, uid:int, gid:int);");
         myPig.registerQuery("split a into plan1 if (uid > 5), plan2 if ( uid < 5);");
         myPig.registerQuery("b = group plan1 by uname;");
-        myPig.registerQuery("c = foreach b { tmp = order plan1 by uid desc; " 
+        myPig.registerQuery("c = foreach b { tmp = order plan1 by uid desc; "
                 + "generate flatten(group) as foo, tmp; };");
         myPig.registerQuery("d = filter c BY foo is not null;");
         myPig.registerQuery("store d into 'output1';");
         myPig.registerQuery("store plan2 into 'output2';");
-         
+
         List<ExecJob> jobs = myPig.executeBatch();
         for (ExecJob job : jobs) {
             assertTrue(job.getStatus() == ExecJob.JOB_STATUS.COMPLETED);
         }
-    }    
-    
+    }
+
     @Test
     public void testMultiQueryJiraPig1114() throws Exception {
 
@@ -390,9 +379,9 @@ public class TestMultiQuery {
         String[] inputData = {
             "10\tjar",
             "20\tbox",
-            "30\tbot"   
+            "30\tbot"
         };
-                
+
         Util.createLocalInputFile(INPUT_FILE, inputData);
 
         myPig.setBatchOn();
@@ -433,39 +422,39 @@ public class TestMultiQuery {
 
         String INPUT_FILE_1 = "set1.txt";
         String INPUT_FILE_2 = "set2.txt";
-        
+
 
         String[] inputData_1 = {
             "login\t0\tjar",
             "login\t1\tbox",
-            "quit\t0\tmany" 
+            "quit\t0\tmany"
         };
-                
+
         Util.createLocalInputFile(INPUT_FILE_1, inputData_1);
-        
+
         String[] inputData_2 = {
             "apple\tlogin\t{(login)}",
             "orange\tlogin\t{(login)}",
-            "strawberry\tquit\t{(login)}"  
+            "strawberry\tquit\t{(login)}"
         };
-                
+
         Util.createLocalInputFile(INPUT_FILE_2, inputData_2);
-            
+
         myPig.setBatchOn();
 
-        myPig.registerQuery("set1 = load '" + INPUT_FILE_1 
+        myPig.registerQuery("set1 = load '" + INPUT_FILE_1
                 + "' USING PigStorage as (a:chararray, b:chararray, c:chararray);");
         myPig.registerQuery("set2 = load '" + INPUT_FILE_2
                 + "' USING PigStorage as (a: chararray, b:chararray, c:bag{});");
-        myPig.registerQuery("set2_1 = FOREACH set2 GENERATE a as f1, b as f2, " 
+        myPig.registerQuery("set2_1 = FOREACH set2 GENERATE a as f1, b as f2, "
                 + "(chararray) 0 as f3;");
         myPig.registerQuery("set2_2 = FOREACH set2 GENERATE a as f1, "
-                + "FLATTEN((IsEmpty(c) ? null : c)) as f2, (chararray) 1 as f3;");  
+                + "FLATTEN((IsEmpty(c) ? null : c)) as f2, (chararray) 1 as f3;");
         myPig.registerQuery("all_set2 = UNION set2_1, set2_2;");
         myPig.registerQuery("joined_sets = JOIN set1 BY (a,b), all_set2 BY (f2,f3);");
-      
+
         List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
-                new String[] { 
+                new String[] {
                         "('quit','0','many','strawberry','quit','0')",
                         "('login','0','jar','apple','login','0')",
                         "('login','0','jar','orange','login','0')",
@@ -473,7 +462,7 @@ public class TestMultiQuery {
                         "('login','1','box','orange','login','1')",
                         "('login','1','box','strawberry','login','1')"
                 });
-        
+
         Iterator<Tuple> iter = myPig.openIterator("joined_sets");
         int count = 0;
         while (iter.hasNext()) {
@@ -481,11 +470,11 @@ public class TestMultiQuery {
         }
         assertEquals(expectedResults.size(), count);
     }
- 
+
     @Test
     public void testMultiQueryJiraPig1060_2() throws Exception {
 
-        // test case: 
+        // test case:
 
         String INPUT_FILE = "pig-1060.txt";
 
@@ -495,9 +484,9 @@ public class TestMultiQuery {
             "orange\t3",
             "orange\t23",
             "strawberry\t10",
-            "strawberry\t34"  
+            "strawberry\t34"
         };
-                    
+
         Util.createLocalInputFile(INPUT_FILE, inputData);
 
         myPig.setBatchOn();
@@ -530,7 +519,7 @@ public class TestMultiQuery {
         for (ExecJob job : jobs) {
             assertTrue(job.getStatus() == ExecJob.JOB_STATUS.COMPLETED);
         }
-    } 
+    }
 
     @Test
     public void testMultiQueryJiraPig920_2() throws Exception {
@@ -551,27 +540,27 @@ public class TestMultiQuery {
         myPig.registerQuery("g = cogroup d by $0, e by $0;");
         myPig.registerQuery("g1 = foreach g generate group, COUNT(d), COUNT(e);");
         myPig.registerQuery("store g1 into 'output2';");
-         
+
         List<ExecJob> jobs = myPig.executeBatch();
         for (ExecJob job : jobs) {
             assertTrue(job.getStatus() == ExecJob.JOB_STATUS.COMPLETED);
         }
-    }            
-    
+    }
+
     @Test
     public void testMultiQueryJiraPig920_3() throws Exception {
 
         // test case: execution of a simple diamond query
-        
+
         String INPUT_FILE = "pig-920.txt";
-        
+
         String[] inputData = {
             "apple\tapple\t100\t10",
             "apple\tapple\t200\t20",
             "orange\torange\t100\t10",
-            "orange\torange\t300\t20"  
+            "orange\torange\t300\t20"
         };
-                        
+
         Util.createLocalInputFile(INPUT_FILE, inputData);
 
         myPig.setBatchOn();
@@ -582,22 +571,22 @@ public class TestMultiQuery {
         myPig.registerQuery("c = filter a by gid > 10;");
         myPig.registerQuery("d = cogroup c by $0, b by $0;");
         myPig.registerQuery("e = foreach d generate group, COUNT(c), COUNT(b);");
-                               
+
         Iterator<Tuple> iter = myPig.openIterator("e");
 
         List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
-                new String[] { 
+                new String[] {
                         "('apple',1L,2L)",
                         "('orange',1L,1L)"
                 });
-        
+
         int counter = 0;
         while (iter.hasNext()) {
             assertEquals(expectedResults.get(counter++).toString(), iter.next().toString());
         }
 
         assertEquals(expectedResults.size(), counter);
-    }        
+    }
 
     @Test
     public void testMultiQueryJiraPig976() throws Exception {
@@ -625,7 +614,7 @@ public class TestMultiQuery {
     @Test
     public void testMultiQueryJiraPig976_2() throws Exception {
 
-        // test case: key ('group') isn't part of foreach output 
+        // test case: key ('group') isn't part of foreach output
         // and keys have different types
 
         myPig.setBatchOn();
@@ -671,7 +660,7 @@ public class TestMultiQuery {
     public void testMultiQueryJiraPig976_4() throws Exception {
 
         // test case: group by multi-cols and key ('group') isn't part of output
-     
+
         myPig.setBatchOn();
 
         myPig.registerQuery("a = load 'passwd' " +
@@ -688,7 +677,7 @@ public class TestMultiQuery {
             assertTrue(job.getStatus() == ExecJob.JOB_STATUS.COMPLETED);
         }
     }
-   
+
     @Test
     public void testMultiQueryJiraPig976_5() throws Exception {
 
@@ -718,7 +707,7 @@ public class TestMultiQuery {
         // test case: key ('group') has null values.
 
         String INPUT_FILE = "pig-976.txt";
-        
+
         String[] inputData = {
             "apple\tapple\t100\t10",
             "apple\tapple\t\t20",
@@ -726,9 +715,9 @@ public class TestMultiQuery {
             "orange\torange\t\t20",
             "strawberry\tstrawberry\t300\t10"
         };
-                            
+
         Util.createLocalInputFile(INPUT_FILE, inputData);
-    
+
         myPig.setBatchOn();
 
         myPig.registerQuery("a = load '" + INPUT_FILE +
@@ -742,11 +731,11 @@ public class TestMultiQuery {
 
         List<ExecJob> jobs = myPig.executeBatch();
         assertTrue(jobs.size() == 2);
-        
+
         for (ExecJob job : jobs) {
             assertTrue(job.getStatus() == ExecJob.JOB_STATUS.COMPLETED);
         }
-    }    
+    }
 
     @Test
     public void testMultiQueryJiraPig983_2() throws Exception {
@@ -766,15 +755,247 @@ public class TestMultiQuery {
         myPig.registerQuery("f = group d by c::gid;");
         myPig.registerQuery("f1 = foreach f generate group, SUM(d.c::uid);");
         myPig.registerQuery("store f1 into 'output2';");
-         
+
         List<ExecJob> jobs = myPig.executeBatch();
 
         assertTrue(jobs.size() == 2);
-        
+
         for (ExecJob job : jobs) {
             assertTrue(job.getStatus() == ExecJob.JOB_STATUS.COMPLETED);
         }
-    }     
+    }
+
+    /**
+       This test will fail indeterministically without the PIG-3902 patch. Sometimes
+       the loads will get attached as dependencies to the appropriate stores (during
+       the postProcess() method on PigServer.Graph) and the dag will successfully
+       run, while other times it will fail (if the loads get attached as dependencies
+       of the incorrect stores).
+     */
+    @Test
+    public void testMultiQueryJiraPig3902() throws Exception {
+
+        // test case: Pig Server creates implicit cycle when
+        // loading and storing from same location with an
+        // intermediate store.
+
+        Storage.Data data = Storage.resetData(myPig);
+        data.set("inputLocation", Storage.tuple(1,2,3));
+
+        myPig.setBatchOn();
+        myPig.registerQuery("A = load 'inputLocation' using mock.Storage() as (a:int, b, c);");
+        myPig.registerQuery("A1 = order A by a desc parallel 3;");
+        myPig.registerQuery("A2 = limit A1 2;");
+        myPig.registerQuery("store A1 into 'output1' using mock.Storage();");
+        myPig.registerQuery("A3 = load 'output1' using mock.Storage()as (a:int, b, c);");
+        myPig.registerQuery("A4 = filter A3 by a > 2;");
+        myPig.registerQuery("store A4 into 'inputLocation' using mock.Storage();");
+
+        List<ExecJob> jobs = myPig.executeBatch();
+
+        assertTrue(jobs.size() == 2);
+
+        for (ExecJob job : jobs) {
+            assertTrue(job.getStatus() == ExecJob.JOB_STATUS.COMPLETED);
+        }
+    }
+
+    @Test
+    public void testMultiQueryJiraPig4170() throws Exception {
+
+        Storage.Data data = Storage.resetData(myPig);
+        data.set("inputLocation", Storage.tuple(1, "hello"), Storage.tuple(2, "world"));
+
+        myPig.setBatchOn();
+        myPig.registerQuery("A = load 'inputLocation' using mock.Storage() as (a:int, b:chararray);");
+        myPig.registerQuery("A1 = group A by a;");
+        myPig.registerQuery("A2 = group A by b;");
+        myPig.registerQuery("store A1 into 'output1' using mock.Storage();");
+        myPig.registerQuery("store A2 into 'output2' using mock.Storage();");
+
+        myPig.executeBatch();
+
+        myPig.registerQuery("A = load 'output1' using mock.Storage() as (a:int, c:bag{(i:int, s:chararray)});");
+        Iterator<Tuple> iter = myPig.openIterator("A");
+        iter.next().toString().equals("(1,{(1,hello)})");
+        iter.next().toString().equals("(2,{(2,world)})");
+
+        myPig.registerQuery("A = load 'output2' using mock.Storage() as (b:chararray, c:bag{(i:int, s:chararray)});");
+        iter = myPig.openIterator("A");
+        iter.next().toString().equals("(hello,{(1,hello)})");
+        iter.next().toString().equals("(world,{(2,world)})");
+    }
+
+    @Test
+    public void testMultiQueryJiraPig4480() throws Exception {
+
+        Storage.Data data = Storage.resetData(myPig);
+        data.set("inputLocation",
+                Storage.tuple(1, Storage.bag(Storage.tuple("hello"), Storage.tuple("world"), Storage.tuple("program"))),
+                Storage.tuple(2, Storage.bag(Storage.tuple("my"), Storage.tuple("world"))));
+
+        myPig.setBatchOn();
+        myPig.registerQuery("A = load 'inputLocation' using mock.Storage() as (a:int, b:bag{(c:chararray)});");
+        myPig.registerQuery("A = foreach A generate a, flatten(b);");
+        myPig.registerQuery("A1 = foreach A generate a;");
+        myPig.registerQuery("A1 = distinct A1;");
+        myPig.registerQuery("A2 = filter A by c == 'world';");
+        myPig.registerQuery("A2 = ORDER A2 by a parallel 2;");
+        myPig.registerQuery("store A1 into 'output1' using mock.Storage();");
+        myPig.registerQuery("store A2 into 'output2' using mock.Storage();");
+
+        myPig.executeBatch();
+
+        List<Tuple> actualResults = data.get("output1");
+        List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
+                new String[] {"(1)", "(2)"});
+        Util.checkQueryOutputsAfterSort(actualResults.iterator(), expectedResults);
+
+        actualResults = data.get("output2");
+        expectedResults = Util.getTuplesFromConstantTupleStrings(
+                new String[] {"(1, 'world')", "(2, 'world')"});
+        Util.checkQueryOutputsAfterSort(actualResults.iterator(), expectedResults);
+    }
+
+    @Test
+    public void testMultiQueryJiraPig4493() throws Exception {
+
+        // Union followed by Split
+        Storage.Data data = Storage.resetData(myPig);
+        data.set("inputLocation",
+                Storage.tuple("1", "Dyson"),
+                Storage.tuple("2", "Miele"),
+                Storage.tuple("3", "Black & Decker")
+                );
+
+        myPig.setBatchOn();
+        myPig.registerQuery("A = load 'inputLocation' using mock.Storage();");
+        myPig.registerQuery("A = foreach A generate (int)$0 as a, (chararray)$1 as b;");
+        myPig.registerQuery("A1 = FILTER A by b matches '.*[a-zA-Z] *& *[a-zA-Z].*';");
+        myPig.registerQuery("A1 = FOREACH A1 generate a, REPLACE(b,'&','and')  as b;");
+        myPig.registerQuery("A = UNION A1, A;");
+        myPig.registerQuery("A = FOREACH A generate a, LOWER(b) as b;");
+        myPig.registerQuery("A2 = GROUP A by a;");
+        myPig.registerQuery("A2 = FOREACH A2 generate group, COUNT(A) as cnt;");
+        myPig.registerQuery("store A2 into 'output1' using mock.Storage();");
+        myPig.registerQuery("A = FILTER A BY b is not null and b != '';");
+        myPig.registerQuery("store A into 'output2' using mock.Storage();");
+
+        myPig.executeBatch();
+
+        List<Tuple> actualResults = data.get("output1");
+        List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
+                new String[] {"(1, 1L)", "(2, 1L)", "(3, 2L)"});
+        Util.checkQueryOutputsAfterSort(actualResults.iterator(), expectedResults);
+
+        actualResults = data.get("output2");
+        expectedResults = Util.getTuplesFromConstantTupleStrings(new String[] {
+                "(1, 'dyson')", "(2, 'miele')", "(3, 'black & decker')",
+                "(3, 'black and decker')" });
+        Util.checkQueryOutputsAfterSort(actualResults.iterator(), expectedResults);
+    }
+
+    @Test
+    public void testMultiQueryJiraPig4899() throws Exception {
+        myPig.setBatchOn();
+
+        myPig.registerQuery("a = load 'passwd' "
+                + "using PigStorage(':') as (uname:chararray, passwd:chararray, uid:int, gid:int);");
+        myPig.registerQuery("b1 = foreach a generate uname;");
+        myPig.registerQuery("b2 = foreach a generate uid;");
+        myPig.registerQuery("store b1 into 'output1';");
+        myPig.registerQuery("store b2 into 'output2';");
+
+        List<ExecJob> jobs = myPig.executeBatch();
+        for (ExecJob job : jobs) {
+            assertTrue(job.getStatus() == ExecJob.JOB_STATUS.COMPLETED);
+            List<InputStats> stats = job.getStatistics().getInputStats();
+            assertEquals(1,stats.size());
+            InputStats stat = stats.get(0);
+            assertEquals("Number of records in passwd file is 14",14,stat.getNumberRecords());
+        }
+    }
+
+    @Test
+    public void testMultiQueryJiraPig4883() throws Exception {
+        Storage.Data data = Storage.resetData(myPig);
+        data.set("inputLocation",
+                Storage.tuple("c", "12"), Storage.tuple("d", "-12"));
+        myPig.setBatchOn();
+        myPig.registerQuery("A = load 'inputLocation' using mock.Storage();");
+        myPig.registerQuery("A = foreach A generate (chararray)$0 as id, (long)$1 as val;");
+        myPig.registerQuery("B = filter A by val > 0;");
+        myPig.registerQuery("B1 = group B by val;");
+        myPig.registerQuery("B1 = foreach B1 generate group as name, COUNT(B) as value;");
+        myPig.registerQuery("B1 = foreach B1 generate (chararray)name,value;");
+        myPig.registerQuery("store B1 into 'output1' using mock.Storage();");
+        myPig.registerQuery("B2 = group B by id;");
+        myPig.registerQuery("B2 = foreach B2 generate group as name, COUNT(B) as value;");
+        myPig.registerQuery("store B2 into 'output2' using mock.Storage();");
+        myPig.registerQuery("C = filter A by val < 0;");
+        myPig.registerQuery("C1 = group C by val;");
+        myPig.registerQuery("C1 = foreach C1 generate group as name, COUNT(C) as value;");
+        myPig.registerQuery("store C1 into 'output3' using mock.Storage();");
+        myPig.registerQuery("C2 = group C by id;");
+        myPig.registerQuery("C2 = foreach C2 generate group as name, COUNT(C) as value;");
+        myPig.registerQuery("store C2 into 'output4' using mock.Storage();");
+        myPig.executeBatch();
+
+        List<Tuple> actualResults = data.get("output1");
+        String[] expectedResults = new String[]{"(12, 1)"};
+        Util.checkQueryOutputs(actualResults.iterator(), expectedResults, org.apache.pig.newplan
+                .logical.Util.translateSchema(myPig.dumpSchema("B1")), Util.isSparkExecType(Util.getLocalTestMode()));
+
+
+        actualResults = data.get("output2");
+        expectedResults = new String[]{"(c,1)"};
+        Util.checkQueryOutputs(actualResults.iterator(), expectedResults, org.apache.pig.newplan.logical.Util
+                .translateSchema(myPig.dumpSchema("B2")), Util.isSparkExecType(Util.getLocalTestMode()));
+
+        actualResults = data.get("output3");
+        expectedResults = new String[]{"(-12, 1)"};
+        Util.checkQueryOutputs(actualResults.iterator(), expectedResults, org.apache.pig.newplan.logical.Util
+                .translateSchema(myPig.dumpSchema("C1")), Util.isSparkExecType(Util.getLocalTestMode()));
+
+        actualResults = data.get("output4");
+        expectedResults = new String[]{"(d,1)"};
+        Util.checkQueryOutputs(actualResults.iterator(), expectedResults, org.apache.pig.newplan.logical.Util
+                .translateSchema(myPig.dumpSchema("C2")), Util.isSparkExecType(Util.getLocalTestMode()));
+    }
+
+    @Test
+    public void testMultiQueryJiraPig4548() throws Exception {
+        Storage.Data data = Storage.resetData(myPig);
+        data.set("inputLocation",
+                Storage.tuple("1", "f"),
+                Storage.tuple("2", "f"),
+                Storage.tuple("3", "f"),
+                Storage.tuple("4", "f"),
+                Storage.tuple("5", "f"),
+                Storage.tuple("6", "f"));
+        myPig.setBatchOn();
+        myPig.registerQuery("A = load 'inputLocation' using mock.Storage() as (f1:chararray, f2:chararray);");
+        myPig.registerQuery("SPLIT A into T if (f2 == 'T'), F otherwise;");
+        myPig.registerQuery("T2 = group T by f1;");
+        myPig.registerQuery("store T2 into 'output1' using mock.Storage();");
+        myPig.registerQuery("F2 = group F by f1;");
+        myPig.registerQuery("F3 = stream F2 through `" + simpleEchoStreamingCommand
+                            + "` as (group:chararray, F:bag{tuple(f1: chararray,f2: chararray)});");
+        myPig.registerQuery("store F3 into 'output2' using mock.Storage();");
+        myPig.executeBatch();
+
+        List<Tuple> actualResults = data.get("output1");
+        assertEquals("Number of records for output1 should be 0",0,actualResults.size());
+        actualResults = data.get("output2");
+        List<Tuple> expectedResults = Util.getTuplesFromConstantTupleStrings(
+                                         new String[]{"('1',{('1','f')})",
+                                                      "('2',{('2','f')})",
+                                                      "('3',{('3','f')})",
+                                                      "('4',{('4','f')})",
+                                                      "('5',{('5','f')})",
+                                                      "('6',{('6','f')})"});
+        Util.checkQueryOutputsAfterSort(actualResults.iterator(), expectedResults);
+    }
 
     // --------------------------------------------------------------------------
     // Helper methods

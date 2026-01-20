@@ -112,7 +112,9 @@ public class PORelationToExprProject extends POProject {
         }
         
         if(input.returnStatus!=POStatus.STATUS_OK) {
-            if(input.returnStatus == POStatus.STATUS_EOP && sendEmptyBagOnEOP)  {
+            if(input.returnStatus == POStatus.STATUS_NULL){
+                return input;
+            } else if (input.returnStatus == POStatus.STATUS_EOP && sendEmptyBagOnEOP)  {
                 // we received an EOP from the predecessor
                 // since the successor in the pipeline is
                 // expecting a bag, send an empty bag
@@ -138,9 +140,23 @@ public class PORelationToExprProject extends POProject {
         return(r);
     }
        
+    // See PIG-4644
     @Override
     public PORelationToExprProject clone() throws CloneNotSupportedException {
-        return (PORelationToExprProject) super.clone();
+        ArrayList<Integer> cols = new ArrayList<Integer>(columns.size());
+        // Can reuse the same Integer objects, as they are immutable
+        for (Integer i : columns) {
+            cols.add(i);
+        }
+        PORelationToExprProject clone = new PORelationToExprProject(new OperatorKey(mKey.scope,
+            NodeIdGenerator.getGenerator().getNextNodeId(mKey.scope)),
+            requestedParallelism, cols);
+        clone.cloneHelper(this);
+        clone.overloaded = overloaded;
+        clone.startCol = startCol;
+        clone.isProjectToEnd = isProjectToEnd;
+        clone.resultType = resultType;
+        clone.sendEmptyBagOnEOP = sendEmptyBagOnEOP;
+        return clone;
     }
-    
 }

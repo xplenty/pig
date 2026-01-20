@@ -23,6 +23,7 @@ options {
   STATIC = false;
   // Case is ignored in keywords
   IGNORE_CASE = true;
+  // DEBUG_PARSER = true;
   JAVA_UNICODE_ESCAPE = true;
 }
 
@@ -36,7 +37,7 @@ import java.util.List;
 import java.util.ArrayList;
 import org.apache.pig.impl.util.StringUtils;
 
-import jline.ConsoleReader;
+import jline.console.ConsoleReader;
 
 public abstract class PigScriptParser
 {
@@ -120,12 +121,23 @@ public abstract class PigScriptParser
 
 	abstract protected void processScript(String script, boolean batch, List<String> params, List<String> files) throws IOException, ParseException;
 
+    abstract protected void processDefault(String key, String value) throws IOException;
+
+    abstract protected void processDeclare(String key, String value) throws IOException;
+
 	static String unquote(String s)
 	{
 		if (s.charAt(0) == '\'' && s.charAt(s.length()-1) == '\'')
 			return s.substring(1, s.length()-1);
 		else
 			return s;
+	}
+	static boolean eolOrSemicolon(int kind) {
+	    if (kind == EOL || kind == SEMICOLON) {
+	        return true;
+	    } else {
+	        return false;
+	    }
 	}
 
 }
@@ -186,6 +198,8 @@ TOKEN: {<XML: "-xml">}
 TOKEN: {<OUT: "-out">}
 TOKEN: {<BRIEF: "-brief">}
 TOKEN: {<N: "-n">}
+TOKEN: {<PIGDEFAULT: "%default" >}
+TOKEN: {<DECLARE: "%declare" >} 
 
 // internal use commands
 TOKEN: {<SCRIPT_DONE: "scriptDone">}
@@ -211,7 +225,7 @@ TOKEN_MGR_DECLS : {
 		{
 			/*System.err.print(">> ");
 			System.err.flush();*/
-		    consoleReader.setDefaultPrompt(">> ");
+		    consoleReader.setPrompt(">> ");
 		}
 	}
 
@@ -247,11 +261,12 @@ TOKEN_MGR_DECLS : {
 {
     <"split"> : PIG_START
 |   <"define"> : PIG_START
-|	<"store"> : PIG_START
-|	<"import"> : PIG_START
-| 	<(["a"-"z", "A"-"Z"])+(["a"-"z", "A"-"Z"] | ["0"-"9"] | "_")*(" " | "\t")*"="> : PIG_START
+|   <"store"> : PIG_START
+|   <"assert"> : PIG_START
+|   <"import"> : PIG_START
+|   <(["a"-"z", "A"-"Z"])+(["a"-"z", "A"-"Z"] | ["0"-"9"] | "_")*(" " | "\t")*"="> : PIG_START
 |   <"=>" (" " | "\t")*> : PIG_START
-| 	< <IDENTIFIER> (" " | "\t")* ("," (" " | "\t")* <IDENTIFIER> )* (" " | "\t")* "="> : PIG_START
+|   < <IDENTIFIER> (" " | "\t")* ("," (" " | "\t")* <IDENTIFIER> )* (" " | "\t")* "="> : PIG_START
 |   < <IDENTIFIER> (" " | "\t")* "(" > : PIG_START
 }
 
@@ -260,7 +275,7 @@ TOKEN_MGR_DECLS : {
 	<"'"> {prevState = PIG_START;} : IN_STRING
 |	<"`"> {prevState = PIG_START;} : IN_COMMAND
 |	<(" " | "\t")+["A","a"]["S","s"](" " | "\t")+ > {prevState = PIG_START;} : SCHEMA_DEFINITION
-|   <(" " | "\t")+["G","g"]["E","e"]["N","n"]["E","e"]["R","r"]["A","a"]["T","t"]["E","e"](" " | "\t")+ > {prevState = PIG_START;} : GENERATE
+|   <(" " | "\t")+["G","g"]["E","e"]["N","n"]["E","e"]["R","r"]["A","a"]["T","t"]["E","e"](" " | "\t" | "\r" | "\n")+ > {prevState = PIG_START;} : GENERATE
 |       <"{"> {pigBlockLevel = 1;} : IN_BLOCK
 |       <"}"> {if (true) throw new TokenMgrError("Unmatched '}'", TokenMgrError.LEXICAL_ERROR);}
 |       <";"> : PIG_END
@@ -285,7 +300,8 @@ TOKEN_MGR_DECLS : {
 
 <IN_STRING> MORE :
 {
-	<"\\'">
+	<"\\\\">
+|	<"\\'">
 |	<"'"> { SwitchTo(prevState);}
 |	<("\n" | "\r" | "\r\n")> {secondary_prompt();}
 |	<(~[])>
@@ -314,6 +330,18 @@ TOKEN_MGR_DECLS : {
         saveState(prevState);
         prevState = GENERATE;
      } : SCHEMA_DEFINITION
+|   <"--">
+    {
+        prevState = getState(prevState);
+        saveState(prevState);
+        prevState = GENERATE;
+    } : SINGLE_LINE_COMMENT
+|      <"/*">
+    {
+        prevState = getState(prevState);
+        saveState(prevState);
+        prevState = GENERATE;
+    } : MULTI_LINE_COMMENT
 |   <"'">
     {
         prevState = getState(prevState);
@@ -336,7 +364,20 @@ TOKEN_MGR_DECLS : {
 <SCHEMA_DEFINITION> MORE :
 {
     <"("> {tupleSchemaLevel++;}
-|   <")"> {tupleSchemaLevel--; if ((tupleSchemaLevel == 0) && (bagSchemaLevel == 0)) SwitchTo(prevState); }
+|   <")">
+    {
+        if ((tupleSchemaLevel == 0) && (bagSchemaLevel == 0)) {
+        // This means parenthesis is not from this schema_def.
+        // Putting back ")" although others do not check parenthesis at this time.
+        // This is a bandaid workaround for the issue with inline-op which
+        // also uses parenthesis.
+        // Real fix would be to move out of using this javacc parser. (PIG-2597)
+            input_stream.backup(1);
+            image.deleteCharAt(image.length()-1);
+            SwitchTo(prevState);
+        }
+        tupleSchemaLevel--; if ((tupleSchemaLevel == 0) && (bagSchemaLevel == 0)) SwitchTo(prevState);
+    }
 |   <"{"> {bagSchemaLevel++;}
 |   <"}"> {bagSchemaLevel--; if ((tupleSchemaLevel == 0) && (bagSchemaLevel == 0)) SwitchTo(prevState); }
 |	<("," | ";" )>
@@ -363,7 +404,7 @@ TOKEN_MGR_DECLS : {
 {
 	<"\""> {prevState = IN_BLOCK;} : IN_DOUBLE_QUOTED_STRING
 |	<(" " | "\t")+["A","a"]["S","s"](" " | "\t")+ > {prevState = IN_BLOCK;} : SCHEMA_DEFINITION
-|   <(" " | "\t")+["G","g"]["E","e"]["N","n"]["E","e"]["R","r"]["A","a"]["T","t"]["E","e"](" " | "\t")+> {prevState = IN_BLOCK;} : GENERATE
+|   <(" " | "\t")+["G","g"]["E","e"]["N","n"]["E","e"]["R","r"]["A","a"]["T","t"]["E","e"](" " | "\t" | "\r" | "\n")+> {prevState = IN_BLOCK;} : GENERATE
 |	<"{"> {pigBlockLevel++;}
 |       <"}"(";")?> {pigBlockLevel--; if (pigBlockLevel == 0) SwitchTo(PIG_END);}
 |	<"'"> {prevState = IN_BLOCK;} : IN_STRING
@@ -419,6 +460,7 @@ TOKEN : { <QUOTEDSTRING :  "'"
           )
       )*
       "'"> }
+TOKEN: {<SHELLCMD: "`" (~["`"])* "`" >}
 void parse() throws IOException:
 {
 	Token t1, t2, t3;
@@ -591,11 +633,21 @@ void parse() throws IOException:
 	<SET>
 	(
 		t1 = GetKey()
-		t2 = GetValue()
-		{processSet(t1.image, unquote(t2.image));}
+		t2 = GetValueOrNull()
+        {processSet(t1.image, eolOrSemicolon(t2.kind)?null:unquote(t2.image));}
     	|
 		{processSet();}
 	)
+	|
+    <PIGDEFAULT>
+	t1 = GetKey()
+	t2 = GetDefaultValue()
+	{processDefault(t1.image, t2.image);}
+	|
+	<DECLARE>
+	t1 = GetKey()
+	t2 = GetDefaultValue()
+	{processDeclare(t1.image, t2.image);}
 	|
 	<EOF>
 	{quit();}
@@ -783,6 +835,22 @@ Token GetKey() :
 	{return t;}
 }
 
+Token GetValueOrNull() :
+{
+	Token t;
+}
+{
+	(
+	t = GetValue()
+	|
+	t = <EOL>
+	|
+	t = <SEMICOLON>
+	)
+
+	{return t;}
+}
+
 Token GetValue() :
 {
 	Token t;
@@ -792,6 +860,22 @@ Token GetValue() :
 	t = GetPath()
 	|
 	t = <QUOTEDSTRING>
+	)
+
+	{return t;}
+}
+
+Token GetDefaultValue() :
+{
+	Token t;
+}
+{
+	(
+	t = GetPath()
+	|
+	t = <QUOTEDSTRING>
+	|
+	t = <SHELLCMD>
 	)
 
 	{return t;}

@@ -17,6 +17,7 @@
  */
 package org.apache.pig.scripting;
 
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.StringReader;
@@ -31,8 +32,8 @@ import java.util.concurrent.Future;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.pig.PigServer;
 import org.apache.pig.PigRunner.ReturnCode;
+import org.apache.pig.PigServer;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.tools.grunt.GruntParser;
 import org.apache.pig.tools.pigscript.parser.ParseException;
@@ -45,41 +46,41 @@ import org.apache.pig.tools.pigstats.ScriptState;
  * This represents an instance of a bound pipeline.
  */
 public class BoundScript {
-    
+
     private static final Log LOG = LogFactory.getLog(BoundScript.class);
-    
+
     private List<String> queries = new ArrayList<String>();
 
     private String name = null;
-   
+
     private ScriptPigContext scriptContext = null;
-    
+
     BoundScript(String query, ScriptPigContext scriptContext, String name) {
         this.queries.add(query);
         this.scriptContext = scriptContext;
-        this.name = name;               
+        this.name = name;
     }
-    
+
     BoundScript(List<String> queries, ScriptPigContext scriptContext,
             String name) {
         this.queries.addAll(queries);
         this.scriptContext = ScriptPigContext.get();
-        this.name = name;        
+        this.name = name;
     }
-    
+
     /**
-     * Run a pipeline on Hadoop.  
-     * If there are no stores in this pipeline then nothing will be run. 
+     * Run a pipeline on Hadoop.
+     * If there are no stores in this pipeline then nothing will be run.
      * @return {@link PigStats}, null if there is no bound query to run.
      * @throws IOException
      */
     public PigStats runSingle() throws IOException {
         return runSingle((Properties)null);
     }
-     
+
     /**
-     * Run a pipeline on Hadoop.  
-     * If there are no stores in this pipeline then nothing will be run.  
+     * Run a pipeline on Hadoop.
+     * If there are no stores in this pipeline then nothing will be run.
      * @param prop Map of properties that Pig should set when running the script.
      * This is intended for use with scripting languages that do not support
      * the Properties object.
@@ -98,14 +99,14 @@ public class BoundScript {
         if (prop != null) {
             scriptContext.getPigContext().getProperties().putAll(prop);
         }
-        PigStats ret = exec(queries.get(0)); 
+        PigStats ret = exec(queries.get(0));
         setPigStats(ret);
         return ret;
     }
-    
+
     /**
-     * Run a pipeline on Hadoop.  
-     * If there are no stores in this pipeline then nothing will be run.  
+     * Run a pipeline on Hadoop.
+     * If there are no stores in this pipeline then nothing will be run.
      * @param propfile File with properties that Pig should set when running the script.
      * @return {@link PigStats}, null if there is no bound query to run.
      * @throws IOException
@@ -123,17 +124,17 @@ public class BoundScript {
     }
 
     /**
-     * Run multiple instances of bound pipeline on Hadoop in parallel.  
-     * If there are no stores in this pipeline then nothing will be run.  
-     * Bind is called first with the list of maps of variables to bind. 
+     * Run multiple instances of bound pipeline on Hadoop in parallel.
+     * If there are no stores in this pipeline then nothing will be run.
+     * Bind is called first with the list of maps of variables to bind.
      * @return a list of {@link PigStats}, one for each map of variables passed
      * to bind.
      * @throws IOException
-     */    
-    public List<PigStats> run() throws IOException {    
+     */
+    public List<PigStats> run() throws IOException {
         return run((Properties)null);
     }
-    
+
     /**
      * Run multiple instances of bound pipeline on Hadoop in parallel.
      * @param prop Map of properties that Pig should set when running the script.
@@ -148,7 +149,7 @@ public class BoundScript {
         if (queries.isEmpty()) {
             LOG.info("No bound query to run.");
             return stats;
-        } 
+        }
         if (queries.size() == 1) {
             PigStats ps = runSingle();
             stats.add(ps);
@@ -157,20 +158,20 @@ public class BoundScript {
         if (prop != null) {
             scriptContext.getPigContext().getProperties().putAll(prop);
         }
-        List<PigProgressNotificationListener> listeners 
+        List<PigProgressNotificationListener> listeners
             = ScriptState.get().getAllListeners();
-        SyncProgressNotificationAdaptor adaptor 
+        SyncProgressNotificationAdaptor adaptor
             = new SyncProgressNotificationAdaptor(listeners);
         List<Future<PigStats>> futures = new ArrayList<Future<PigStats>>();
         ExecutorService executor = Executors.newFixedThreadPool(queries.size());
-        for (int i=0; i<queries.size(); i++) {          
+        for (int i=0; i<queries.size(); i++) {
             Properties props = new Properties();
             props.putAll(scriptContext.getPigContext().getProperties());
             PigContext ctx = new PigContext(scriptContext.getPigContext().getExecType(), props);
             MyCallable worker = new MyCallable(queries.get(i), ctx, adaptor);
             Future<PigStats> submit = executor.submit(worker);
             futures.add(submit);
-        }           
+        }
         for (Future<PigStats> future : futures) {
             try {
                 stats.add(future.get());
@@ -178,23 +179,23 @@ public class BoundScript {
                 LOG.error("Pig pipeline failed to complete", e);
                 PigStatsUtil.getEmptyPigStats();
                 PigStatsUtil.setErrorMessage(e.getMessage());
-                PigStats failed = PigStatsUtil.getPigStats(ReturnCode.FAILURE);                    
+                PigStats failed = PigStatsUtil.getPigStats(ReturnCode.FAILURE);
                 stats.add(failed);
             } catch (ExecutionException e) {
                 LOG.error("Pig pipeline failed to complete", e);
                 PigStatsUtil.getEmptyPigStats();
-                PigStatsUtil.setErrorMessage(e.getMessage());                  
-                PigStats failed = PigStatsUtil.getPigStats(ReturnCode.FAILURE);                    
+                PigStatsUtil.setErrorMessage(e.getMessage());
+                PigStats failed = PigStatsUtil.getPigStats(ReturnCode.FAILURE);
                 stats.add(failed);
             }
         }
-    
+
         if (!stats.isEmpty()) {
             setPigStats(stats);;
         }
         return stats;
     }
-    
+
     /**
      * Run multiple instances of bound pipeline on Hadoop in parallel.
      * @param propfile File with properties that Pig should set when running the script.
@@ -210,12 +211,12 @@ public class BoundScript {
             prop.load(fin);
         } finally {
             if (fin != null) fin.close();
-        }        
+        }
         return run(prop);
     }
 
     /**
-     * Run illustrate for this pipeline.  Results will be printed to stdout.  
+     * Run illustrate for this pipeline.  Results will be printed to stdout.
      * @throws IOException if illustrate fails.
      */
     public void illustrate() throws IOException {
@@ -224,7 +225,7 @@ public class BoundScript {
             return;
         }
         PigServer pigServer = new PigServer(scriptContext.getPigContext(), false);
-        registerQuery(pigServer, queries.get(0));
+        registerQueryForDiagnostics(pigServer, queries.get(0));
         pigServer.getExamples(null);
     }
 
@@ -238,7 +239,7 @@ public class BoundScript {
             return;
         }
         PigServer pigServer = new PigServer(scriptContext.getPigContext(), false);
-        registerQuery(pigServer, queries.get(0));
+        registerQueryForDiagnostics(pigServer, queries.get(0));
         pigServer.explain(null, System.out);
     }
 
@@ -254,48 +255,52 @@ public class BoundScript {
             return;
         }
         PigServer pigServer = new PigServer(scriptContext.getPigContext(), false);
-        registerQuery(pigServer, queries.get(0));
-        pigServer.dumpSchema(alias);        
+        registerQueryForDiagnostics(pigServer, queries.get(0));
+        pigServer.dumpSchema(alias);
     }
 
-    //-------------------------------------------------------------------------      
+    //-------------------------------------------------------------------------
 
     private PigStats exec(String query) throws IOException {
         LOG.info("Query to run:\n" + query);
-        List<PigProgressNotificationListener> listeners = ScriptState.get()
-                .getAllListeners();
-        ScriptState.start("embedded", scriptContext.getPigContext());
+        List<PigProgressNotificationListener> listeners = ScriptState.get().getAllListeners();
+        PigContext pc = scriptContext.getPigContext();
+        String scriptName = new File(ScriptState.get().getFileName()).getName();
+        ScriptState scriptState = pc.getExecutionEngine().instantiateScriptState();
+        scriptState.setFileName(scriptName);
+        ScriptState.start(scriptState);
         ScriptState.get().setScript(query);
         for (PigProgressNotificationListener listener : listeners) {
             ScriptState.get().registerListener(listener);
         }
         PigServer pigServer = new PigServer(scriptContext.getPigContext(), false);
-        pigServer.setBatchOn();
-        GruntParser grunt = new GruntParser(new StringReader(query));
+        if (!pigServer.getPigContext().getProperties().containsKey("jobName")) {
+            pigServer.setJobName(scriptName);
+        }
+        GruntParser grunt = new GruntParser(new StringReader(query), pigServer);
         grunt.setInteractive(false);
-        grunt.setParams(pigServer);
         try {
-            grunt.parseStopOnError(true);
+            grunt.parseStopOnError(false);
         } catch (ParseException e) {
             throw new IOException("Failed to parse script " + e.getMessage(), e);
         }
-        pigServer.executeBatch();
         return PigStats.get();
     }
-        
-    private void registerQuery(PigServer pigServer, String pl) throws IOException {                
-        GruntParser grunt = new GruntParser(new StringReader(pl));
+
+    private void registerQueryForDiagnostics(PigServer pigServer, String pl) throws IOException {
+        GruntParser grunt = new GruntParser(new StringReader(pl), pigServer);
         grunt.setInteractive(false);
-        grunt.setParams(pigServer);
+        // We want parsing to happen in batch. But no execution as this is for diagnostics
         pigServer.setBatchOn();
-        try {
+        pigServer.setSkipParseInRegisterForBatch(true);
+      try {
             grunt.parseStopOnError(true);
         } catch (ParseException e) {
             throw new IOException("Failed to parse query: " + pl, e);
         }
     }
-    
-    private void setPigStats(PigStats stats) {        
+
+    private void setPigStats(PigStats stats) {
         ScriptEngine engine = scriptContext.getScriptEngine();
         if (name != null) {
             engine.setPigStats(name, stats);
@@ -305,47 +310,46 @@ public class BoundScript {
     }
 
     private void setPigStats(List<PigStats> lst) {
-        if (lst == null || lst.isEmpty()) return;        
+        if (lst == null || lst.isEmpty()) return;
         String key = (name != null) ? name : this.toString();
         ScriptEngine engine = scriptContext.getScriptEngine();
         for (PigStats stats : lst) {
             engine.setPigStats(key, stats);
-        } 
+        }
     }
-        
+
     //-------------------------------------------------------------------------
-    
+
     private class MyCallable implements Callable<PigStats> {
-        
+
         private String query = null;
         private PigContext ctx = null;
         private PigProgressNotificationListener adaptor;
-        
+
         public MyCallable(String pl, PigContext ctx, PigProgressNotificationListener adaptor) {
             query = pl;
             this.ctx = ctx;
             this.adaptor = adaptor;
         }
-        
+
         @Override
         public PigStats call() throws Exception {
-            LOG.info("Query to run:\n" + query);          
-            ScriptState.start("embedded", scriptContext.getPigContext());
+            LOG.info("Query to run:\n" + query);
+            PigContext pc = scriptContext.getPigContext();
+            ScriptState scriptState = pc.getExecutionEngine().instantiateScriptState();
+            ScriptState.start(scriptState);
             ScriptState.get().setScript(query);
             ScriptState.get().registerListener(adaptor);
             PigServer pigServer = new PigServer(ctx, true);
-            pigServer.setBatchOn();
-            GruntParser grunt = new GruntParser(new StringReader(query));
+            GruntParser grunt = new GruntParser(new StringReader(query), pigServer);
             grunt.setInteractive(false);
-            grunt.setParams(pigServer);
             try {
-                grunt.parseStopOnError(true);
+                grunt.parseStopOnError(false);
             } catch (ParseException e) {
                 throw new IOException("Failed to parse script", e);
             }
-            pigServer.executeBatch();
             return PigStats.get();
         }
     }
-          
+
 }

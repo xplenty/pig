@@ -45,7 +45,7 @@ import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.util.Utils;
-import org.apache.pig.newplan.FilterExtractor;
+import org.apache.pig.newplan.PartitionFilterExtractor;
 import org.apache.pig.newplan.Operator;
 import org.apache.pig.newplan.OperatorPlan;
 import org.apache.pig.newplan.logical.expression.AndExpression;
@@ -57,10 +57,13 @@ import org.apache.pig.newplan.logical.expression.EqualExpression;
 import org.apache.pig.newplan.logical.expression.IsNullExpression;
 import org.apache.pig.newplan.logical.expression.LogicalExpression;
 import org.apache.pig.newplan.logical.expression.MapLookupExpression;
+import org.apache.pig.newplan.logical.expression.NotEqualExpression;
+import org.apache.pig.newplan.logical.expression.NotExpression;
 import org.apache.pig.newplan.logical.expression.OrExpression;
 import org.apache.pig.newplan.logical.expression.ProjectExpression;
 import org.apache.pig.newplan.logical.optimizer.LogicalPlanOptimizer;
 import org.apache.pig.newplan.logical.relational.LOFilter;
+import org.apache.pig.newplan.logical.relational.LogToPhyTranslationVisitor;
 import org.apache.pig.newplan.logical.relational.LogicalPlan;
 import org.apache.pig.newplan.logical.rules.LoadTypeCastInserter;
 import org.apache.pig.newplan.logical.rules.PartitionFilterOptimizer;
@@ -119,6 +122,17 @@ public class TestNewPartitionFilterPushDown {
         test(q, Arrays.asList("srcid", "mrkt"),
                 "((srcid > 20) and (mrkt == 'us'))", null);
 
+    }
+
+    /**
+     * test case where filter only contains condition on partition cols
+     * @throws Exception
+     */
+    @Test
+    public void testPartIsNullFilter() throws Exception {
+        String q = query + "b = filter a by srcid is null;" + "store b into 'out';";
+        test(q, Arrays.asList("srcid"),
+                null, "(srcid is null)");
     }
 
     /**
@@ -453,9 +467,8 @@ public class TestNewPartitionFilterPushDown {
             Operator op = newLogicalPlan.getSinks().get(0);
             LOFilter filter = (LOFilter)newLogicalPlan.getPredecessors(op).get(0);
 
-            String actual =
-                    FilterExtractor.getExpression((LogicalExpression) filter.getFilterPlan().
-                            getSources().get(0)).toString();
+            String actual = new PartitionFilterExtractor(null, new ArrayList<String>())
+                    .getExpression((LogicalExpression) filter.getFilterPlan().getSources().get(0)).toString();
             Assert.assertEquals("checking trimmed filter expression:",
                     filterExpr, actual);
         } else {
@@ -466,6 +479,10 @@ public class TestNewPartitionFilterPushDown {
                         (it.next() instanceof LOFilter));
             }
         }
+
+        // Test that the filtered plan can be translated to physical plan (PIG-3657)
+        LogToPhyTranslationVisitor translator = new LogToPhyTranslationVisitor(newLogicalPlan);
+        translator.visit();
     }
 
     /**
@@ -671,31 +688,57 @@ public class TestNewPartitionFilterPushDown {
         negativeTest(q, Arrays.asList("srcid", "mrkt", "dstid"));
     }
 
+    // PIG-3657
+    @Test
+    public void testFilteredPlanWithLogToPhyTranslator() throws Exception {
+        String q = "a = load 'foo' using " + TestLoader.class.getName() +
+                "('srcid:int, mrkt:chararray', 'srcid') as (f1, f2);" +
+                "b = filter a by (f1 < 5 or (f1 == 10 and f2 == 'UK'));" +
+                "store b into 'out';";
+        testFull(q, "((srcid < 5) or (srcid == 10))", "((f1 < 5) or (f2 == 'UK'))", false);
+    }
+
+    // PIG-4940
+    @Test
+    public void testUnaryExpressions() throws Exception {
+        String q = query + "b = filter a by srcid == 10 and not browser#'type' is null;" +
+                "store b into 'out';";
+        test(q, Arrays.asList("srcid"), "(srcid == 10)",
+                "(not (browser#'type' is null))", true);
+    }
+
+    @Test
+    public void testNegativeOrAndOr() throws Exception {
+        String q = query + "b = filter a by dstid != 10 OR ((dstid < 3000 and srcid == 1000) OR (dstid >= 3000 and srcid == 2000));" +
+                   "store b into 'out';";
+        test(q, Arrays.asList("srcid"), null, "((dstid != 10) or (((dstidLessThan3000) and (srcid == 1000)) or ((dstidGreaterThanEqual3000) and (srcid == 2000))))", true);
+    }
+
     //// helper methods ///////
-    private FilterExtractor test(String query, List<String> partitionCols,
+    private PartitionFilterExtractor test(String query, List<String> partitionCols,
             String expPartFilterString, String expFilterString)
                     throws Exception {
         return test(query, partitionCols, expPartFilterString, expFilterString, false);
     }
 
-    private FilterExtractor test(String query, List<String> partitionCols,
+    private PartitionFilterExtractor test(String query, List<String> partitionCols,
             String expPartFilterString, String expFilterString, boolean unsupportedExpression)
                     throws Exception {
         PigServer pigServer = new PigServer( pc );
         LogicalPlan newLogicalPlan = Util.buildLp(pigServer, query);
         Operator op = newLogicalPlan.getSinks().get(0);
         LOFilter filter = (LOFilter)newLogicalPlan.getPredecessors(op).get(0);
-        FilterExtractor pColExtractor = new FilterExtractor(
+        PartitionFilterExtractor pColExtractor = new PartitionFilterExtractor(
                 filter.getFilterPlan(), partitionCols);
         pColExtractor.visit();
 
         if(expPartFilterString == null) {
             Assert.assertEquals("Checking partition column filter:", null,
-                    pColExtractor.getPColCondition());
+                    pColExtractor.getPushDownExpression());
         } else  {
             Assert.assertEquals("Checking partition column filter:",
                     expPartFilterString,
-                    pColExtractor.getPColCondition().toString());
+                    pColExtractor.getPushDownExpression().toString());
         }
 
         if (expFilterString == null) {
@@ -706,7 +749,7 @@ public class TestNewPartitionFilterPushDown {
                 String actual = getTestExpression((LogicalExpression)pColExtractor.getFilteredPlan().getSources().get(0)).toString();
                 Assert.assertEquals("checking trimmed filter expression:", expFilterString, actual);
             } else {
-                String actual = FilterExtractor.getExpression((LogicalExpression)pColExtractor.getFilteredPlan().getSources().get(0)).toString();
+                String actual = pColExtractor.getExpression((LogicalExpression)pColExtractor.getFilteredPlan().getSources().get(0)).toString();
                 Assert.assertEquals("checking trimmed filter expression:", expFilterString, actual);
             }
         }
@@ -720,7 +763,7 @@ public class TestNewPartitionFilterPushDown {
         LogicalPlan newLogicalPlan = Util.buildLp(pigServer, query);
         Operator op = newLogicalPlan.getSinks().get(0);
         LOFilter filter = (LOFilter)newLogicalPlan.getPredecessors(op).get(0);
-        FilterExtractor extractor = new FilterExtractor(
+        PartitionFilterExtractor extractor = new PartitionFilterExtractor(
                 filter.getFilterPlan(), partitionCols);
         extractor.visit();
         Assert.assertFalse(extractor.canPushDown());
@@ -793,12 +836,13 @@ public class TestNewPartitionFilterPushDown {
             super( p, iterations, new HashSet<String>() );
         }
 
+        @Override
         protected List<Set<Rule>> buildRuleSets() {
             List<Set<Rule>> ls = new ArrayList<Set<Rule>>();
 
             Set<Rule> s = new HashSet<Rule>();
             // add split filter rule
-            Rule r = new PartitionFilterOptimizer("NewPartitionFilterPushDown");
+            Rule r = new PartitionFilterOptimizer("PartitionFilterPushDown");
             s = new HashSet<Rule>();
             s.add(r);
             ls.add(s);
@@ -834,7 +878,7 @@ public class TestNewPartitionFilterPushDown {
         return "(" + input + ")";
     }
 
-    private static String getTestExpression(LogicalExpression op) throws FrontendException {
+    public static String getTestExpression(LogicalExpression op) throws FrontendException {
         if(op == null) {
             return null;
         }
@@ -856,6 +900,8 @@ public class TestNewPartitionFilterPushDown {
                     opStr = " and ";
                 } else if (op instanceof OrExpression) {
                     opStr = " or ";
+                } else if (op instanceof NotEqualExpression) {
+                    opStr = " != ";
                 } else {
                     opStr = op.getName();
                 }
@@ -875,6 +921,9 @@ public class TestNewPartitionFilterPushDown {
                 int colind = ((DereferenceExpression) op).getBagColumns().get(0);
                 String column = String.valueOf(colind);
                 return alias + ".$" + column;
+            } else if (op instanceof NotExpression) {
+                String expr = getTestExpression(((NotExpression) op).getExpression());
+                return braketize("not " + expr);
             } else {
                 throw new FrontendException("Unsupported conversion of LogicalExpression to Expression: " + op.getName());
             }

@@ -17,9 +17,9 @@
  */
 package org.apache.pig.data;
 
-import static junit.framework.Assert.assertEquals;
 import static org.apache.pig.builtin.mock.Storage.resetData;
 import static org.apache.pig.builtin.mock.Storage.tuple;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -52,6 +52,7 @@ import org.apache.pig.PigConfiguration;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.datastorage.ConfigurationUtil;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRConfiguration;
 import org.apache.pig.backend.hadoop.executionengine.shims.HadoopShims;
 import org.apache.pig.builtin.mock.Storage.Data;
 import org.apache.pig.data.SchemaTupleClassGenerator.GenContext;
@@ -77,7 +78,7 @@ public class TestSchemaTuple {
     @Before
     public void perTestInitialize() {
         props = new Properties();
-        props.setProperty(PigConfiguration.SHOULD_USE_SCHEMA_TUPLE, "true");
+        props.setProperty(PigConfiguration.PIG_SCHEMA_TUPLE_ENABLED, "true");
 
         conf = ConfigurationUtil.toConfiguration(props);
 
@@ -533,10 +534,10 @@ public class TestSchemaTuple {
         writer.close(null);
 
         Configuration conf = new Configuration();
-        conf.set("fs.default.name", "file:///");
+        conf.set("fs.defaultFS", "file:///");
 
         TaskAttemptID taskId = HadoopShims.createTaskAttemptID("jt", 1, true, 1, 1);
-        conf.set("mapred.task.id", taskId.toString());
+        conf.set(MRConfiguration.TASK_ID, taskId.toString());
 
         InputSplit is = new FileSplit(new Path(temp.getAbsolutePath()), 0, temp.length(), null);
 
@@ -598,33 +599,33 @@ public class TestSchemaTuple {
         Data data = resetData(pigServer);
 
         data.set("foo1",
-            tuple(0),
-            tuple(1),
-            tuple(2),
-            tuple(3),
-            tuple(4),
-            tuple(5),
-            tuple(6),
-            tuple(7),
-            tuple(8),
-            tuple(9)
+            tuple(0, 0),
+            tuple(1, 1),
+            tuple(2, 2),
+            tuple(3, 3),
+            tuple(4, 4),
+            tuple(5, 5),
+            tuple(6, 6),
+            tuple(7, 7),
+            tuple(8, 8),
+            tuple(9, 9)
             );
 
         data.set("foo2",
-            tuple(0),
-            tuple(1),
-            tuple(2),
-            tuple(3),
-            tuple(4),
-            tuple(5),
-            tuple(6),
-            tuple(7),
-            tuple(8),
-            tuple(9)
+            tuple(0, 0),
+            tuple(1, 1),
+            tuple(2, 2),
+            tuple(3, 3),
+            tuple(4, 4),
+            tuple(5, 5),
+            tuple(6, 6),
+            tuple(7, 7),
+            tuple(8, 8),
+            tuple(9, 9)
             );
 
-        pigServer.registerQuery("A = LOAD 'foo1' USING mock.Storage() as (x:int);");
-        pigServer.registerQuery("B = LOAD 'foo2' USING mock.Storage() as (x:int);");
+        pigServer.registerQuery("A = LOAD 'foo1' USING mock.Storage() as (x:int, y:int);");
+        pigServer.registerQuery("B = LOAD 'foo2' USING mock.Storage() as (x:int, y:int);");
         if (preSort) {
             pigServer.registerQuery("A = ORDER A BY x ASC;");
             pigServer.registerQuery("B = ORDER B BY x ASC;");
@@ -637,20 +638,24 @@ public class TestSchemaTuple {
             if (!out.hasNext()) {
                 throw new Exception("Output should have had more elements! Failed on element: " + i);
             }
-            assertEquals(tuple(i, i), out.next());
+            assertEquals(tuple(i, i, i, i), out.next());
         }
         assertFalse(out.hasNext());
 
-        pigServer.registerQuery("STORE D INTO 'bar' USING mock.Storage();");
+        pigServer.registerQuery("STORE D INTO 'bar1' USING mock.Storage();");
+        pigServer.registerQuery("E = JOIN A by (x, y),  B by (x, y) using '"+joinType+"';");
+        pigServer.registerQuery("F = ORDER E BY $0 ASC;");
+        pigServer.registerQuery("STORE F INTO 'bar2' USING mock.Storage();");
 
-        List<Tuple> tuples = data.get("bar");
+        List<Tuple> bar1 = data.get("bar1");
+        List<Tuple> bar2 = data.get("bar2");
 
-        if (tuples.size() != 10) {
-            throw new Exception("Output does not have enough elements! List: " + tuples);
-        }
+        assertEquals("Output does not have enough elements! List: " + bar1, 10, bar1.size());
+        assertEquals("Output does not have enough elements! List: " + bar2, 10, bar2.size());
 
         for (int i = 0; i < 10; i++) {
-            assertEquals(tuple(i, i), tuples.get(i));
+            assertEquals(tuple(i, i, i, i), bar1.get(i));
+            assertEquals(tuple(i, i, i, i), bar2.get(i));
         }
 
     }

@@ -22,6 +22,8 @@ import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigMapReduce
 import org.apache.pig.classification.InterfaceAudience;
 import org.apache.pig.classification.InterfaceStability;
 
+import java.io.Serializable;
+
 /**
  * Class to hold code common to self spilling bags such as InternalCachedBag
  */
@@ -29,6 +31,7 @@ import org.apache.pig.classification.InterfaceStability;
 @InterfaceStability.Evolving
 public abstract class SelfSpillBag extends DefaultAbstractBag {
     private static final long serialVersionUID = 1L;
+    // SelfSpillBag$MemoryLimits is not serializable
     protected MemoryLimits memLimit;
 
     public SelfSpillBag(int bagCount) {
@@ -47,15 +50,29 @@ public abstract class SelfSpillBag extends DefaultAbstractBag {
      * The number of objects that will fit into this memory limit is computed
      * using the average memory size of the objects whose size is given to this
      * class.
+     * In spark mode, MemoryLimits needs implement Serializable interface otherwise NotSerializableExecption will be thrown (See PIG-4611)
      */
     @InterfaceAudience.Private
     @InterfaceStability.Evolving
-    public static class MemoryLimits {
+    public static class MemoryLimits implements Serializable {
 
         private long maxMemUsage;
-        private int cacheLimit = Integer.MAX_VALUE;
+        private long cacheLimit = Integer.MAX_VALUE;
         private long memUsage = 0;
         private long numObjsSizeChecked = 0;
+
+        private static float cachedMemUsage = 0.2F;
+        private static long maxMem = 0;
+        static {
+            maxMem = Runtime.getRuntime().maxMemory();
+            if (PigMapReduce.sJobConfInternal.get() != null) {
+                String usage = PigMapReduce.sJobConfInternal.get().get(
+                        PigConfiguration.PIG_CACHEDBAG_MEMUSAGE);
+                if (usage != null) {
+                    cachedMemUsage = Float.parseFloat(usage);
+                }
+            }
+        }
 
         /**
          * @param bagCount
@@ -68,18 +85,10 @@ public abstract class SelfSpillBag extends DefaultAbstractBag {
         private void init(int bagCount, float percent) {
 
             if (percent < 0) {
-                percent = 0.2F;
-                if (PigMapReduce.sJobConfInternal.get() != null) {
-                    String usage = PigMapReduce.sJobConfInternal.get().get(
-                            PigConfiguration.PROP_CACHEDBAG_MEMUSAGE);
-                    if (usage != null) {
-                        percent = Float.parseFloat(usage);
-                    }
-                }
+                percent = cachedMemUsage;
             }
 
-            long max = Runtime.getRuntime().maxMemory();
-            maxMemUsage = (long) ((max * percent) / bagCount);
+            maxMemUsage = (long) ((maxMem * percent) / bagCount);
 
             // set limit to 0, if memusage is 0 or really really small.
             // then all tuples are put into disk
@@ -94,11 +103,11 @@ public abstract class SelfSpillBag extends DefaultAbstractBag {
          * 
          * @return number of objects limit
          */
-        public int getCacheLimit() {
+        public long getCacheLimit() {
             if (numObjsSizeChecked > 0) {
                 long avgUsage = memUsage / numObjsSizeChecked;
                 if (avgUsage > 0) {
-                    cacheLimit = (int) (maxMemUsage / avgUsage);
+                    cacheLimit = maxMemUsage / avgUsage;
                 }
             }
             return cacheLimit;

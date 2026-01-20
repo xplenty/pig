@@ -48,9 +48,15 @@ public class PigConstants {
     public static final String PIG_OPTIMIZER_RULES_DISABLED_KEY = "pig.optimizer.rules.disabled";
 
     /**
-     * flag to use old PartitionFilterOptimizer in case NewPartitionFilterOptimizer is not backwards compatible
-     * (A known case is "filter a by 1 == 0").
+     * Prefix used by pig to configure local mode configuration
      */
-    public static final String PIG_EXEC_OLD_PART_FILTER_OPTIMIZER = "pig.exec.useOldPartitionFilterOptimizer";
+    public static final String PIG_LOCAL_CONF_PREFIX = "pig.local.";
 
+    /**
+     * Counter names used by pig.udf.profile
+     */
+    public static final String TIME_UDFS_INVOCATION_COUNTER = "approx_invocations";
+    public static final String TIME_UDFS_ELAPSED_TIME_COUNTER = "approx_microsecs";
+
+    public static final String TASK_INDEX = "mapreduce.task.index";
 }

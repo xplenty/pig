@@ -55,16 +55,24 @@ public class NullablePartitionWritable extends PigNullableWritable{
 		return partitionIndex;
 	}
 
-  	@Override
+    @Override
+    public NullablePartitionWritable clone() throws CloneNotSupportedException {
+        NullablePartitionWritable clone = new NullablePartitionWritable();
+        clone.setKey(this.getKey());
+        clone.partitionIndex = this.partitionIndex;
+        return clone;
+    }
+
+    @Override
     public int compareTo(Object o) {
 		return key.compareTo(((NullablePartitionWritable)o).getKey());
 	}
 
 	@Override
     public void readFields(DataInput in) throws IOException {
-		String c = in.readUTF();
+		byte type = in.readByte();
 		try {
-			key = HDataType.getWritableComparable(c);
+			key = HDataType.getNewWritableComparable(type);
 		} catch(Exception e) {
 			throw new IOException(e);
 		}
@@ -73,7 +81,7 @@ public class NullablePartitionWritable extends PigNullableWritable{
 
 	@Override
     public void write(DataOutput out) throws IOException {
-		out.writeUTF(key.getClass().getName());
+		out.writeByte(HDataType.findTypeFromClassName(key.getClass().getName()));
 		key.write(out);
 	}
 

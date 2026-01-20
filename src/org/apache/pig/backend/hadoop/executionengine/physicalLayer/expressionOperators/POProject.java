@@ -21,19 +21,16 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-
 import org.apache.pig.PigException;
 import org.apache.pig.PigWarning;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
-import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.SingleTupleBag;
 import org.apache.pig.data.Tuple;
-import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.plan.NodeIdGenerator;
 import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
@@ -52,10 +49,6 @@ public class POProject extends ExpressionOperator {
      */
     private static final long serialVersionUID = 1L;
 
-    private static TupleFactory tupleFactory = TupleFactory.getInstance();
-
-    protected static final BagFactory bagFactory = BagFactory.getInstance();
-
     private boolean resultSingleTupleBag = false;
 
     //The column to project
@@ -63,20 +56,20 @@ public class POProject extends ExpressionOperator {
 
     //True if we are in the middle of streaming tuples
     //in a bag
-    boolean processingBagOfTuples = false;
+    private boolean processingBagOfTuples = false;
 
     //The bag iterator used while straeming tuple
-    transient Iterator<Tuple> bagIterator = null;
+    private transient Iterator<Tuple> bagIterator = null;
 
     //Represents the fact that this instance of POProject
     //is overloaded to stream tuples in the bag rather
     //than passing the entire bag. It is the responsibility
     //of the translator to set this.
-    boolean overloaded = false;
+    protected boolean overloaded = false;
 
 
-    private boolean isProjectToEnd = false;
-    private int startCol;
+    protected boolean isProjectToEnd = false;
+    protected int startCol;
 
     public POProject(OperatorKey k) {
         this(k,-1,0);
@@ -165,21 +158,17 @@ public class POProject extends ExpressionOperator {
             illustratorMarkup(inpValue, res.result, -1);
             return res;
         } else if(columns.size() == 1) {
-            try {
+            if ( inpValue == null ) {
+                // the tuple is null, so a dereference should also produce a null
+                res.returnStatus = POStatus.STATUS_OK;
+                ret = null;
+            } else if( inpValue.size() > columns.get(0) ) {
                 ret = inpValue.get(columns.get(0));
-            } catch (IndexOutOfBoundsException ie) {
+            } else {
                 if(pigLogger != null) {
                     pigLogger.warn(this,"Attempt to access field " +
                             "which was not found in the input", PigWarning.ACCESSING_NON_EXISTENT_FIELD);
                 }
-                res.returnStatus = POStatus.STATUS_OK;
-                ret = null;
-            } catch (NullPointerException npe) {
-                // the tuple is null, so a dereference should also produce a null
-                // there is a slight danger here that the Tuple implementation
-                // may have given the exception for a different reason but if we
-                // don't catch it, we will die and the most common case for the
-                // exception would be because the tuple is null
                 res.returnStatus = POStatus.STATUS_OK;
                 ret = null;
             }
@@ -192,7 +181,7 @@ public class POProject extends ExpressionOperator {
             for(int col : columns) {
                 addColumn(objList, inpValue, col);
             }
-            ret = tupleFactory.newTupleNoCopy(objList);
+            ret = mTupleFactory.newTupleNoCopy(objList);
         }
         res.result = ret;
         illustratorMarkup(inpValue, res.result, -1);
@@ -222,21 +211,16 @@ public class POProject extends ExpressionOperator {
      */
     private void addColumn(ArrayList<Object> objList, Tuple inpValue, int i)
     throws ExecException {
-        try {
+        if( inpValue == null ) {
+            // the tuple is null, so a dereference should also produce a null
+            objList.add(null);
+        } else if( inpValue.size() > i ) {
             objList.add(inpValue.get(i));
-        } catch (IndexOutOfBoundsException ie) {
+        } else {
             if(pigLogger != null) {
                 pigLogger.warn(this,"Attempt to access field " + i +
                         " which was not found in the input", PigWarning.ACCESSING_NON_EXISTENT_FIELD);
             }
-            objList.add(null);
-        }
-        catch (NullPointerException npe) {
-            // the tuple is null, so a dereference should also produce a null
-            // there is a slight danger here that the Tuple implementation
-            // may have given the exception for a different reason but if we
-            // don't catch it, we will die and the most common case for the
-            // exception would be because the tuple is null
             objList.add(null);
         }
     }
@@ -278,20 +262,20 @@ public class POProject extends ExpressionOperator {
                     for (int col : columns) {
                         addColumn(objList, tuple, col);
                     }
-                    outBag = new SingleTupleBag( tupleFactory.newTupleNoCopy(objList) );
+                    outBag = new SingleTupleBag( mTupleFactory.newTupleNoCopy(objList) );
                 }else {
                     Tuple tmpTuple = getRangeTuple(tuple);
                     outBag = new SingleTupleBag(tmpTuple);
                 }
             } else {
-                outBag = bagFactory.newDefaultBag();
+                outBag = mBagFactory.newDefaultBag();
                 for (Tuple tuple : inpBag) {
                     if(!isProjectToEnd){
                         ArrayList<Object> objList = new ArrayList<Object>(columns.size());
                         for (int col : columns) {
                             addColumn(objList, tuple, col);
                         }
-                        outBag.add( tupleFactory.newTupleNoCopy(objList) );
+                        outBag.add( mTupleFactory.newTupleNoCopy(objList) );
                     }else{
                         Tuple outTuple = getRangeTuple(tuple);
                         outBag.add(outTuple);
@@ -310,7 +294,7 @@ public class POProject extends ExpressionOperator {
         } else if (input.result==null) {
             Result retVal = new Result();
             retVal.result = null;
-            retVal.returnStatus = POStatus.STATUS_NULL;
+            retVal.returnStatus = POStatus.STATUS_OK;
             return retVal;
         } else {
             throw new ExecException("Cannot dereference a bag from " + input.result.getClass().getName(), 1129);
@@ -322,14 +306,14 @@ public class POProject extends ExpressionOperator {
         Tuple outTuple;
         if(isRangeInvalid(lastColIdx)){
             //invalid range - return empty tuple
-            outTuple = tupleFactory.newTuple();
+            outTuple = mTupleFactory.newTuple();
         }
         else {
             ArrayList<Object> objList = new ArrayList<Object>(lastColIdx - startCol + 1);
             for(int i = startCol; i <= lastColIdx ; i++){
                 addColumn(objList, tuple, i);
             }
-            outTuple = tupleFactory.newTupleNoCopy(objList);
+            outTuple = mTupleFactory.newTupleNoCopy(objList);
         }
         return outTuple;
     }
@@ -413,20 +397,16 @@ public class POProject extends ExpressionOperator {
             Object ret;
 
             if(columns.size() == 1) {
-                try{
+                if( inpValue == null ) {
+                    // the tuple is null, so a dereference should also produce a null
+                    ret = null;
+                } else if( inpValue.size() > columns.get(0) ) {
                     ret = inpValue.get(columns.get(0));
-                } catch (IndexOutOfBoundsException ie) {
+                } else {
                     if(pigLogger != null) {
                         pigLogger.warn(this,"Attempt to access field " +
                                 "which was not found in the input", PigWarning.ACCESSING_NON_EXISTENT_FIELD);
                     }
-                    ret = null;
-                } catch (NullPointerException npe) {
-                    // the tuple is null, so a dereference should also produce a null
-                    // there is a slight danger here that the Tuple implementation
-                    // may have given the exception for a different reason but if we
-                    // don't catch it, we will die and the most common case for the
-                    // exception would be because the tuple is null
                     ret = null;
                 }
             } else if(isProjectToEnd) {
@@ -435,24 +415,20 @@ public class POProject extends ExpressionOperator {
                 ArrayList<Object> objList = new ArrayList<Object>(columns.size());
 
                 for(int col: columns) {
-                    try {
+                    if( inpValue == null ) {
+                        // the tuple is null, so a dereference should also produce a null
+                        objList.add(null);
+                    } else if( inpValue.size() > col ) {
                         objList.add(inpValue.get(col));
-                    } catch (IndexOutOfBoundsException ie) {
+                    } else {
                         if(pigLogger != null) {
                             pigLogger.warn(this,"Attempt to access field " +
                                     "which was not found in the input", PigWarning.ACCESSING_NON_EXISTENT_FIELD);
                         }
                         objList.add(null);
-                    } catch (NullPointerException npe) {
-                        // the tuple is null, so a dereference should also produce a null
-                        // there is a slight danger here that the Tuple implementation
-                        // may have given the exception for a different reason but if we
-                        // don't catch it, we will die and the most common case for the
-                        // exception would be because the tuple is null
-                        objList.add(null);
                     }
                 }
-                ret = tupleFactory.newTuple(objList);
+                ret = mTupleFactory.newTuple(objList);
                 res.result = (Tuple)ret;
                 return res;
             }

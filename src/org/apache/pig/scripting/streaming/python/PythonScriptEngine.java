@@ -33,6 +33,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.pig.ExecType;
 import org.apache.pig.FuncSpec;
+import org.apache.pig.PigConfiguration;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.scripting.ScriptEngine;
 import org.apache.pig.tools.pigstats.PigStats;
@@ -43,7 +44,9 @@ public class PythonScriptEngine extends ScriptEngine {
     @Override
     public void registerFunctions(String path, String namespace,
             PigContext pigContext) throws IOException {
-        
+
+        String command = pigContext.getProperties().getProperty(
+                PigConfiguration.PIG_STREAMING_UDF_PYTHON_COMMAND, "python");
         String fileName = path.substring(0, path.length() - ".py".length());
         log.debug("Path: " + path + " FileName: " + fileName + " Namespace: " + namespace);
         File f = new File(path);
@@ -53,7 +56,12 @@ public class PythonScriptEngine extends ScriptEngine {
         }
         
         FileInputStream fin = new FileInputStream(f);
-        List<String[]> functions = getFunctions(fin);
+        List<String[]> functions = null;
+        try {
+            functions = getFunctions(fin);
+        } finally {
+            fin.close();
+        }
         namespace = namespace == null ? "" : namespace + NAMESPACE_SEPARATOR;
         for(String[] functionInfo : functions) {
             String name = functionInfo[0];
@@ -66,13 +74,12 @@ public class PythonScriptEngine extends ScriptEngine {
             pigContext.registerFunction(alias, 
                                         new FuncSpec("StreamingUDF", 
                                                 new String[] {
-                                                    "python", 
+                                                    command, 
                                                     fileName, name, 
                                                     schemaString, schemaLineNumber,
                                                     execType, isIllustrate
                                         }));
         }
-        fin.close();
     }
 
     @Override

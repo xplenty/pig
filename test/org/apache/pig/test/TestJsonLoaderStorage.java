@@ -17,32 +17,35 @@
  */
 package org.apache.pig.test;
 
-import org.apache.pig.ExecType;
-import org.apache.pig.PigServer;
-import org.apache.pig.backend.executionengine.ExecJob.JOB_STATUS;
-import org.apache.pig.data.DataByteArray;
-import org.apache.pig.data.Tuple;
-import org.apache.pig.data.DataBag;
-import org.apache.pig.test.Util;
+import static org.apache.pig.builtin.mock.Storage.tuple;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.FileReader;
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
-
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.Iterator;
 import java.util.Map;
 
-import java.math.BigDecimal;
-import java.math.BigInteger;
-
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.pig.PigServer;
+import org.apache.pig.backend.executionengine.ExecException;
+import org.apache.pig.builtin.mock.Storage;
+import org.apache.pig.builtin.mock.Storage.Data;
+import org.apache.pig.data.DataBag;
+import org.apache.pig.data.DataByteArray;
+import org.apache.pig.data.Tuple;
 import org.joda.time.DateTime;
-
+import org.junit.Before;
 import org.junit.Test;
-
-import static junit.framework.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 public class TestJsonLoaderStorage {
 
@@ -96,6 +99,13 @@ public class TestJsonLoaderStorage {
     "\"m\":[{\"a\":123},{\"a\":456},{\"a\":789}]" +
     "}";
 
+  private static final String arraysJson =
+    "{" +
+    "\"s\":[\"abc\",\"def\",\"ghi\"]," +
+    "\"i\":[23,45,78]," +
+    "\"f\":[23.1,45.2,78.3]" +
+    "}";
+
   private static final String nullJson =
     "{" +
     "\"a\":null," +
@@ -112,47 +122,89 @@ public class TestJsonLoaderStorage {
     "\"l\":null," +
     "\"m\":null" +
     "}";
+  
+  private static final String bigDecimalJson =
+    "{" +
+    "\"a\":123.456," +
+    "\"b\":\"123.456\"" +
+    "}";
+	
+  private static final String badJson =
+    "{" +
+    "\"a\":\"good\"," +
+    "\"b\":\"good\"" +
+    "}\n" +
+	"{" +
+    "\"a\":bad," +
+    "\"b\":\"good\"" +
+    "}\n" +
+	"{" +
+    "\"a\":\"good\"," +
+    "\"b\":\"good\"" +
+    "}";
+      
+  private static final String jsonOutput =
+    "{\"f1\":\"18\",\"count\":3}";
 
-  private Iterator<Tuple> loadJson(String input) throws IOException {
-    File tempFile = File.createTempFile("json", null);
-    tempFile.deleteOnExit();
+  private PigServer pigServer;
 
-    FileWriter writer = new FileWriter(tempFile);
-    writer.write(input);
-    writer.close();
-
-    PigServer pigServer = new PigServer(ExecType.LOCAL);
-    pigServer.registerQuery("data = load '" + tempFile.getAbsolutePath()
-        + "' using JsonLoader('" + schema + "');");
-
-    return pigServer.openIterator("data");
+  @Before
+  public void setup() throws Exception {
+    pigServer = new PigServer(Util.getLocalTestMode());
   }
 
-  private BufferedReader storeJson(String input) throws IOException {
-    File tempJsonFile = File.createTempFile("json", "");
-    tempJsonFile.delete();
+  private String getTempOutputPath() throws IOException {
+    File tempFile = File.createTempFile("json", null);
+    tempFile.delete();
+    tempFile.deleteOnExit();
 
+    String path = tempFile.getAbsolutePath();
+    if (Util.WINDOWS) {
+      path = path.replace('\\', '/');
+    }
+    return path;
+  }
+
+  private String createInput(String input) throws IOException {
     File tempInputFile = File.createTempFile("input", null);
     tempInputFile.deleteOnExit();
 
     FileWriter w = new FileWriter(tempInputFile);
     w.write(input);
     w.close();
+    String pathInputFile = tempInputFile.getAbsolutePath();
+    if (Util.WINDOWS) {
+      pathInputFile = pathInputFile.replace('\\', '/');
+    }
+    return pathInputFile;
+  }
 
-    PigServer pigServer = new PigServer(ExecType.LOCAL);
-    pigServer.registerQuery("data = load '" + tempInputFile.getAbsolutePath()
+  private Iterator<Tuple> loadJson(String input) throws IOException {
+    String path = createInput(input);
+    pigServer.registerQuery("data = load '" + path
+        + "' using JsonLoader('" + schema + "');");
+
+    return pigServer.openIterator("data");
+  }
+
+  private BufferedReader storeJson(String input) throws Exception {
+    String pathInputFile = createInput(input);
+    String pathJsonFile = getTempOutputPath();
+    pigServer.registerQuery("data = load '" + pathInputFile
         + "' as (" + schema + ");");
-    pigServer.registerQuery("store data into '" + tempJsonFile.getAbsolutePath()
+    pigServer.registerQuery("store data into '" + pathJsonFile
         + "' using JsonStorage();");
 
-    tempJsonFile.deleteOnExit();
+    Path p = new Path(pathJsonFile);
+    FileSystem fs = FileSystem.get(p.toUri(), new Configuration());
+    Reader r = new InputStreamReader(fs.open(Util.getFirstPartFile(p)));
 
-    FileReader r = new FileReader(tempJsonFile.getAbsolutePath() + "/part-m-00000");
     BufferedReader br = new BufferedReader(r);
 
     return br;
   }
 
+  @SuppressWarnings("rawtypes")
   @Test
   public void testJsonLoader() throws IOException {
     Iterator<Tuple> tuples = loadJson(json);
@@ -196,6 +248,68 @@ public class TestJsonLoaderStorage {
     assertEquals(1, count);
   }
 
+  @SuppressWarnings("rawtypes")
+  @Test
+  public void testJsonLoaderBadRow() throws IOException{
+
+    String badJsonFile = createInput(badJson);
+    pigServer.registerQuery("data = load '" + badJsonFile + "' using JsonLoader('a:chararray, b:chararray');");
+    Iterator<Tuple> tuples = pigServer.openIterator("data");
+    
+    Tuple t = tuples.next();
+    assertTrue(t.size()==2);
+    assertTrue(t.get(0)!=null);
+    assertTrue(t.get(1)!=null);
+    assertTrue(tuples.hasNext());
+
+    // bad row - skip it, returning a null tuple.
+    t = tuples.next();
+    assertTrue(t.size()==2);
+    assertTrue(t.get(0)==null);
+    assertTrue(t.get(1)==null);
+    assertTrue(tuples.hasNext());
+
+    t = tuples.next();
+    assertTrue(t.size()==2);
+    assertTrue(t.get(0)!=null);
+    assertTrue(t.get(1)!=null);
+    assertTrue(!tuples.hasNext());
+  }
+
+  @SuppressWarnings("rawtypes")
+  @Test
+  public void testJsonLoaderArrays() throws IOException{
+
+    String arraysJsonFile = createInput(arraysJson);
+    pigServer.registerQuery("data = load '" + arraysJsonFile + "' using JsonLoader('s:bag{a:tuple(a:chararray)}, i:bag{a:tuple(a:int)}, f:bag{a:tuple(a:double)}');");
+
+    Iterator<Tuple> tuples = pigServer.openIterator("data");
+    
+    Tuple t = tuples.next();
+    assertTrue(t.size()==3);
+    assertTrue(t.get(0)!=null);
+    assertTrue(t.get(1)!=null);
+    assertTrue(t.get(2)!=null);
+    assertTrue(! tuples.hasNext());
+
+  }
+
+  @SuppressWarnings("rawtypes")
+  @Test
+  public void testJsonLoaderBigDecimalFormats() throws IOException{
+
+    String bigDecimalJsonFile = createInput(bigDecimalJson);
+    pigServer.registerQuery("data = load '" + bigDecimalJsonFile + "' using JsonLoader('a:bigdecimal, b:bigdecimal');");
+    Iterator<Tuple> tuples = pigServer.openIterator("data");
+    
+    Tuple t = tuples.next();
+    assertTrue(t.size()==2);
+    assertTrue(t.get(0)!=null);
+    assertTrue(t.get(1)!=null);
+    assertEquals(t.get(0), t.get(1));
+    assertTrue(!tuples.hasNext());
+  }
+  
   @Test
   public void testJsonLoaderNull() throws IOException {
     Iterator<Tuple> tuples = loadJson(nullJson);
@@ -225,7 +339,7 @@ public class TestJsonLoaderStorage {
   }
 
   @Test
-  public void testJsonStorage() throws IOException {
+  public void testJsonStorage() throws Exception {
     BufferedReader br = storeJson(rawInput);
     String data = br.readLine();
 
@@ -243,7 +357,7 @@ public class TestJsonLoaderStorage {
   }
 
   @Test
-  public void testJsonStorageNull() throws IOException {
+  public void testJsonStorageNull() throws Exception {
     BufferedReader br = storeJson(nullInput);
     String data = br.readLine();
 
@@ -261,34 +375,24 @@ public class TestJsonLoaderStorage {
   }
 
   @Test
-  public void testJsonLoaderStorage() throws IOException {
-    File tempJsonFile = File.createTempFile("json", "");
-    tempJsonFile.delete();
+  public void testJsonLoaderStorage() throws Exception {
 
-    File tempJson2File = File.createTempFile("json2", "");
-    tempJson2File.delete();
+    String pattInputFile = createInput(rawInput);
+    String pattJsonFile = getTempOutputPath();
+    String pattJson2File = getTempOutputPath();
 
-    File tempInputFile = File.createTempFile("input", null);
-    tempInputFile.deleteOnExit();
-
-    FileWriter w = new FileWriter(tempInputFile);
-    w.write(rawInput);
-    w.close();
-
-    PigServer pigServer = new PigServer(ExecType.LOCAL);
-    pigServer.registerQuery("data = load '" + tempInputFile.getAbsolutePath()
+    pigServer.registerQuery("data = load '" + pattInputFile
         + "' as (" + schema + ");");
-    pigServer.registerQuery("store data into '" + tempJsonFile.getAbsolutePath()
+    pigServer.registerQuery("store data into '" + pattJsonFile
         + "' using JsonStorage();");
-    pigServer.registerQuery("json = load '" + tempJsonFile.getAbsolutePath()
+    pigServer.registerQuery("json = load '" + pattJsonFile
         + "' using JsonLoader('" + schema + "');");
-    pigServer.registerQuery("store json into '" + tempJson2File.getAbsolutePath()
+    pigServer.registerQuery("store json into '" + pattJson2File
         + "' using JsonStorage();");
 
-    tempJsonFile.deleteOnExit();
-    tempJson2File.deleteOnExit();
-
-    FileReader r = new FileReader(tempJson2File.getAbsolutePath() + "/part-m-00000");
+    Path p = new Path(pattJson2File);
+    FileSystem fs = FileSystem.get(p.toUri(), new Configuration());
+    Reader r = new InputStreamReader(fs.open(Util.getFirstPartFile(p)));
 
     BufferedReader br = new BufferedReader(r);
     String data = br.readLine();
@@ -305,4 +409,84 @@ public class TestJsonLoaderStorage {
 
     br.close();
   }
+
+  @Test
+  public void testJsonStorageLimit() throws Exception {
+    String outPath = getTempOutputPath();
+    Data data = Storage.resetData(pigServer);
+    data.set("foo", tuple(1), tuple(2), tuple(3), tuple(4));
+    pigServer.registerQuery("data = load 'foo' using mock.Storage() as (id:int);");
+    pigServer.registerQuery("data = order data by id;");
+    pigServer.registerQuery("data = limit data 2;");
+    pigServer.registerQuery("store data into '" + outPath + "' using JsonStorage();");
+
+    Path p = new Path(outPath);
+    FileSystem fs = FileSystem.get(p.toUri(), new Configuration());
+    Reader r = new InputStreamReader(fs.open(Util.getFirstPartFile(p)));
+
+    BufferedReader br = new BufferedReader(r);
+
+    String line = null;
+    int count = 0;
+    while ((line = br.readLine()) != null) {
+      count++;
+      assertEquals("{\"id\":" + count + "}", line);
+    }
+    assertEquals(2, count);
+
+    br.close();
+  }
+
+  @Test
+  public void testSimpleMapSideStreaming() throws Exception {
+    File input = Util.createInputFile("tmp", "", new String [] {"1,2,3;4,5,6,7,8",
+        "1,2,3;4,5,6,7,9",
+        "1,2,3;4,5,6,7,18"});
+    File tempJsonFile = File.createTempFile("json", "");
+    tempJsonFile.delete();
+
+    // Pig query to run
+    pigServer.registerQuery("IP = load '"+  Util.generateURI(input.toString(), pigServer.getPigContext())
+        +"' using PigStorage (';') as (ID:chararray,DETAILS:chararray);");
+    pigServer.registerQuery(
+        "id_details = FOREACH IP GENERATE " +
+            "FLATTEN" +
+            "(STRSPLIT" +
+            "(ID,',',3)) AS (drop, code, transaction) ," +
+            "FLATTEN" +
+            "(STRSPLIT" +
+            "(DETAILS,',',5)) AS (lname, fname, date, price, product);");
+    pigServer.registerQuery(
+        "transactions = FOREACH id_details GENERATE $0 .. ;");
+    pigServer.registerQuery(
+        "transactionsG = group transactions by code;");
+    pigServer.registerQuery(
+        "uniqcnt  = foreach transactionsG {"+
+            "sym = transactions.product ;"+
+            "dsym =  distinct sym ;"+
+            "generate flatten(dsym.product) as f1, COUNT(dsym) as count ;" +
+            "};");
+    pigServer.store("uniqcnt", tempJsonFile.getAbsolutePath(), "JsonStorage");
+
+    Path p = new Path(tempJsonFile.getAbsolutePath());
+    FileSystem fs = FileSystem.get(p.toUri(), new Configuration());
+    Reader r = new InputStreamReader(fs.open(Util.getFirstPartFile(p)));
+
+    BufferedReader br = new BufferedReader(r);
+    String data = br.readLine();
+
+    assertEquals(jsonOutput, data);
+
+    String line = data;
+    int count = 0;
+    while (line != null) {
+      line = br.readLine();
+      count++;
+    }
+    assertEquals(3, count);
+
+    br.close();
+    tempJsonFile.deleteOnExit();
+  }
+
 }

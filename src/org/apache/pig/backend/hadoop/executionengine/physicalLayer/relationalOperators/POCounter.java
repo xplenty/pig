@@ -28,11 +28,9 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlan
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
-import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
 import org.apache.pig.pen.util.ExampleTuple;
-import org.apache.pig.pen.util.LineageTracer;
 
 /**
  * This operator is part of the RANK operator implementation.
@@ -52,7 +50,7 @@ import org.apache.pig.pen.util.LineageTracer;
 public class POCounter extends PhysicalOperator {
 
     private static final long serialVersionUID = 1L;
-    private static final Long ONE = 1L;
+    public static final Long ONE = 1L;
 
     private List<PhysicalPlan> counterPlans;
     private List<Boolean> mAscCols;
@@ -70,8 +68,6 @@ public class POCounter extends PhysicalOperator {
      **/
     private boolean isRowNumber = false;
 
-    protected static final TupleFactory mTupleFactory = TupleFactory.getInstance();
-
     /**
      * Local counter for tuples on the same task.
      **/
@@ -80,7 +76,7 @@ public class POCounter extends PhysicalOperator {
     /**
      * Task ID to label each tuple analyzed by the corresponding task
      **/
-    private String taskID = "-1";
+    private Integer taskID = -1;
 
     /**
      * Unique identifier that links POCounter and PORank,
@@ -102,6 +98,15 @@ public class POCounter extends PhysicalOperator {
 
     public POCounter(OperatorKey k, int rp, List<PhysicalOperator> inputs) {
         super(k, rp, inputs);
+    }
+
+    public POCounter(POCounter copy) {
+        super(copy);
+        this.counterPlans = copy.counterPlans;
+        this.mAscCols = copy.mAscCols;
+        this.isDenseRank = copy.isDenseRank;
+        this.isRowNumber = copy.isRowNumber;
+        this.operationID = copy.operationID;
     }
 
     @SuppressWarnings({ "rawtypes", "unchecked" })
@@ -156,22 +161,21 @@ public class POCounter extends PhysicalOperator {
         Tuple in = (Tuple) input.result;
         Tuple out = mTupleFactory.newTuple(in.getAll().size() + 2);
         Long sizeBag = 0L;
-        int positionBag, i = 2;
+        int positionBag, i = 1;
 
         // Tuples are added by two stamps before the tuple content:
-        // 1.- At position 0: Current taskId
-        out.set(0, getTaskId());
+        // 1.- At position 0: counter value
+        // 2.- At position last: Current taskId
 
-        // 2.- At position 1: counter value
         //On this case, each tuple is analyzed independently of the tuples grouped
         if(isRowNumber() || isDenseRank()) {
 
             //Only when is Dense Rank (attached to a reduce phase) it is incremented on this way
             //Otherwise, the increment is done at mapper automatically
             if(isDenseRank())
-                PigMapReduceCounter.PigReduceCounter.incrementCounter(POCounter.ONE);
+                incrementReduceCounter(POCounter.ONE);
 
-            out.set(1, getLocalCounter());
+            out.set(0, getLocalCounter());
 
             //and the local incrementer is sequentially increased.
             incrementLocalCounter();
@@ -186,9 +190,9 @@ public class POCounter extends PhysicalOperator {
 
             //This value (the size of the tuples on the bag) is used to increment
             //the current global counter and
-            PigMapReduceCounter.PigReduceCounter.incrementCounter(sizeBag);
+            incrementReduceCounter(sizeBag);
 
-            out.set(1, getLocalCounter());
+            out.set(0, getLocalCounter());
 
             //the value for the next tuple on the current task
             addToLocalCounter(sizeBag);
@@ -199,9 +203,16 @@ public class POCounter extends PhysicalOperator {
             out.set(i++, o);
         }
 
+        // At position last: Current taskId
+        out.set(i++, getTaskId());
+
         input.result = illustratorMarkup(in, out, 0);
 
         return input;
+    }
+
+    protected void incrementReduceCounter(Long increment) {
+        PigMapReduceCounter.PigReduceCounter.incrementCounter(increment);
     }
 
     @Override
@@ -248,7 +259,7 @@ public class POCounter extends PhysicalOperator {
     /**
      *  Sequential counter used at ROW NUMBER and RANK BY DENSE mode
      **/
-    public Long incrementLocalCounter() {
+    protected Long incrementLocalCounter() {
         return localCount++;
     }
 
@@ -260,18 +271,18 @@ public class POCounter extends PhysicalOperator {
         return this.localCount;
     }
 
-    public void addToLocalCounter(Long sizeBag) {
+    protected void addToLocalCounter(Long sizeBag) {
         this.localCount += sizeBag;
     }
 
     /**
      *  Task ID: identifier of the task (map or reducer)
      **/
-    public void setTaskId(String taskID) {
+    public void setTaskId(int taskID) {
         this.taskID = taskID;
     }
 
-    public String getTaskId() {
+    public int getTaskId() {
         return this.taskID;
     }
 
@@ -307,4 +318,14 @@ public class POCounter extends PhysicalOperator {
     public String getOperationID() {
         return operationID;
     }
+
+    @Override
+    public POCounter clone() throws CloneNotSupportedException {
+        POCounter clone = (POCounter)super.clone();
+        clone.localCount = new Long(localCount);
+        clone.taskID = new Integer(taskID);
+        // counterPlans and mAscCols unused. Not cloning them
+        return clone;
+    }
+
 }

@@ -96,7 +96,7 @@ class PythonStreamingController:
 
         if is_illustrate or udf_logging.udf_log_level != logging.DEBUG:
             #Only log output for illustrate after we get the flag to capture output.
-            sys.stdout = open("/dev/null", 'w')
+            sys.stdout = open(os.devnull, 'w')
         else:
             sys.stdout = self.output_stream
 
@@ -125,7 +125,12 @@ class PythonStreamingController:
                 try:
                     func_output = func(*inputs)
                     if should_log:
-                        log_message("Row %s: UDF Output: %s" % (self.input_count, unicode(func_output)))
+                        try:
+                            log_message("Row %s: UDF Output: %s" % (self.input_count, unicode(func_output)))
+                        except:
+                            #This is probably an error with unicoding the output.  Calling unicode on bytearray will
+                            #throw an exception.  Since its just a log statement, just skip and carry on.
+                            logging.exception("Couldn't log output.  Try to continue.")
                 except:
                     #These errors should always be caused by user code.
                     write_user_exception(module_name, self.stream_error, NUM_LINES_OFFSET_TRACE)
@@ -157,7 +162,14 @@ class PythonStreamingController:
         input_str = input_stream.readline()
 
         while input_str.endswith(END_RECORD_DELIM) == False:
-            input_str += input_stream.readline()
+            line = input_stream.readline()
+            if line == '':
+                input_str = ''
+                break
+            input_str += line
+
+        if input_str == '':
+            return END_OF_STREAM
 
         if input_str == TURN_ON_OUTPUT_CAPTURING:
             logging.debug("Turned on Output Capturing")
@@ -297,6 +309,12 @@ def _deserialize_collection(input_str, return_type, si, ei):
     else:
         return list_result
 
+def wrap_tuple(o, serialized_item):
+    if type(o) != tuple:
+        return WRAPPED_TUPLE_START + serialized_item + WRAPPED_TUPLE_END
+    else:
+        return serialized_item
+
 def serialize_output(output, utfEncodeAllFields=False):
     """
     @param utfEncodeStrings - Generally we want to utf encode only strings.  But for
@@ -314,7 +332,7 @@ def serialize_output(output, utfEncodeAllFields=False):
                 WRAPPED_TUPLE_END)
     elif output_type == list:
         return (WRAPPED_BAG_START +
-                WRAPPED_FIELD_DELIMITER.join([serialize_output(o, utfEncodeAllFields) for o in output]) +
+                WRAPPED_FIELD_DELIMITER.join([wrap_tuple(o, serialize_output(o, utfEncodeAllFields)) for o in output]) +
                 WRAPPED_BAG_END)
     elif output_type == dict:
         return (WRAPPED_MAP_START +

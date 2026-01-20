@@ -22,6 +22,8 @@ use TestDeployer;
 use strict;
 use English;
 
+use Util;
+
 our @ISA = "TestDeployer";
 
 ###########################################################################
@@ -229,20 +231,25 @@ sub generateData
             'rows' => 5000,
             'hdfs' => "types/numbers.txt",
         }, {
-            'name' => "biggish",
-            'filetype' => "biggish",
-            'rows' => 1000000,
-            'hdfs' => "singlefile/biggish",
-        }, {
             'name' => "prerank",
             'filetype' => "ranking",
             'rows' => 30,
             'hdfs' => "singlefile/prerank",
+        }, {
+            'name' => "utf8Voter",
+            'filetype' => "utf8Voter",
+            'rows' => 30,
+            'hdfs' => "utf8Data/选民/utf8Voter",
+        }, {
+            'name' => "utf8Student",
+            'filetype' => "utf8Student",
+            'rows' => 300,
+            'hdfs' => "utf8Data/学生/utf8Student",
         }
     );
 
 	# Create the HDFS directories
-	$self->runPigCmd($cfg, $log, "fs -mkdir $cfg->{'inpathbase'}");
+	$self->runPigCmd($cfg, $log, "fs -mkdir -p $cfg->{'inpathbase'}");
 
     foreach my $table (@tables) {
 		print "Generating data for $table->{'name'}\n";
@@ -354,11 +361,18 @@ sub runPigCmd($$$$)
 
     my @pigCmd = "";
 
+	my $pigbin = "";
     if ($cfg->{'usePython'} eq "true") {
-      @pigCmd = ("$cfg->{'pigpath'}/bin/pig.py");
+      $pigbin = "$cfg->{'pigpath'}/bin/pig.py";
+    } elsif (Util::isCygwin()) {
+      $pigbin = "$cfg->{'pigpath'}/bin/pig.cmd";
+      $pigbin =~ s/\\/\//g;
+      $pigbin = `cygpath -u $pigbin`;
+      chomp($pigbin);
     } else {
-      @pigCmd = ("$cfg->{'pigpath'}/bin/pig");
+      $pigbin = "$cfg->{'pigpath'}/bin/pig";
     }
+	@pigCmd = ($pigbin);
     push(@pigCmd, '-e');
     push(@pigCmd, split(' ', $c));
 

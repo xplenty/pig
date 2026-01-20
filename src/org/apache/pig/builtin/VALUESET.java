@@ -118,7 +118,7 @@ public class VALUESET extends EvalFunc<DataBag> {
                 throw new RuntimeException(fe);
             }
             if (fs != null) {
-                innerFieldSchema = new Schema.FieldSchema(null, fs.type);
+                innerFieldSchema = new Schema.FieldSchema(null, new Schema(fs));
             }
         } else {
             innerFieldSchema = new Schema.FieldSchema(null, DataType.BYTEARRAY);
@@ -132,5 +132,10 @@ public class VALUESET extends EvalFunc<DataBag> {
             throw new RuntimeException(fe);
         }
         return bagSchema;
+    }
+
+    @Override
+    public boolean allowCompileTimeCalculation() {
+        return true;
     }
 }

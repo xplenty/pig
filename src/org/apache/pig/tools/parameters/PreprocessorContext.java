@@ -25,28 +25,49 @@ package org.apache.pig.tools.parameters;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
 import java.io.StringReader;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.util.Shell;
+import org.apache.pig.impl.PigContext;
+import org.apache.pig.impl.logicalLayer.FrontendException;
+import org.apache.pig.validator.BlackAndWhitelistFilter;
+import org.apache.pig.validator.PigCommandFilter;
 
 public class PreprocessorContext {
 
-    private Map<String, String> param_val;
+    private int tableinitsize = 10;
+    private Deque<Map<String,String>> param_val_stack;
 
-    // used internally to detect when a param is set multiple times,
-    // but it set with the same value so it's ok not to log a warning
-    private Map<String, String> param_source;
+    private PigContext pigContext;
 
     public Map<String, String> getParamVal() {
-        return param_val;
+        Map <String, String> ret = new Hashtable <String, String>(tableinitsize);
+
+        //stack (deque) iterates LIFO
+        for (Map <String, String> map : param_val_stack ) {
+            for (Map.Entry<String, String> entry : map.entrySet()) {
+                if( ! ret.containsKey(entry.getKey()) ) {
+                    ret.put(entry.getKey(), entry.getValue());
+                }
+            }
+        }
+        return ret;
     }
 
     private final Log log = LogFactory.getLog(getClass());
@@ -56,19 +77,14 @@ public class PreprocessorContext {
      *                smaller number only impacts performance
      */
     public PreprocessorContext(int limit) {
-        param_val = new Hashtable<String, String> (limit);
-        param_source = new Hashtable<String, String> (limit);
+        tableinitsize = limit;
+        param_val_stack = new ArrayDeque<Map<String,String>> ();
+        param_val_stack.push(new Hashtable<String, String> (tableinitsize));
     }
 
-    public PreprocessorContext(Map<String, String> paramVal) {
-        param_val = paramVal;
-        param_source = new Hashtable<String, String>(paramVal);
+    public void setPigContext(PigContext context) {
+        this.pigContext = context;
     }
-
-    /*
-    public  void processLiteral(String key, String val) {
-        processLiteral(key, val, true);
-    } */
 
     /**
      * This method generates parameter value by running specified command
@@ -76,7 +92,7 @@ public class PreprocessorContext {
      * @param key - parameter name
      * @param val - string containing command to be executed
      */
-    public  void processShellCmd(String key, String val)  throws ParameterSubstitutionException {
+    public  void processShellCmd(String key, String val)  throws ParameterSubstitutionException, FrontendException {
         processShellCmd(key, val, true);
     }
 
@@ -91,20 +107,35 @@ public class PreprocessorContext {
         processOrdLine(key, val, true);
     }
 
-    /*
-    public  void processLiteral(String key, String val, Boolean overwrite) {
+    public void paramScopePush() {
+        param_val_stack.push( new Hashtable<String, String> (tableinitsize) );
+    }
 
-        if (param_val.containsKey(key)) {
-            if (overwrite) {
-                log.warn("Warning : Multiple values found for " + key + ". Using value " + val);
-            } else {
-                return;
+    public void paramScopePop() {
+        param_val_stack.pop();
+    }
+
+    public boolean paramval_containsKey(String key) {
+        for (Map <String, String> map : param_val_stack ) {
+            if( map.containsKey(key) ) {
+                return true;
             }
         }
+        return false;
+    }
 
-        String sub_val = substitute(val);
-        param_val.put(key, sub_val);
-    } */
+    public String paramval_get(String key) {
+        for (Map <String, String> map : param_val_stack ) {
+            if( map.containsKey(key) ) {
+                return map.get(key);
+            }
+        }
+        return null;
+    }
+
+    public void paramval_put(String key, String value) {
+        param_val_stack.peek().put(key, value);
+    }
 
     /**
      * This method generates parameter value by running specified command
@@ -112,24 +143,48 @@ public class PreprocessorContext {
      * @param key - parameter name
      * @param val - string containing command to be executed
      */
-    public  void processShellCmd(String key, String val, Boolean overwrite)  throws ParameterSubstitutionException {
-
-        if (param_val.containsKey(key)) {
-            if (param_source.get(key).equals(val) || !overwrite) {
-                return;
-            } else {
-                log.warn("Warning : Multiple values found for " + key + ". Using value " + val);
-            }
+    public  void processShellCmd(String key, String val, Boolean overwrite)  throws ParameterSubstitutionException, FrontendException {
+        if (pigContext != null) {
+            BlackAndWhitelistFilter filter = new BlackAndWhitelistFilter(pigContext);
+            filter.validate(PigCommandFilter.Command.SH);
         }
 
-        param_source.put(key, val);
+        if (paramval_containsKey(key) && !overwrite) {
+            return;
+        }
 
         val = val.substring(1, val.length()-1); //to remove the backticks
         String sub_val = substitute(val);
         sub_val = executeShellCommand(sub_val);
-        param_val.put(key, sub_val);
+
+        if (paramval_containsKey(key) && !paramval_get(key).equals(sub_val) ) {
+            //(boolean overwrite is always true here)
+            log.warn("Warning : Multiple values found for " + key + " command `" + val + "`. "
+                     + "Previous value " + paramval_get(key) + ", now using value " + sub_val);
+        }
+
+        paramval_put(key, sub_val);
     }
 
+    public void validate(String preprocessorCmd) throws FrontendException {
+        if (pigContext == null) {
+            return;
+        }
+
+        final BlackAndWhitelistFilter filter = new BlackAndWhitelistFilter(pigContext);
+        final String declareToken = "%declare";
+        final String defaultToken = "%default";
+
+        if (preprocessorCmd.toLowerCase().equals(declareToken)) {
+            filter.validate(PigCommandFilter.Command.DECLARE);
+        } else if (preprocessorCmd.toLowerCase().equals(defaultToken)) {
+            filter.validate(PigCommandFilter.Command.DEFAULT);
+        } else {
+            throw new IllegalArgumentException("Pig Internal Error. Invalid preprocessor command specified : "
+                            + preprocessorCmd);
+        }
+    }
+    
     /**
      * This method generates value for the specified key by
      * performing substitution if needed within the value first.
@@ -140,20 +195,41 @@ public class PreprocessorContext {
      */
     public  void processOrdLine(String key, String val, Boolean overwrite)  throws ParameterSubstitutionException {
 
-        if (param_val.containsKey(key)) {
-            if (param_source.get(key).equals(val) || !overwrite) {
+        String sub_val = substitute(val, key);
+        if (paramval_containsKey(key)) {
+            if (paramval_get(key).equals(sub_val) || !overwrite) {
                 return;
             } else {
-                log.warn("Warning : Multiple values found for " + key + ". Using value " + val);
+                log.warn("Warning : Multiple values found for " + key
+                         + ". Previous value " + paramval_get(key)
+                         + ", now using value " + sub_val);
             }
         }
 
-        param_source.put(key, val);
-
-        String sub_val = substitute(val, key);
-        param_val.put(key, sub_val);
+        paramval_put(key, sub_val);
     }
 
+    /**
+     * Slurp in an entire input stream and close it.
+     */
+    public static class CallableStreamReader implements Callable<String> {
+        private final InputStream inputStream;
+
+        public CallableStreamReader(InputStream stream) {
+            inputStream = stream;
+        }
+
+        @Override
+        public String call() {
+            try {
+                return IOUtils.toString(inputStream);
+            } catch (IOException e) {
+                throw new RuntimeException("IO Exception while executing shell command: " + e.getMessage() , e);
+            } finally {
+                IOUtils.closeQuietly(inputStream);
+            }
+        }
+    }
 
     /*
      * executes the 'cmd' in shell and returns result
@@ -186,6 +262,23 @@ public class PreprocessorContext {
             throw rte;
         }
 
+        // Read stdout and stderr in separate threads to avoid deadlock due to pipe buffer size
+        ExecutorService executorService = Executors.newFixedThreadPool(2);
+        Future<String> futureOut = executorService.submit(new CallableStreamReader(p.getInputStream()));
+        Future<String> futureErr = executorService.submit(new CallableStreamReader(p.getErrorStream()));
+
+        try {
+            streamData = futureOut.get();
+            streamError = futureErr.get();
+            log.debug("Error stream while executing shell command : " + streamError);
+        } catch (InterruptedException e) {
+            throw new RuntimeException("InterruptedException while executing shell command : " + e.getMessage() , e);
+        } catch (ExecutionException e) {
+            throw new RuntimeException("ExecutionException while executing shell command : " + e.getMessage(), e);
+        } finally {
+            executorService.shutdownNow();
+        }
+
         int exitVal;
         try {
             exitVal = p.waitFor();
@@ -197,42 +290,6 @@ public class PreprocessorContext {
         if (exitVal != 0) {
             RuntimeException rte = new RuntimeException("Error executing shell command: " + cmd + ". Command exit with exit code of " + exitVal );
             throw rte;
-        }
-
-        BufferedReader br = null;
-        try{
-            InputStreamReader isr = new InputStreamReader(p.getInputStream());
-            br = new BufferedReader(isr);
-            String line=null;
-            StringBuilder sb = new StringBuilder();
-            while ( (line = br.readLine()) != null){
-                sb.append(line);
-                sb.append("\n");
-            }
-            streamData = sb.toString();
-        } catch (IOException e){
-            RuntimeException rte = new RuntimeException("IO Exception while executing shell command : "+e.getMessage() , e);
-            throw rte;
-        } finally {
-            if (br != null) try {br.close();} catch(Exception e) {}
-        }
-
-        try {
-            InputStreamReader isr = new InputStreamReader(p.getErrorStream());
-            br = new BufferedReader(isr);
-            String line=null;
-            StringBuilder sb = new StringBuilder();
-            while ( (line = br.readLine()) != null ) {
-                sb.append(line);
-                sb.append("\n");
-            }
-            streamError = sb.toString();
-            log.debug("Error stream while executing shell command : " + streamError);
-        } catch (Exception e) {
-            RuntimeException rte = new RuntimeException("IO Exception while executing shell command : "+e.getMessage() , e);
-            throw rte;
-        } finally {
-            if (br != null) try {br.close();} catch(Exception e) {}
         }
 
         return streamData.trim();
@@ -283,7 +340,7 @@ public class PreprocessorContext {
         while (bracketKeyMatcher.find()) {
             if ( (bracketKeyMatcher.start() == 0) || (line.charAt( bracketKeyMatcher.start() - 1)) != '\\' ) {
                 key = bracketKeyMatcher.group(1);
-                if (!(param_val.containsKey(key))) {
+                if (!(paramval_containsKey(key))) {
                     String message;
                     if (parentKey == null) {
                         message = "Undefined parameter : " + key;
@@ -292,7 +349,7 @@ public class PreprocessorContext {
                     }
                     throw new ParameterSubstitutionException(message);
                 }
-                val = param_val.get(key);
+                val = paramval_get(key);
                 if (val.contains("$")) {
                     val = val.replaceAll("(?<!\\\\)\\$", "\\\\\\$");
                 }
@@ -310,7 +367,7 @@ public class PreprocessorContext {
             // for escaped vars of the form \$<id>
             if ( (keyMatcher.start() == 0) || (line.charAt( keyMatcher.start() - 1)) != '\\' ) {
                 key = keyMatcher.group(1);
-                if (!(param_val.containsKey(key))) {
+                if (!(paramval_containsKey(key))) {
                     String message;
                     if (parentKey == null) {
                         message = "Undefined parameter : " + key;
@@ -319,7 +376,7 @@ public class PreprocessorContext {
                     }
                     throw new ParameterSubstitutionException(message);
                 }
-                val = param_val.get(key);
+                val = paramval_get(key);
                 if (val.contains("$")) {
                     val = val.replaceAll("(?<!\\\\)\\$", "\\\\\\$");
                 }

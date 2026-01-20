@@ -31,6 +31,8 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.pig.ExecType;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRConfiguration;
+import org.apache.pig.impl.PigImplConstants;
 import org.apache.pig.impl.util.UDFContext;
 
 import com.google.common.base.Charsets;
@@ -60,28 +62,58 @@ public class ScriptingOutputCapturer {
         this.execType = execType;
     }
 
-    public String getStandardOutputRootWriteLocation() {
+    public String getStandardOutputRootWriteLocation() throws IOException {
         Configuration conf = UDFContext.getUDFContext().getJobConf();
         
-        String jobId = conf.get("mapred.job.id");
-        String taskId = conf.get("mapred.task.id");
+        String jobId = conf.get(MRConfiguration.JOB_ID);
+        String taskId = conf.get(MRConfiguration.TASK_ID);
+        String hadoopLogDir = System.getProperty("yarn.app.container.log.dir");
+        if (hadoopLogDir == null) {
+            hadoopLogDir = conf.get("yarn.app.container.log.dir");
+        }
+        if (hadoopLogDir == null) {
+            hadoopLogDir = System.getProperty("hadoop.log.dir");
+        }
+        if (hadoopLogDir == null) {
+            hadoopLogDir = conf.get("hadoop.log.dir");
+        }
+        
+        String tmpDir = conf.get("hadoop.tmp.dir");
+        boolean fallbackToTmp = (hadoopLogDir == null);
+        if (!fallbackToTmp) {
+            try {
+                if (!(new File(hadoopLogDir).canWrite())) {
+                    fallbackToTmp = true;
+                }
+            }
+            catch (SecurityException e) {
+                fallbackToTmp = true;
+            }
+            finally {
+                if (fallbackToTmp)
+                    log.warn(String.format("Insufficient permission to write into %s. Change path to: %s", hadoopLogDir, tmpDir));
+            }
+        }
+        if (fallbackToTmp) {
+            hadoopLogDir = tmpDir;
+        }
         log.debug("JobId: " + jobId);
         log.debug("TaskId: " + taskId);
+        log.debug("hadoopLogDir: " + hadoopLogDir);
 
-        if (execType.isLocal()) {
+        if (execType.isLocal() || conf.getBoolean(PigImplConstants.CONVERTED_TO_FETCH, false)) {
             String logDir = System.getProperty("pig.udf.scripting.log.dir");
             if (logDir == null)
                 logDir = ".";
             return logDir + "/" + (taskId == null ? "" : (taskId + "_"));
         } else {
-            String taskLogDir = getTaskLogDir(jobId, taskId);
+            String taskLogDir = getTaskLogDir(jobId, taskId, hadoopLogDir);
             return taskLogDir + "/";
         }
     }
 
-    public String getTaskLogDir(String jobId, String taskId) {
+    public String getTaskLogDir(String jobId, String taskId, String hadoopLogDir) throws IOException {
         String taskLogDir;
-        String hadoopLogDir = System.getProperty("hadoop.log.dir");
         String defaultUserLogDir = hadoopLogDir + File.separator + "userlogs";
 
         if ( new File(defaultUserLogDir + File.separator + jobId).exists() ) {
@@ -92,6 +124,11 @@ public class ScriptingOutputCapturer {
             taskLogDir = defaultUserLogDir;
         } else {
             taskLogDir = hadoopLogDir + File.separator + "udfOutput";
+            File dir = new File(taskLogDir);
+            dir.mkdirs();
+            if (!dir.exists()) {
+                throw new IOException("Could not create directory: " + taskLogDir);
+            }
         }
         return taskLogDir;
     }

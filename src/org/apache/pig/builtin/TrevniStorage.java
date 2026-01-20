@@ -43,8 +43,10 @@ import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.apache.hadoop.mapreduce.lib.input.FileSplit;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.pig.LoadPushDown;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRConfiguration;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigFileInputFormat;
 import org.apache.pig.data.Tuple;
+import org.apache.pig.impl.util.Utils;
 import org.apache.pig.impl.util.avro.AvroRecordWriter;
 import org.apache.pig.impl.util.avro.AvroStorageDataConversionUtilities;
 import org.apache.trevni.ColumnFileMetaData;
@@ -107,9 +109,9 @@ public class TrevniStorage extends AvroStorage implements LoadPushDown{
       @Override protected  List<FileStatus> listStatus(final JobContext job)
           throws IOException {
         List<FileStatus> results = Lists.newArrayList();
-        job.getConfiguration().setBoolean("mapred.input.dir.recursive", true);
+        job.getConfiguration().setBoolean(MRConfiguration.INPUT_DIR_RECURSIVE, true);
         for (FileStatus file : super.listStatus(job)) {
-          if (VISIBLE_FILES.accept(file.getPath())) {
+          if (Utils.VISIBLE_FILES.accept(file.getPath())) {
             results.add(file);
           }
         }
@@ -308,7 +310,7 @@ public class TrevniStorage extends AvroStorage implements LoadPushDown{
     ArrayList<FileStatus> statusList = new ArrayList<FileStatus>();
     FileSystem fs = FileSystem.get(p[0].toUri(), job.getConfiguration());
     for (Path temp : p) {
-      for (FileStatus tempf : fs.globStatus(temp, VISIBLE_FILES)) {
+      for (FileStatus tempf : fs.globStatus(temp, Utils.VISIBLE_FILES)) {
         statusList.add(tempf);
       }
     }
@@ -323,7 +325,7 @@ public class TrevniStorage extends AvroStorage implements LoadPushDown{
       throw new IOException("No path matches pattern " + p.toString());
     }
 
-    Path filePath = depthFirstSearchForFile(statusArray, fs);
+    Path filePath = Utils.depthFirstSearchForFile(statusArray, fs);
     
     if (filePath == null) {
       throw new IOException("No path matches pattern " + p.toString());

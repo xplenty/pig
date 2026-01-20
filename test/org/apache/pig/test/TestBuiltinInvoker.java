@@ -27,7 +27,6 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.builtin.mock.Storage.Data;
 import org.apache.pig.data.Tuple;
@@ -35,8 +34,8 @@ import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.util.Utils;
 import org.junit.Before;
 import org.junit.Test;
-import org.python.google.common.collect.Sets;
 
+import com.google.common.collect.Sets;
 import com.google.common.collect.ImmutableSet;
 
 public class TestBuiltinInvoker {
@@ -50,7 +49,7 @@ public class TestBuiltinInvoker {
 
     @Before
     public void setUp() throws Exception {
-        pigServer = new PigServer(ExecType.LOCAL);
+        pigServer = new PigServer(Util.getLocalTestMode());
 
         data = resetData(pigServer);
 

@@ -27,37 +27,59 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Random;
 
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.mapred.FileAlreadyExistsException;
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRConfiguration;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.util.JavaCompilerHelper;
-import org.junit.After;
+import org.apache.pig.test.junit.OrderedJUnit4Runner;
+import org.apache.pig.test.junit.OrderedJUnit4Runner.TestOrder;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 
+//Need to run testImportList first due to TEZ-1802
+@RunWith(OrderedJUnit4Runner.class)
+@TestOrder({
+    "testImportList",
+    "testScriptFiles",
+    "testSetProperties_way_num01",
+    "testSetProperties_way_num02",
+    "testSetProperties_way_num03",
+    "testHadoopExceptionCreation"
+})
 public class TestPigContext {
     private static final String TMP_DIR_PROP = "/tmp/hadoop-hadoop";
     private static final String FS_NAME = "file:///";
     private static final String JOB_TRACKER = "local";
 
+    private static PigContext pigContext;
+    private static Properties properties;
+    private static MiniGenericCluster cluster;
+
     private File input;
-    private PigContext pigContext;
-    static MiniCluster cluster = null;
 
     @BeforeClass
     public static void oneTimeSetup() {
-        cluster = MiniCluster.buildCluster();
+        cluster = MiniGenericCluster.buildCluster();
+        properties = cluster.getProperties();
     }
 
     @Before
     public void setUp() throws Exception {
-        pigContext = new PigContext(ExecType.LOCAL, getProperties());
+        Util.resetStateForExecModeSwitch();
+        pigContext = new PigContext(Util.getLocalTestMode(), getProperties());
         input = File.createTempFile("PigContextTest-", ".txt");
+    }
+
+    @AfterClass
+    public static void oneTimeTearDown() throws Exception {
+        cluster.shutDown();
     }
 
     /**
@@ -76,7 +98,7 @@ public class TestPigContext {
      */
     @Test
     public void testSetProperties_way_num02() throws Exception {
-        PigServer pigServer = new PigServer(ExecType.LOCAL, getProperties());
+        PigServer pigServer = new PigServer(Util.getLocalTestMode(), getProperties());
         registerAndStore(pigServer);
 
         check_asserts(pigServer);
@@ -142,8 +164,8 @@ public class TestPigContext {
         int status = Util.executeJavaCommand("jar -cf " + jarFile +
                 " -C " + tmpDir.getAbsolutePath() + " " + "com");
         assertEquals(0, status);
-        Properties properties = cluster.getProperties();
-        PigContext localPigContext = new PigContext(ExecType.MAPREDUCE, properties);
+        Util.resetStateForExecModeSwitch();
+        PigContext localPigContext = new PigContext(cluster.getExecType(), properties);
 
         // register jar using properties
         localPigContext.getProperties().setProperty("pig.additional.jars", jarFile);
@@ -195,7 +217,7 @@ public class TestPigContext {
     @SuppressWarnings("deprecation")
     @Test
     public void testScriptFiles() throws Exception {
-        PigContext pc = new PigContext(ExecType.LOCAL, getProperties());
+        PigContext pc = new PigContext(Util.getLocalTestMode(), getProperties());
         final int n = pc.scriptFiles.size();
         pc.addScriptFile("test/path-1824");
         assertEquals("test" + File.separator + "path-1824", pc.getScriptFiles().get("test/path-1824").toString());
@@ -216,20 +238,10 @@ public class TestPigContext {
         pc.getScriptFiles().remove("test/path-1824");
     }
 
-    @After
-    public void tearDown() throws Exception {
-        input.delete();
-    }
-
-    @AfterClass
-    public static void oneTimeTearDown() throws Exception {
-        cluster.shutDown();
-    }
-
     private static Properties getProperties() {
         Properties props = new Properties();
-        props.put("mapred.job.tracker", JOB_TRACKER);
-        props.put("fs.default.name", FS_NAME);
+        props.put(MRConfiguration.JOB_TRACKER, JOB_TRACKER);
+        props.put("fs.defaultFS", FS_NAME);
         props.put("hadoop.tmp.dir", TMP_DIR_PROP);
         return props;
     }
@@ -257,9 +269,9 @@ public class TestPigContext {
 
     private void check_asserts(PigServer pigServer) {
         assertEquals(JOB_TRACKER,
-                pigServer.getPigContext().getProperties().getProperty("mapred.job.tracker"));
+                pigServer.getPigContext().getProperties().getProperty(MRConfiguration.JOB_TRACKER));
         assertEquals(FS_NAME,
-                pigServer.getPigContext().getProperties().getProperty("fs.default.name"));
+                pigServer.getPigContext().getProperties().getProperty(FileSystem.FS_DEFAULT_NAME_KEY));
         assertEquals(TMP_DIR_PROP,
                 pigServer.getPigContext().getProperties().getProperty("hadoop.tmp.dir"));
     }

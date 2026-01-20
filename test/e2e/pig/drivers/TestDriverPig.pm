@@ -73,11 +73,14 @@ sub replaceParameters
     $cmd =~ s/:INPATH:/$testCmd->{'inpathbase'}/g;
     $cmd =~ s/:OUTPATH:/$outfile/g;
     $cmd =~ s/:FUNCPATH:/$testCmd->{'funcjarPath'}/g;
-    $cmd =~ s/:PIGGYBANKPATH:/$testCmd->{'piggybankjarPath'}/g;
+    $cmd =~ s/:PIGGYBANKJAR:/$testCmd->{'piggybankjarPath'}/g;
     $cmd =~ s/:PIGPATH:/$testCmd->{'pigpath'}/g;
     $cmd =~ s/:RUNID:/$testCmd->{'UID'}/g;
     $cmd =~ s/:USRHOMEPATH:/$testCmd->{'userhomePath'}/g;
     $cmd =~ s/:MAPREDJARS:/$testCmd->{'mapredjars'}/g;
+    $cmd =~ s/:HIVELIBDIR:/$testCmd->{'hivelibdir'}/g;
+    $cmd =~ s/:HIVEVERSION:/$testCmd->{'hiveversion'}/g;
+    $cmd =~ s/:HIVESHIMSVERSION:/$testCmd->{'hiveshimsversion'}/g;
     $cmd =~ s/:SCRIPTHOMEPATH:/$testCmd->{'scriptPath'}/g;
     $cmd =~ s/:DBUSER:/$testCmd->{'dbuser'}/g;
     $cmd =~ s/:DBNAME:/$testCmd->{'dbdb'}/g;
@@ -113,7 +116,7 @@ sub globalSetup
 
     # Setup the output path
     my $me = `whoami`;
-    chomp $me;
+    $me =~ s/[^a-zA-Z0-9]*//g;
     my $jobId = $globalHash->{'job-id'};
     my $timeId = time;
     $globalHash->{'runid'} = $me . "-" . $timeId . "-" . $jobId;
@@ -128,6 +131,7 @@ sub globalSetup
     $globalHash->{'outpath'} = $globalHash->{'outpathbase'} . "/" . $globalHash->{'runid'} . "/";
     $globalHash->{'localpath'} = $globalHash->{'localpathbase'} . "/" . $globalHash->{'runid'} . "/";
     $globalHash->{'tmpPath'} = $globalHash->{'tmpPath'} . "/" . $globalHash->{'runid'} . "/";
+    $globalHash->{'orig_pig_classpath'} = $ENV{'PIG_CLASSPATH'};
 }
 
 sub globalSetupConditional() {
@@ -202,18 +206,11 @@ sub runTest
     if ( $testCmd->{'pig'} && $self->hasCommandLineVerifications( $testCmd, $log) ) {
        my $oldpig;
 
-       if ( Util::isWindows() && $testCmd->{'pig_win'}) {
+       if ((Util::isWindows() || Util::isCygwin()) && $testCmd->{'pig_win'}) {
            $oldpig = $testCmd->{'pig'};
            $testCmd->{'pig'} = $testCmd->{'pig_win'};
        }
 
-       if ( $testCmd->{'hadoopversion'} == '23' && $testCmd->{'pig23'}) {
-           $oldpig = $testCmd->{'pig'};
-           $testCmd->{'pig'} = $testCmd->{'pig23'};
-       }
-       if ( $testCmd->{'hadoopversion'} == '23' && $testCmd->{'expected_err_regex23'}) {
-           $testCmd->{'expected_err_regex'} = $testCmd->{'expected_err_regex23'};
-       }
        my $res = $self->runPigCmdLine( $testCmd, $log, 1, $resources );
        if ($oldpig) {
            $testCmd->{'pig'} = $oldpig;
@@ -222,15 +219,11 @@ sub runTest
     } elsif( $testCmd->{'pig'} ){
        my $oldpig;
 
-       if ( Util::isWindows() && $testCmd->{'pig_win'}) {
+       if ((Util::isWindows() || Util::isCygwin()) && $testCmd->{'pig_win'}) {
            $oldpig = $testCmd->{'pig'};
            $testCmd->{'pig'} = $testCmd->{'pig_win'};
        }
 
-       if ( $testCmd->{'hadoopversion'} == '23' && $testCmd->{'pig23'}) {
-           $oldpig = $testCmd->{'pig'};
-           $testCmd->{'pig'} = $testCmd->{'pig23'};
-       }
        my $res = $self->runPig( $testCmd, $log, 1, $resources );
        if ($oldpig) {
            $testCmd->{'pig'} = $oldpig;
@@ -273,10 +266,11 @@ sub runPigCmdLine
 
     # Build the command
     my @baseCmd = $self->getPigCmd($testCmd, $log);
+    push(@baseCmd, ("-x", $testCmd->{'exectype'}));
     my @cmd = @baseCmd;
 
     # Add option -l giving location for secondary logs
-    ##!!! Should that even be here? 
+    ##!!! Should that even be here?
     my $locallog = $testCmd->{'localpath'} . $testCmd->{'group'} . "_" . $testCmd->{'num'} . ".log";
     push(@cmd, "-logfile");
     push(@cmd, $locallog);
@@ -308,7 +302,9 @@ sub runPigCmdLine
     $result{'rc'} = $? >> 8;
     $result{'output'} = $outfile;
     $result{'stdout'} = `cat $stdoutfile`;
+    $result{'stdout'} =~ s/\r\n/\n/g;
     $result{'stderr'} = `cat $stderrfile`;
+    $result{'stderr'} =~ s/\r\n/\n/g;
     $result{'stderr_file'} = $stderrfile;
 
     print $log "STD ERROR CONTAINS:\n$result{'stderr'}\n";
@@ -387,28 +383,33 @@ sub getPigCmd($$$)
 
     # set the PIG_CLASSPATH environment variable
 	my $separator = ":";
-	if(Util::isWindows()) {
+	if(Util::isWindows()||Util::isCygwin()) {
 	    $separator = ";";
 	}
-	my $pcp .= $testCmd->{'jythonjar'} if (defined($testCmd->{'jythonjar'}));
-    $pcp .= $separator . $testCmd->{'jrubyjar'} if (defined($testCmd->{'jrubyjar'}));
-    $pcp .= $separator . $testCmd->{'classpath'} if (defined($testCmd->{'classpath'}));
+    my $pcp .= $separator . $testCmd->{'classpath'} if (defined($testCmd->{'classpath'}));
 
     # Set it in our current environment.  It will get inherited by the IPC::Run
     # command.
-    $ENV{'PIG_CLASSPATH'} = $pcp;
+    $ENV{'PIG_CLASSPATH'} = $testCmd->{'orig_pig_classpath'} . $separator . $pcp;
 
     if ($testCmd->{'usePython'} eq "true") {
         @pigCmd = ("python");
         push(@pigCmd, "$testCmd->{'pigpath'}/bin/pig.py");
         # print ("Using pig too\n");
     } else {
+        my $pigbin = "";
         if(Util::isWindows()) {
-            @pigCmd = ("$testCmd->{'pigpath'}/bin/pig.cmd");
+            $pigbin = "$testCmd->{'pigpath'}/bin/pig.cmd";
         }
-        else {
-           @pigCmd = ("$testCmd->{'pigpath'}/bin/pig");
+        elsif (Util::isCygwin()) {
+            $pigbin = "$testCmd->{'pigpath'}/bin/pig.cmd";
+            $pigbin =~ s/\\/\//g;
+            $pigbin = `cygpath -u $pigbin`;
+            chomp($pigbin);
+        } else {
+            $pigbin = "$testCmd->{'pigpath'}/bin/pig";
         }
+        @pigCmd = ($pigbin);
     }
 
     if (defined($testCmd->{'additionaljars'})) {
@@ -423,9 +424,14 @@ sub getPigCmd($$$)
            $additionalJavaParams .= " -Dmapred.local.dir=$hadoopTmpDir -Dmapreduce.cluster.local.dir=$hadoopTmpDir";
         }
         TestDriver::dbg("Additional java parameters: [$additionalJavaParams].\n");
-
-        push(@pigCmd, ("-x", "local"));
     }
+
+    # Several OutOfMemoryErrors - Perm space issues were seen during running E2E tests, here max Perm size is adjusted
+    if ($testCmd->{'exectype'} eq "spark") {
+        $additionalJavaParams = "-XX:MaxPermSize=512m";
+    }
+    
+    push(@pigCmd, ("-x", $testCmd->{'exectype'}));
 
     if (defined($testCmd->{'java_params'}) || defined($additionalJavaParams)) {
         if (defined($testCmd->{'java_params'})) {
@@ -489,6 +495,7 @@ sub runPig
 
     # Build the command
     my @baseCmd = $self->getPigCmd($testCmd, $log);
+    push(@baseCmd, ("-x", $testCmd->{'exectype'}));
     my @cmd = @baseCmd;
 
     # Add option -l giving location for secondary logs
@@ -582,8 +589,8 @@ sub postProcessSingleOutputFile
     # Build command to:
     # 1. Combine part files
     my $fppCmd;
-    if(Util::isWindows()) {
-        my $delCmd = "del \"$localdir\\*.crc\"";
+    if(Util::isWindows()||Util::isCygwin()) {
+        my $delCmd = "del \"$localdir\\*.crc\" 2>NUL";
         print $log "$delCmd\n";
         system($delCmd);
         $fppCmd = "cat $localdir\\map* $localdir\\part* 2>NUL";
@@ -596,10 +603,15 @@ sub postProcessSingleOutputFile
     if (defined $testCmd->{'floatpostprocess'} &&
             defined $testCmd->{'delimiter'}) {
         $fppCmd .= " | perl $toolpath/floatpostprocessor.pl \"" .
-            $testCmd->{'delimiter'} . "\"";
+            $testCmd->{'delimiter'} . "\" " . $testCmd->{'decimals'};
     }
     
     $fppCmd .= " > $localdir/out_original";
+    
+    #Need slashes to be consistent for windows
+    if (Util::isWindows() || Util::isCygwin()) {
+        $fppCmd =~ s/\\/\//g;
+    }
     
     # run command
     print $log "$fppCmd\n";
@@ -610,6 +622,25 @@ sub postProcessSingleOutputFile
     print $log join(" ", @sortCmd) . "\n";
     IPC::Run::run(\@sortCmd, '>', "$localdir/out_sorted") or die "Sort for benchmark comparison failed on $localdir/out_original";
 
+    # Remove extra \r from $localdir/out_sorted for Windows benchmark
+    if(Util::isWindows()||Util::isCygwin()) {
+        my $tmpfile = "$localdir/out_sorted.tmp";
+        link("$localdir/out_sorted", $tmpfile) or
+            die "Unable to create temporary file $tmpfile, $!\n";
+        unlink("$localdir/out_sorted") or
+            die "Unable to unlink file $localdir/out_sorted, $!\n";
+        open(IFH, "< $tmpfile") or
+            die "Unable to open file $tmpfile, $!\n";
+        open(OFH, "> $localdir/out_sorted") or
+            die "Unable to open file $localdir/out_sorted, $!\n";
+        while(<IFH>) {
+            $_ =~ s/\r$//g;
+            print OFH $_;
+        }
+        close(OFH);
+        close(IFH);
+        unlink($tmpfile);
+    }
     return "$localdir/out_sorted";
 }
 
@@ -646,11 +677,13 @@ sub generateBenchmark
 		$modifiedTestCmd{'pig'} = $testCmd->{'verify_pig_script'};
 	}
     else {
-        if ( Util::isWindows() && $testCmd->{'pig_win'}) {
+        if ((Util::isWindows()||Util::isCygwin()) && $testCmd->{'pig_win'}) {
            $modifiedTestCmd{'pig'} = $testCmd->{'pig_win'};
        }
 		# Change so we're looking at the old version of Pig
-		$modifiedTestCmd{'pigpath'} = $testCmd->{'oldpigpath'};
+                if (defined $testCmd->{'oldpigpath'} && $testCmd->{'oldpigpath'} ne "") {
+		    $modifiedTestCmd{'pigpath'} = $testCmd->{'oldpigpath'};
+                }
                 if (defined($testCmd->{'oldconfigpath'})) {
 		    $modifiedTestCmd{'testconfigpath'} = $testCmd->{'oldconfigpath'};
                 }
@@ -675,6 +708,10 @@ sub generateBenchmark
                     $ENV{'YARN_CONF_DIR'} = $ENV{'OLD_YARN_CONF_DIR'};
                 }
 	}
+        # For exectype tez, we compare tez with mapreduce
+        if (defined $testCmd->{'benchmark_exectype'}) {
+            $modifiedTestCmd{'exectype'} = $testCmd->{'benchmark_exectype'};
+        }
 	# Modify the test number so we don't run over the actual test output
 	# and logs
 	$modifiedTestCmd{'num'} = $testCmd->{'num'} . "_benchmark";
@@ -914,6 +951,17 @@ sub compareSingleOutput
 {
     my ($self, $testResult, $testOutput, $benchmarkOutput, $log) = @_;
 
+    if ($ENV{'SORT_BENCHMARKS'} eq 'true'){
+        # Sort the benchmark Output.
+        my $benchmarkOutput_new = $benchmarkOutput.'_new';
+        my @sortCmd = ('sort', "$benchmarkOutput");
+        print $log join(" ", @sortCmd) . "\n";
+        IPC::Run::run(\@sortCmd, '>', "$benchmarkOutput_new") or die "Sort for benchmark ouput failed on $benchmarkOutput_new";
+        my @renameCmd = ('mv', "$benchmarkOutput_new" , "$benchmarkOutput");
+        print $log join(" ", @renameCmd) . "\n";
+        IPC::Run::run(\@renameCmd, \undef, $log, $log) or die "Rename command failed";
+    }
+
     # cksum the the two files to see if they are the same
     my ($testChksm, $benchmarkChksm);
     IPC::Run::run((['cat', $testOutput], '|', ['cksum']), \$testChksm,
@@ -988,19 +1036,17 @@ sub wrongExecutionMode($$)
 
     # Check that we should run this test.  If the current execution type
     # doesn't match the execonly flag, then skip this one.
-    my $wrong = ((defined $testCmd->{'execonly'} &&
-            $testCmd->{'execonly'} ne $testCmd->{'exectype'}));
+    my $wrong = 0;
 
-    if ($wrong) {
-        print $log "Skipping test $testCmd->{'group'}" . "_" .
-            $testCmd->{'num'} . " since it is executed only in " .
-            $testCmd->{'execonly'} . " mode and we are executing in " .
-            $testCmd->{'exectype'} . " mode.\n";
-        return $wrong;
-    }
-
-    if (defined $testCmd->{'ignore23'} && $testCmd->{'hadoopversion'}=='23') {
-        $wrong = 1;
+    if (defined $testCmd->{'execonly'}) {
+        my @exectypes = split(',', $testCmd->{'execonly'});
+        if (!grep /$testCmd->{'exectype'}/, @exectypes) {
+            print $log "Skipping test $testCmd->{'group'}" . "_" .
+                $testCmd->{'num'} . " since it is executed only in " .
+                $testCmd->{'execonly'} . " mode and we are executing in " .
+                $testCmd->{'exectype'} . " mode.\n";
+            return 1;
+        }
     }
 
     if ($wrong) {

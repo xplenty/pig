@@ -120,11 +120,6 @@ sub generateData
             'rows' => 10000,
             'outfile' => "singlefile/studenttab10k",
         }, {
-            'name' => "studenttab20m",
-            'filetype' => "studenttab",
-            'rows' => 20000000,
-            'outfile' => "singlefile/studenttab20m",
-        }, {
             'name' => "votertab10k",
             'filetype' => "votertab",
             'rows' => 10000,
@@ -210,20 +205,25 @@ sub generateData
             'rows' => 5000,
             'outfile' => "types/numbers.txt",
         }, {
-            'name' => "biggish",
-            'filetype' => "biggish",
-            'rows' => 1000000,
-            'outfile' => "singlefile/biggish",
-        }, {
             'name' => "prerank",
             'filetype' => "ranking",
             'rows' => 30,
             'outfile' => "singlefile/prerank",
+        }, {
+            'name' => "utf8Voter",
+            'filetype' => "utf8Voter",
+            'rows' => 30,
+            'outfile' => "utf8Data/选民/utf8Voter",
+        }, {
+            'name' => "utf8Student",
+            'filetype' => "utf8Student",
+            'rows' => 300,
+            'outfile' => "utf8Data/学生/utf8Student",
         }
     );
 
 	# Create the target directories
-    for my $dir ("singlefile", "dir", "types", "glob/star/somegood",
+    for my $dir ("singlefile", "utf8Data/选民", "utf8Data/学生", "dir", "types", "glob/star/somegood",
             "glob/star/moregood", "glob/star/bad") {
         my @cmd = ("mkdir", "-p", "$cfg->{'inpathbase'}/$dir");
 	    $self->runCmd($log, \@cmd);

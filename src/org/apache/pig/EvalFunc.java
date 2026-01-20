@@ -89,6 +89,15 @@ public abstract class EvalFunc<T>  {
      */
     protected Type returnType;
 
+    /**
+     * EvalFunc's schema type.
+     * @see {@link EvalFunc#getSchemaType()}
+     */
+    public static enum SchemaType {
+        NORMAL, //default field type
+        VARARG //if the last field of the (udf) schema is of type vararg
+    };
+    
     public EvalFunc() {
         // Resolve concrete type for T of EvalFunc<T>
         // 1. Build map from type param to type for class hierarchy from current class to EvalFunc
@@ -267,12 +276,23 @@ public abstract class EvalFunc<T>  {
     }
 
     /**
-     * Allow a UDF to specify a list of files it would like placed in the distributed
+     * Allow a UDF to specify a list of hdfs files it would like placed in the distributed
      * cache.  These files will be put in the cache for every job the UDF is used in.
      * The default implementation returns null.
      * @return A list of files
      */
     public List<String> getCacheFiles() {
+        return null;
+    }
+
+    /**
+     * Allow a UDF to specify a list of local files it would like placed in the distributed
+     * cache. These files will be put in the cache for every job the UDF is used in. Check for
+     * {@link FuncUtils} for utility function to facilitate it
+     * The default implementation returns null.
+     * @return A list of files
+     */
+    public List<String> getShipFiles() {
         return null;
     }
 
@@ -320,4 +340,46 @@ public abstract class EvalFunc<T>  {
     public Schema getInputSchema(){
         return this.inputSchemaInternal;
     }
+
+    /**
+     * Returns the {@link SchemaType} of the EvalFunc. User defined functions can override
+     * this method to return {@link SchemaType#VARARG}. In this case the last FieldSchema
+     * added to the Schema in {@link #getArgToFuncMapping()} will be considered as a vararg field.
+     * 
+     * @return the schema type of the UDF
+     */
+    public SchemaType getSchemaType() {
+        return SchemaType.NORMAL;
+    }
+
+    /**
+     * Whether the UDF should be evaluated at compile time if all inputs are constant.
+     * This is applicable for most UDF, however, if a UDF will access hdfs file which
+     * is not available at compile time, it has to be false
+     * @return Whether or not compile time calculation is allowed, default to false
+     * to ensure legacy UDF will get the right behavior
+     */
+    public boolean allowCompileTimeCalculation() {
+        return false;
+    }
+
+    public boolean needEndOfAllInputProcessing() {
+        return false;
+    }
+
+    public void setEndOfAllInput(boolean endOfAllInput) {
+    }
+
+    /**
+     * This will be called on both the front end and the back
+     * end during execution.
+     * @return the {@link LoadCaster} associated with this eval. Returning null
+     * indicates that casts from bytearray will pick the one associated with the
+     * parameters when they all come from the same loadcaster type.
+     * @throws IOException if there is an exception during LoadCaster
+     */
+    public LoadCaster getLoadCaster() throws IOException {
+        return null;
+    }
+
 }

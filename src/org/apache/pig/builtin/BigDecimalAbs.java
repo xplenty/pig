@@ -27,6 +27,13 @@ import org.apache.pig.data.Tuple;
 public class BigDecimalAbs extends EvalFunc<BigDecimal> {
     @Override
     public BigDecimal exec(Tuple input) throws IOException {
+        if (input == null || input.size() == 0 || input.get(0) == null)
+            return null;
         return ((BigDecimal)input.get(0)).abs();
+    }
+
+    @Override
+    public boolean allowCompileTimeCalculation() {
+        return true;
     }
 }
