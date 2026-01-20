@@ -30,7 +30,7 @@ jobs:
       - name: Build with Ant
         run: |
           export JRE_HOME=${JAVA_HOME}
-          ant jar -Dhadoopversion=2 -Dhbaseversion=1
+          ant jar -Dhadoopversion=23 -Dhbaseversion=95
 
       - name: Verify JAR was built
         run: |
@@ -56,17 +56,17 @@ jobs:
       - name: Extract version from build.xml
         id: version
         run: |
-          # Extract pig.version and pig.version.patch from build.xml
-          PIG_MAJOR=$(grep -oP 'name="pig.version" value="\K[^"]+' build.xml)
-          PIG_PATCH=$(grep -oP 'name="pig.version.patch" value="\K[^"]+' build.xml)
-          PIG_VERSION="${PIG_MAJOR}.${PIG_PATCH}"
-          echo "PIG_VERSION=${PIG_VERSION}" >> $GITHUB_ENV
-          echo "Detected version: ${PIG_VERSION}"
+          # Extract pig.version and pig.version.suffix from build.xml
+          PIG_VERSION=$(grep -oP 'name="pig.version" value="\K[^"]+' build.xml)
+          PIG_SUFFIX=$(grep -oP 'name="pig.version.suffix" value="\K[^"]+' build.xml || echo "")
+          FULL_VERSION="${PIG_VERSION}${PIG_SUFFIX}"
+          echo "PIG_VERSION=${FULL_VERSION}" >> $GITHUB_ENV
+          echo "Detected version: ${FULL_VERSION}"
 
       - name: Build with Ant
         run: |
           export JRE_HOME=${JAVA_HOME}
-          ant jar -Dhadoopversion=2 -Dhbaseversion=1
+          ant jar -Dhadoopversion=23 -Dhbaseversion=95
 
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
