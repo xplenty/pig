@@ -6,6 +6,7 @@ target/
 ivy/*.jar
 pig.jar
 pig-withouthadoop.jar
+pig-*.jar
 *.iml
 *.ipr
 *.iws
@@ -18,9 +19,10 @@ pig-withouthadoop.jar
 *.classpath
 *.project
 *.crc
-.ant-targets-build.xml
-contrib/piggybank/java/piggybank.jar
-conf/log4j.properties
-lib/jdiff/pig_*SNAPSHOT.xml
-test/resources/*.jar
-!ivy/ant-contrib-1.0b3.jar
+# Mac finder artifacts
+.DS_Store
+
+# Build artifacts - downloaded dependencies and generated files
+lib/
+legacy/
+${output.jarfile.withouthadoop-h2}
