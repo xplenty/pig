@@ -6,6 +6,7 @@ target/
 ivy/*.jar
 pig.jar
 pig-withouthadoop.jar
+pig-*.jar
 *.iml
 *.ipr
 *.iws
@@ -20,3 +21,8 @@ pig-withouthadoop.jar
 *.crc
 # Mac finder artifacts
 .DS_Store
+
+# Build artifacts - downloaded dependencies and generated files
+lib/
+legacy/
+${output.jarfile.withouthadoop-h2}
