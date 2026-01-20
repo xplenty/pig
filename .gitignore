@@ -20,3 +20,9 @@ pig-withouthadoop.jar
 *.crc
 # Mac finder artifacts
 .DS_Store
+
+# Build artifacts
+lib/
+legacy/
+pig-*.jar
+${output.jarfile.withouthadoop-h2}
