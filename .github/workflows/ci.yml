@@ -27,6 +27,12 @@ jobs:
           echo "JRE_HOME: $JRE_HOME"
           java -version
 
+      - name: Download ant-contrib
+        run: |
+          mkdir -p ivy
+          curl -L -o ivy/ant-contrib-1.0b3.jar \
+            https://repo1.maven.org/maven2/ant-contrib/ant-contrib/1.0b3/ant-contrib-1.0b3.jar
+
       - name: Build with Ant
         run: |
           export JRE_HOME=${JAVA_HOME}
@@ -71,6 +77,12 @@ jobs:
           FULL_VERSION="${PIG_VERSION}${PIG_SUFFIX}"
           echo "PIG_VERSION=${FULL_VERSION}" >> $GITHUB_ENV
           echo "Detected version: ${FULL_VERSION}"
+
+      - name: Download ant-contrib
+        run: |
+          mkdir -p ivy
+          curl -L -o ivy/ant-contrib-1.0b3.jar \
+            https://repo1.maven.org/maven2/ant-contrib/ant-contrib/1.0b3/ant-contrib-1.0b3.jar
 
       - name: Build with Ant
         run: |
