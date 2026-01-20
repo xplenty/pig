@@ -37,6 +37,15 @@ jobs:
           ls -la build/*.jar
           ls -la *.jar || true
 
+      - name: Upload JAR as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pig-jar
+          path: |
+            build/pig-*.jar
+            pig-*.jar
+          retention-days: 30
+
   deploy:
     name: Deploy to JFrog
     runs-on: ubuntu-latest
