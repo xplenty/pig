@@ -90,7 +90,6 @@ import org.joda.time.format.PeriodFormat;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
-import com.google.common.io.Closeables;
 
 /**
  * Main class for Pig engine.
@@ -823,7 +822,13 @@ public class Main {
            } catch (IOException e)  {
                log.warn("Cannot open log4j properties file " + log4jconf + ", using default");
            } finally {
-               Closeables.closeQuietly(propertyReader);
+               if (propertyReader != null) {
+                   try {
+                       propertyReader.close();
+                   } catch (IOException e) {
+                       // ignore
+                   }
+               }
            }
        }
        return properties;
