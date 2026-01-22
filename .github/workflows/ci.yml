@@ -107,35 +107,19 @@ jobs:
       - name: Deploy to staging
         if: github.ref == 'refs/heads/staging'
         run: |
-          # Upload the main pig JAR
+          # Upload the pig JAR to the correct path structure
           jf rt upload \
-            "build/pig-*.jar" \
-            "sharelib-stg/org/apache/pig/pig/${PIG_VERSION}/" \
+            "build/pig-23-withouthadoop-*.jar" \
+            "sharelib-stg/common/pig-23-withouthadoop/${PIG_VERSION}/" \
             --server-id=xplenty-artifactory \
-            --flat=false
-          
-          # Also upload the root-level JAR if it exists
-          if [ -f "pig-${PIG_VERSION}.jar" ]; then
-            jf rt upload \
-              "pig-${PIG_VERSION}.jar" \
-              "sharelib-stg/org/apache/pig/pig/${PIG_VERSION}/" \
-              --server-id=xplenty-artifactory
-          fi
+            --flat=true
 
       - name: Deploy to production
         if: github.ref == 'refs/heads/master'
         run: |
-          # Upload the main pig JAR
+          # Upload the pig JAR to the correct path structure
           jf rt upload \
-            "build/pig-*.jar" \
-            "sharelib/org/apache/pig/pig/${PIG_VERSION}/" \
+            "build/pig-23-withouthadoop-*.jar" \
+            "sharelib/common/pig-23-withouthadoop/${PIG_VERSION}/" \
             --server-id=xplenty-artifactory \
-            --flat=false
-          
-          # Also upload the root-level JAR if it exists
-          if [ -f "pig-${PIG_VERSION}.jar" ]; then
-            jf rt upload \
-              "pig-${PIG_VERSION}.jar" \
-              "sharelib/org/apache/pig/pig/${PIG_VERSION}/" \
-              --server-id=xplenty-artifactory
-          fi
+            --flat=true
