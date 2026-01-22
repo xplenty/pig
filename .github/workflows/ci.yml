@@ -94,26 +94,24 @@ jobs:
 
       - name: Deploy to staging
         if: github.ref == 'refs/heads/staging'
-        env:
-          JF_URL: https://xplenty.jfrog.io/artifactory
-          JF_USER: ${{ secrets.JFROG_USERNAME }}
-          JF_PASSWORD: ${{ secrets.JFROG_PASSWORD }}
         run: |
           # Upload the pig JAR to the correct path structure
           jf rt upload \
             "build/pig-23-withouthadoop-*.jar" \
             "sharelib-stg/common/pig-23-withouthadoop/${PIG_VERSION}/" \
+            --url=https://xplenty.jfrog.io/artifactory \
+            --user=${{ secrets.JFROG_USERNAME }} \
+            --password=${{ secrets.JFROG_PASSWORD }} \
             --flat=true
 
       - name: Deploy to production
         if: github.ref == 'refs/heads/master'
-        env:
-          JF_URL: https://xplenty.jfrog.io/artifactory
-          JF_USER: ${{ secrets.JFROG_USERNAME }}
-          JF_PASSWORD: ${{ secrets.JFROG_PASSWORD }}
         run: |
           # Upload the pig JAR to the correct path structure
           jf rt upload \
             "build/pig-23-withouthadoop-*.jar" \
             "sharelib/common/pig-23-withouthadoop/${PIG_VERSION}/" \
+            --url=https://xplenty.jfrog.io/artifactory \
+            --user=${{ secrets.JFROG_USERNAME }} \
+            --password=${{ secrets.JFROG_PASSWORD }} \
             --flat=true
