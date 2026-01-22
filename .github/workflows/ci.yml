@@ -91,35 +91,29 @@ jobs:
 
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
-        env:
-          JF_URL: https://xplenty.jfrog.io
-          JF_USER: ${{ secrets.JFROG_USERNAME }}
-          JF_PASSWORD: ${{ secrets.JFROG_PASSWORD }}
-
-      - name: Configure JFrog CLI
-        run: |
-          jf config add xplenty-artifactory \
-            --url=https://xplenty.jfrog.io/artifactory \
-            --user=${{ secrets.JFROG_USERNAME }} \
-            --password=${{ secrets.JFROG_PASSWORD }} \
-            --interactive=false
 
       - name: Deploy to staging
         if: github.ref == 'refs/heads/staging'
+        env:
+          JF_URL: https://xplenty.jfrog.io/artifactory
+          JF_USER: ${{ secrets.JFROG_USERNAME }}
+          JF_PASSWORD: ${{ secrets.JFROG_PASSWORD }}
         run: |
           # Upload the pig JAR to the correct path structure
           jf rt upload \
             "build/pig-23-withouthadoop-*.jar" \
             "sharelib-stg/common/pig-23-withouthadoop/${PIG_VERSION}/" \
-            --server-id=xplenty-artifactory \
             --flat=true
 
       - name: Deploy to production
         if: github.ref == 'refs/heads/master'
+        env:
+          JF_URL: https://xplenty.jfrog.io/artifactory
+          JF_USER: ${{ secrets.JFROG_USERNAME }}
+          JF_PASSWORD: ${{ secrets.JFROG_PASSWORD }}
         run: |
           # Upload the pig JAR to the correct path structure
           jf rt upload \
             "build/pig-23-withouthadoop-*.jar" \
             "sharelib/common/pig-23-withouthadoop/${PIG_VERSION}/" \
-            --server-id=xplenty-artifactory \
             --flat=true
