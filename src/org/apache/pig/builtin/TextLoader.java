@@ -18,10 +18,12 @@
 package org.apache.pig.builtin;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.Map;
 
-import org.joda.time.DateTime;
-
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.InputFormat;
 import org.apache.hadoop.mapreduce.Job;
@@ -29,6 +31,7 @@ import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.pig.LoadCaster;
 import org.apache.pig.LoadFunc;
+import org.apache.pig.PigConfiguration;
 import org.apache.pig.PigException;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
 import org.apache.pig.backend.executionengine.ExecException;
@@ -39,6 +42,7 @@ import org.apache.pig.data.DataBag;
 import org.apache.pig.data.DataByteArray;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
+import org.joda.time.DateTime;
 
 
 /**
@@ -50,6 +54,12 @@ public class TextLoader extends LoadFunc implements LoadCaster {
     protected RecordReader in = null;
     private TupleFactory mTupleFactory = TupleFactory.getInstance();
     private String loadLocation;
+    protected final Log mLog = LogFactory.getLog(getClass());
+
+    // it determines whether to depend on pig's own Bzip2TextInputFormat or
+    // to simply depend on hadoop for handling bzip2 inputs
+    private boolean bzipinput_usehadoops ;
+
 
     @Override
     public Tuple getNext() throws IOException {
@@ -57,7 +67,7 @@ public class TextLoader extends LoadFunc implements LoadCaster {
             boolean notDone = in.nextKeyValue();
             if (!notDone) {
                 return null;
-            }                                                                                           
+            }
             Text value = (Text) in.getCurrentValue();
             byte[] ba = value.getBytes();
             // make a copy of the bytes representing the input since
@@ -122,7 +132,7 @@ public class TextLoader extends LoadFunc implements LoadCaster {
         String msg = "TextLoader does not support conversion to Double.";
         throw new ExecException(msg, errCode, PigException.BUG);
     }
-    
+
     /**
      * TextLoader does not support conversion to DateTime
      * @throws IOException if the value cannot be cast.
@@ -135,7 +145,7 @@ public class TextLoader extends LoadFunc implements LoadCaster {
     }
 
     /**
-     * Cast data from bytes to chararray value.  
+     * Cast data from bytes to chararray value.
      * @param b byte array to be cast.
      * @return String value.
      * @throws IOException if the value cannot be cast.
@@ -145,15 +155,6 @@ public class TextLoader extends LoadFunc implements LoadCaster {
         return new String(b);
     }
 
-    @Override
-    public Map<String, Object> bytesToMap(byte[] b) throws IOException {
-        return bytesToMap(b, null);
-    }
-    
-    /**
-     * TextLoader does not support conversion to Map
-     * @throws IOException if the value cannot be cast.
-     */
     @Override
     public Map<String, Object> bytesToMap(byte[] b, ResourceFieldSchema schema) throws IOException {
         int errCode = 2109;
@@ -241,10 +242,27 @@ public class TextLoader extends LoadFunc implements LoadCaster {
     }
 
     @Override
+    public BigInteger bytesToBigInteger(byte[] b) throws IOException {
+        int errCode = 2109;
+        String msg = "TextLoader does not support conversion to BigInteger.";
+        throw new ExecException(msg, errCode, PigException.BUG);
+    }
+
+    @Override
+    public BigDecimal bytesToBigDecimal(byte[] b) throws IOException {
+        int errCode = 2109;
+        String msg = "TextLoader does not support conversion to BigDecimal.";
+        throw new ExecException(msg, errCode, PigException.BUG);
+    }
+
+    @Override
     public InputFormat getInputFormat() {
-        if(loadLocation.endsWith(".bz2") || loadLocation.endsWith(".bz")) {
+        if((loadLocation.endsWith(".bz2") || loadLocation.endsWith(".bz"))
+                && !bzipinput_usehadoops ) {
+            mLog.info("Using Bzip2TextInputFormat");
             return new Bzip2TextInputFormat();
         } else {
+            mLog.info("Using PigTextInputFormat");
             return new PigTextInputFormat();
         }
     }
@@ -253,16 +271,18 @@ public class TextLoader extends LoadFunc implements LoadCaster {
     public LoadCaster getLoadCaster() {
         return this;
     }
-    
+
     @Override
     public void prepareToRead(RecordReader reader, PigSplit split) {
-        in = reader;        
+        in = reader;
     }
 
     @Override
     public void setLocation(String location, Job job) throws IOException {
         loadLocation = location;
         FileInputFormat.setInputPaths(job, location);
+        bzipinput_usehadoops = job.getConfiguration().getBoolean(
+                                  PigConfiguration.PIG_BZIP_USE_HADOOP_INPUTFORMAT,
+                                  true );
     }
-
 }

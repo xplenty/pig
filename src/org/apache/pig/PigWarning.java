@@ -19,7 +19,7 @@ package org.apache.pig;
 
 /**
  * An enum to enumerate the warning types in Pig
- * 
+ *
  */
 public enum PigWarning {
     ACCESSING_NON_EXISTENT_FIELD,
@@ -33,13 +33,15 @@ public enum PigWarning {
     IMPLICIT_CAST_TO_FLOAT,
     IMPLICIT_CAST_TO_INT,
     IMPLICIT_CAST_TO_LONG,
+    IMPLICIT_CAST_TO_BIGINTEGER,
+    IMPLICIT_CAST_TO_BIGDECIMAL,
     IMPLICIT_CAST_TO_BOOLEAN,
     IMPLICIT_CAST_TO_DATETIME,
     IMPLICIT_CAST_TO_MAP,
     IMPLICIT_CAST_TO_TUPLE,
     TOO_LARGE_FOR_INT,
     MULTI_LEAF_MAP,
-    MULTI_LEAF_REDUCE,
+    MULTI_ROOT_REDUCE,
     NON_PACKAGE_REDUCE_PLAN_ROOT,
     NON_EMPTY_COMBINE_PLAN,
     PROGRESS_REPORTER_NOT_PROVIDED,
@@ -64,6 +66,10 @@ public enum PigWarning {
     REDUCER_COUNT_LOW,
     NULL_COUNTER_COUNT,
     DELETE_FAILED,
-    PROJECTION_INVALID_RANGE
+    PROJECTION_INVALID_RANGE,
+    NO_LOAD_FUNCTION_FOR_CASTING_BYTEARRAY,
+    SKIP_UDF_CALL_FOR_NULL,
+    SPARK_WARN, //bulk collection of warnings under Spark exec engine
+    SPARK_CUSTOM_WARN // same as above but for custom UDF warnings only, see PIG-2207
     ;
 }

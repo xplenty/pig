@@ -23,6 +23,8 @@ import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -43,7 +45,6 @@ import org.apache.pig.impl.util.ObjectSerializer;
  */
 public class DefaultTuple extends AbstractTuple {
 
-    protected boolean isNull = false;
     private static final long serialVersionUID = 2L;
     protected List<Object> mFields;
 
@@ -59,7 +60,7 @@ public class DefaultTuple extends AbstractTuple {
     /**
      * Construct a tuple with a known number of fields. Package level so that callers cannot directly invoke it.
      * <br>Resulting tuple is filled pre-filled with null elements. Time complexity: O(N), after allocation
-     * 
+     *
      * @param size
      *            Number of fields to allocate in the tuple.
      */
@@ -82,7 +83,7 @@ public class DefaultTuple extends AbstractTuple {
     /**
      * Construct a tuple from an existing list of objects. Package level so that callers cannot directly invoke it.
      * <br>Time complexity: O(1)
-     * 
+     *
      * @param c
      *            List of objects to turn into a tuple. This list will be kept as part of the tuple.
      * @param junk
@@ -94,7 +95,7 @@ public class DefaultTuple extends AbstractTuple {
 
     /**
      * Find the size of the tuple. Used to be called arity().
-     * 
+     *
      * @return number of fields in the tuple.
      */
     @Override
@@ -104,7 +105,7 @@ public class DefaultTuple extends AbstractTuple {
 
     /**
      * Get the value in a given field.
-     * 
+     *
      * @param fieldNum
      *            Number of the field to get the value for.
      * @return value, as an Object.
@@ -118,7 +119,7 @@ public class DefaultTuple extends AbstractTuple {
 
     /**
      * Get all of the fields in the tuple as a list.
-     * 
+     *
      * @return List&lt;Object&gt; containing the fields of the tuple in order.
      */
     @Override
@@ -128,7 +129,7 @@ public class DefaultTuple extends AbstractTuple {
 
     /**
      * Set the value in a given field.
-     * 
+     *
      * @param fieldNum
      *            Number of the field to set the value for.
      * @param val
@@ -145,7 +146,7 @@ public class DefaultTuple extends AbstractTuple {
      * Append a field to a tuple. This method is not efficient as it may force copying of existing data in order to grow
      * the data structure. Whenever possible you should construct your Tuple with the newTuple(int) method and then fill
      * in the values with set(), rather than construct it with newTuple() and append values.
-     * 
+     *
      * @param val
      *            Object to append to the tuple.
      */
@@ -157,17 +158,12 @@ public class DefaultTuple extends AbstractTuple {
     /**
      * Determine the size of tuple in memory. This is used by data bags to determine their memory size. This need not be
      * exact, but it should be a decent estimation.
-     * 
+     *
      * @return estimated memory size.
      */
     @Override
     public long getMemorySize() {
         Iterator<Object> i = mFields.iterator();
-        // fixed overhead
-        long empty_tuple_size = 8 /* tuple object header */
-        + 8 /* isNull - but rounded to 8 bytes as total obj size needs to be multiple of 8 */
-        + 8 /* mFields reference */
-        + 32 /* mFields array list fixed size */;
 
         // rest of the fixed portion of mfields size is accounted within empty_tuple_size
         long mfields_var_size = SizeUtil.roundToEight(4 + 4 * mFields.size());
@@ -175,7 +171,11 @@ public class DefaultTuple extends AbstractTuple {
         // which is probably from the minimum size of this array list
         mfields_var_size = Math.max(40, mfields_var_size);
 
-        long sum = empty_tuple_size + mfields_var_size;
+        // fixed overhead = 48 bytes
+        //8 - tuple object header
+        //8 - mFields reference
+        //32 - mFields array list fixed size
+        long sum = 48 + mfields_var_size;
         while (i.hasNext()) {
             sum += SizeUtil.getPigObjMemSize(i.next());
         }
@@ -228,13 +228,8 @@ public class DefaultTuple extends AbstractTuple {
 
         @Override
         public void setConf(Configuration conf) {
-            if (!(conf instanceof JobConf)) {
-                mLog.warn("Expected jobconf in setConf, got " + conf.getClass().getName());
-                return;
-            }
-            JobConf jconf = (JobConf) conf;
             try {
-                mAsc = (boolean[]) ObjectSerializer.deserialize(jconf.get("pig.sortOrder"));
+                mAsc = (boolean[]) ObjectSerializer.deserialize(conf.get("pig.sortOrder"));
             } catch (IOException ioe) {
                 mLog.error("Unable to deserialize pig.sortOrder " + ioe.getMessage());
                 throw new RuntimeException(ioe);
@@ -323,6 +318,42 @@ public class DefaultTuple extends AbstractTuple {
                             double dv2 = bb2.getDouble();
                             rc = Double.compare(dv1, dv2);
                             break;
+                        case DataType.BIGINTEGER: {
+                            if (bb1.get() != DataType.BYTEARRAY || bb2.get() != DataType.BYTEARRAY) {
+                                throw new RuntimeException("Issue in comparing raw bytes for DefaultTuple! BIGINTEGER was not serialized with BYTEARRAY");
+                            }
+
+                            int basz1 = bb1.getInt();
+                            int basz2 = bb2.getInt();
+                            byte[] ba1 = new byte[basz1];
+                            byte[] ba2 = new byte[basz2];
+                            bb1.get(ba1);
+                            bb2.get(ba2);
+                            rc = new BigInteger(ba1).compareTo(new BigInteger(ba2));
+                            break;
+                        }
+                        case DataType.BIGDECIMAL: {
+                            byte catype1 = bb1.get();
+                            byte catype2 = bb2.get();
+                            int casz1 = (catype1 == DataType.CHARARRAY) ? bb1.getShort() : bb1.getInt();
+                            int casz2 = (catype2 == DataType.CHARARRAY) ? bb2.getShort() : bb2.getInt();
+                            byte[] ca1 = new byte[casz1];
+                            byte[] ca2 = new byte[casz2];
+                            bb1.get(ca1);
+                            bb2.get(ca2);
+                            String str1 = null,
+                            str2 = null;
+                            try {
+                                str1 = new String(ca1, DataReaderWriter.UTF8);
+                                str2 = new String(ca2, DataReaderWriter.UTF8);
+                            } catch (UnsupportedEncodingException uee) {
+                                mLog.warn("Unsupported string encoding", uee);
+                                uee.printStackTrace();
+                            }
+                            if (str1 != null && str2 != null)
+                                rc = new BigDecimal(str1).compareTo(new BigDecimal(str2));
+                            break;
+                        }
                         case DataType.DATETIME:
                             long dtv1 = bb1.getLong();
                             bb1.position(bb1.position() + 2); // move cursor forward without read the timezone bytes

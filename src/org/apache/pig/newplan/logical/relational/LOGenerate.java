@@ -33,8 +33,11 @@ import org.apache.pig.newplan.logical.relational.LogicalSchema.LogicalFieldSchem
 public class LOGenerate extends LogicalRelationalOperator {
      private List<LogicalExpressionPlan> outputPlans;
      private boolean[] flattenFlags;
+     // mUserDefinedSchema is the original input from the user, we don't suppose
+     // to store uid in mUserDefinedSchema
      private List<LogicalSchema> mUserDefinedSchema = null;
      private List<LogicalSchema> outputPlanSchemas = null;
+     private List<LogicalSchema> expSchemas = null;
      // If LOGenerate generate new uid, cache it here.
      // This happens when expression plan does not have complete schema, however,
      // user give complete schema in ForEach statement in script
@@ -62,12 +65,14 @@ public class LOGenerate extends LogicalRelationalOperator {
         
         if (uidOnlySchemas == null) {
             uidOnlySchemas = new ArrayList<LogicalSchema>();
-            for (int i=0;i<outputPlans.size();i++)
+            for (int i=0;i<outputPlans.size();i++) {
                 uidOnlySchemas.add(null);
+            }
         }
         
         schema = new LogicalSchema();
         outputPlanSchemas = new ArrayList<LogicalSchema>();
+        expSchemas = new ArrayList<LogicalSchema>();
         
         for(int i=0; i<outputPlans.size(); i++) {
             LogicalExpression exp = (LogicalExpression)outputPlans.get(i).getSources().get(0);
@@ -90,19 +95,17 @@ public class LOGenerate extends LogicalRelationalOperator {
                 fieldSchema = exp.getFieldSchema().deepCopy();
                 
                 expSchema = new LogicalSchema();
-                if ((fieldSchema.type != DataType.TUPLE && fieldSchema.type != DataType.BAG)||!flattenFlags[i]) {
+                if ((fieldSchema.type != DataType.TUPLE && fieldSchema.type != DataType.BAG && fieldSchema.type != DataType.MAP) || !flattenFlags[i]) {
                     // if type is primitive, just add to schema
-                    if (fieldSchema!=null)
+                    if (fieldSchema != null)
                         expSchema.addField(fieldSchema);
-                    else
-                        expSchema = null;
                 } else {
-                    // if bag/tuple don't have inner schema, after flatten, we don't have schema for the entire operator
+                    // if bag/tuple/map don't have inner schema, after flatten, we don't have schema for the entire operator
                     if (fieldSchema.schema==null) {
                         expSchema = null;
                     }
                     else {
-                     // if we come here, we get a BAG/Tuple with flatten, extract inner schema of the tuple as expSchema
+                     // if we come here, we get a BAG/Tuple/Map with flatten, extract inner schema of the tuple as expSchema
                         List<LogicalSchema.LogicalFieldSchema> innerFieldSchemas = new ArrayList<LogicalSchema.LogicalFieldSchema>();
                         if (flattenFlags[i]) {
                             if (fieldSchema.type == DataType.BAG) {
@@ -114,13 +117,23 @@ public class LOGenerate extends LogicalRelationalOperator {
                                         fs.alias = fs.alias == null ? null : fieldSchema.alias + "::" + fs.alias;
                                     }
                                 }
+                            } else if (fieldSchema.type == DataType.MAP) {
+                                //should only contain 1 schemafield for Map's value
+                                innerFieldSchemas = fieldSchema.schema.getFields();
+                                LogicalSchema.LogicalFieldSchema fsForValue = innerFieldSchemas.get(0);
+                                fsForValue.alias = fieldSchema.alias + "::value";
+
+                                LogicalSchema.LogicalFieldSchema fsForKey = new LogicalFieldSchema(
+                                        fieldSchema.alias + "::key" , null, DataType.CHARARRAY, fieldSchema.uid);
+
+                                expSchema.addField(fsForKey);
                             } else { // DataType.TUPLE
                                 innerFieldSchemas = fieldSchema.schema.getFields();
                                 for (LogicalSchema.LogicalFieldSchema fs : innerFieldSchemas) {
                                     fs.alias = fs.alias == null ? null : fieldSchema.alias + "::" + fs.alias;
                                 }
                             }
-                            
+
                             for (LogicalSchema.LogicalFieldSchema fs : innerFieldSchemas)
                                 expSchema.addField(fs);
                         }
@@ -134,6 +147,7 @@ public class LOGenerate extends LogicalRelationalOperator {
             if (expSchema!=null && expSchema.size()==0)
                 expSchema = null;
             LogicalSchema planSchema = new LogicalSchema();
+            expSchemas.add(expSchema);
             if (mUserDefinedSchemaCopy!=null) {
                 LogicalSchema mergedSchema = new LogicalSchema();
                 // merge with userDefinedSchema
@@ -143,11 +157,6 @@ public class LOGenerate extends LogicalRelationalOperator {
                         fs.stampFieldSchema();
                         mergedSchema.addField(new LogicalFieldSchema(fs));
                     }
-                    if(mergedSchema.size() == 1 && mergedSchema.getField(0).type == DataType.NULL){
-                        //this is the use case where a new alias has been specified by user
-                        mergedSchema.getField(0).type = DataType.BYTEARRAY;
-                    }
-                
                 } else {
 
                     // Merge uid with the exp field schema
@@ -159,8 +168,10 @@ public class LOGenerate extends LogicalRelationalOperator {
                     mergedSchema.mergeUid(expSchema);
 
                 }
-                for (LogicalFieldSchema fs : mergedSchema.getFields())
+                setNullTypeToByteArrayType(mergedSchema);
+                for (LogicalFieldSchema fs : mergedSchema.getFields()) {
                     planSchema.addField(fs);
+                }
             } else {
                 // if any plan do not have schema, the whole LOGenerate do not have schema
                 if (expSchema==null) {
@@ -191,6 +202,7 @@ public class LOGenerate extends LogicalRelationalOperator {
             schema = null;
             outputPlanSchemas = null;
         }
+        
         return schema;
     }
 
@@ -304,5 +316,21 @@ public class LOGenerate extends LogicalRelationalOperator {
     public void resetSchema(){
         super.resetSchema();
         outputPlanSchemas = null;
+    }
+
+    public List<LogicalSchema> getExpSchemas() {
+        return expSchemas;
+    }
+
+    private void setNullTypeToByteArrayType (LogicalSchema s1) {
+        if( s1 != null ) {
+            for (LogicalFieldSchema fs : s1.getFields()) {
+                if( DataType.isSchemaType(fs.type) ) {
+                    setNullTypeToByteArrayType(fs.schema);
+                } else if(fs.type == DataType.NULL) {
+                    fs.type = DataType.BYTEARRAY;
+                }
+            }
+        }
     }
 }

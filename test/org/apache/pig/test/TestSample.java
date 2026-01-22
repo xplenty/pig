@@ -23,7 +23,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Iterator;
 
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.logicalLayer.FrontendException;
@@ -38,21 +37,24 @@ public class TestSample {
     private String tmpfilepath;
 
     private int DATALEN = 1024;
-    static MiniCluster cluster = MiniCluster.buildCluster();
-    
+    static MiniGenericCluster cluster = MiniGenericCluster.buildCluster();
+
     @Before
     public void setUp()
     throws Exception
     {
-        pig = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        pig = new PigServer(cluster.getExecType(), cluster.getProperties());
 
         tmpFile = File.createTempFile( this.getClass().getName(), ".txt");
+        tmpFile.delete(); // we don't want the file, just the temp path
+
+        tmpfilepath = Util.removeColon(tmpFile.getCanonicalPath());
+
         String input[] = new String[DATALEN];
         for(int i = 0; i < DATALEN; i++) {
             input[i] = Integer.toString(i);
         }
-        
-        tmpfilepath = tmpFile.getCanonicalPath();
+
         Util.createInputFile(cluster, tmpfilepath, input);
     }
 
@@ -62,7 +64,7 @@ public class TestSample {
     {
         Util.deleteFile(cluster, tmpfilepath);
     }
-    
+
     @AfterClass
     public static void oneTimeTearDown() throws Exception {
         cluster.shutDown();
@@ -90,51 +92,51 @@ public class TestSample {
     public void testSample_None()
     throws Exception
     {
-        verify("myid = sample (load '"+ tmpfilepath + "') 0.0;", 0, 0);
+        verify("myid = sample (load '"+ Util.encodeEscape(tmpfilepath) + "') 0.0;", 0, 0);
     }
 
     @Test
     public void testSample_All()
     throws Exception
     {
-        verify("myid = sample (load '"+ tmpfilepath + "') 1.0;", DATALEN, DATALEN);
+       verify("myid = sample (load '"+ Util.encodeEscape(tmpfilepath) + "') 1.0;", DATALEN, DATALEN);
     }
 
     @Test
     public void testSample_Some()
     throws Exception
     {
-        verify("myid = sample (load '"+ tmpfilepath + "') 0.5;", DATALEN/3, DATALEN*2/3);
+       verify("myid = sample (load '"+ Util.encodeEscape(tmpfilepath) + "') 0.5;", DATALEN/3, DATALEN*2/3);
     }
-    
+
     @Test
     public void testSample_VariableNone() throws Exception {
-        verify("a = LOAD '" + tmpfilepath + "'; " +
+        verify("a = LOAD '" + Util.encodeEscape(tmpfilepath) + "'; " +
                 "b = GROUP a all;" +
                 "c = FOREACH b GENERATE COUNT(a) AS count;" +
         		"myid = SAMPLE a (c.count - c.count);", 0, 0);
 }
-    
+
     @Test
     public void testSample_VariableAll() throws Exception {
-        verify("a = LOAD '" + tmpfilepath + "'; " +
+        verify("a = LOAD '" + Util.encodeEscape(tmpfilepath) + "'; " +
                 "b = GROUP a all;" +
                 "c = FOREACH b GENERATE COUNT(a) AS count;" +
                 "myid = SAMPLE a 1.0 * (c.count / c.count) PARALLEL 2;", DATALEN, DATALEN); // test for PIG-2156
     }
-    
+
     @Test
     public void testSample_VariableSome() throws Exception {
-        verify("a = LOAD '" + tmpfilepath + "'; " +
+        verify("a = LOAD '" + Util.encodeEscape(tmpfilepath) + "'; " +
                 "b = GROUP a all;" +
                 "c = FOREACH b GENERATE COUNT(a) AS count;" +
                 "myid = SAMPLE a (c.count / (2.0 * c.count) );", DATALEN/3, DATALEN*2/3);
     }
-    
+
     @Test(expected=FrontendException.class)
     public void testSampleScalarException() throws IOException {
-        String query = 
-            "a = load '" + tmpfilepath + "';" + 
+        String query =
+            "a = load '" + Util.encodeEscape(tmpfilepath) + "';" +
             "b = sample a $0;" // reference to non scalar context is not allowed
             ;
 

@@ -30,10 +30,10 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOpe
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.PORelationToExprProject;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POUserFunc;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.JoinPackager;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.PODistinct;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POFilter;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POForEach;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POJoinPackage;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POLimit;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POLocalRearrange;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POPackage;
@@ -152,6 +152,10 @@ public class SecondaryKeyOptimizer extends MROpPlanVisitor {
         if (mr.isGlobalSort())
             return;
 
+        // Don't optimize when we already have a custom partitioner
+        if (mr.getCustomPartitioner()!=null)
+            return;
+
         List<PhysicalOperator> mapLeaves = mr.mapPlan.getLeaves();
         if (mapLeaves == null || mapLeaves.size() != 1) {
             log
@@ -217,7 +221,8 @@ public class SecondaryKeyOptimizer extends MROpPlanVisitor {
         PhysicalOperator currentNode = root;
         POForEach foreach = null;
         while (currentNode != null) {
-            if (currentNode instanceof POPackage && !(currentNode instanceof POJoinPackage)
+            if (currentNode instanceof POPackage
+                    && !(((POPackage) currentNode).getPkgr() instanceof JoinPackager)
                     || currentNode instanceof POFilter
                     || currentNode instanceof POLimit) {
                 List<PhysicalOperator> succs = mr.reducePlan
@@ -368,7 +373,7 @@ public class SecondaryKeyOptimizer extends MROpPlanVisitor {
                 }
             }
             POPackage pack = (POPackage) root;
-            pack.setUseSecondaryKey(true);
+            pack.getPkgr().setUseSecondaryKey(true);
         }
     }
 
@@ -481,10 +486,10 @@ public class SecondaryKeyOptimizer extends MROpPlanVisitor {
                     sawInvalidPhysicalOper = processSort((POSort)currentNode);
                 else if (currentNode instanceof POProject)
                     sawInvalidPhysicalOper = processProject((POProject)currentNode);
-                else if (currentNode instanceof POForEach)
-                    sawInvalidPhysicalOper = processForEach((POForEach)currentNode);
                 else if (currentNode instanceof POUserFunc ||
-                         currentNode instanceof POUnion)
+                         currentNode instanceof POUnion ||
+                         // We don't process foreach, since foreach is too complex to get right
+                         currentNode instanceof POForEach)
                     break;
                 
                 if (sawInvalidPhysicalOper)
@@ -541,25 +546,6 @@ public class SecondaryKeyOptimizer extends MROpPlanVisitor {
         public boolean processProject(POProject project) throws FrontendException {
             columnChainInfo.insertInReduce(project);
             return false;
-        }
-
-        // Accumulate column info from nested project
-        public boolean processForEach(POForEach fe) throws FrontendException {
-            if (fe.getInputPlans().size() > 1) {
-                // We don't optimize the case when POForEach has more than 1 input plan
-                return true;
-            }
-            boolean r = false;
-            try {
-                r = collectColumnChain(fe.getInputPlans().get(0),
-                        columnChainInfo);
-            } catch (PlanException e) {
-                int errorCode = 2205;
-                throw new FrontendException("Error visiting POForEach inner plan",
-                        errorCode, e);
-            }
-            // See something other than POProject in POForEach, set the flag to stop further processing
-            return r;
         }
 
         // We see POSort, check which key it is using

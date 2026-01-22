@@ -20,12 +20,10 @@ package org.apache.pig.test;
 import static org.apache.pig.builtin.mock.Storage.resetData;
 import static org.apache.pig.builtin.mock.Storage.tuple;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.util.Iterator;
 import java.util.jar.Attributes;
@@ -33,64 +31,17 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.builtin.mock.Storage;
 import org.apache.pig.data.Tuple;
-import org.junit.After;
-import org.junit.Before;
 import org.junit.Test;
 
 public class TestPigServerWithMacros {
-    // We pull in this MiniCluster just to get the properties. The test was not functioning properly
-    // otherwise.
-    private static MiniCluster cluster = MiniCluster.buildCluster();
-
-    private PigServer pig = null;
-    
-    @Before
-    public void setUp() throws Exception{
-        pig = new PigServer(ExecType.LOCAL, cluster.getProperties());
-    }
-
-    @After
-    public void tearDown() throws Exception{
-        pig = null;
-    }
-
-    @Test
-    public void testRegisterRemoteMacro() throws Throwable {
-        String macroName = "util.pig";
-        File macroFile = File.createTempFile("tmp", "");
-        PrintWriter pw = new PrintWriter(new FileWriter(macroFile));
-        pw.println("DEFINE row_count(X) RETURNS Z { Y = group $X all; $Z = foreach Y generate COUNT($X); };");
-        pw.close();
-
-        Path macroPath = new Path(macroName);
-        FileSystem fs = macroPath.getFileSystem(new Configuration());
-
-        fs.copyFromLocalFile(new Path(macroFile.getAbsolutePath()), macroPath);
-
-        // find the absolute path for the directory so that it does not
-        // depend on configuration
-        String absPath = fs.getFileStatus(new Path(macroName)).getPath().toString();
-
-        Storage.Data data = resetData(pig);
-        data.set("some_path", "(l:chararray)", tuple("first row"), tuple("second row"));
-
-        pig.registerQuery("import '" + absPath + "';");
-        pig.registerQuery("a = load 'some_path' USING mock.Storage();");
-        pig.registerQuery("b = row_count(a);");
-        Iterator<Tuple> iter = pig.openIterator("b");
-
-        assertEquals(2L, ((Long)iter.next().get(0)).longValue());
-    }
 
     @Test
     public void testInlineMacro() throws Throwable {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
+
         Storage.Data data = resetData(pig);
         data.set("some_path", "(l:chararray)", tuple("first row"), tuple("second row"));
 
@@ -100,78 +51,47 @@ public class TestPigServerWithMacros {
         Iterator<Tuple> iter = pig.openIterator("b");
 
         assertEquals(2L, ((Long)iter.next().get(0)).longValue());
+
+        pig.shutdown();
     }
 
-    @Test
-    public void testRegisterRemoteScript() throws Throwable {
-        String scriptName = "script.py";
-        File scriptFile = File.createTempFile("tmp", "");
-        PrintWriter pw = new PrintWriter(new FileWriter(scriptFile));
-        pw.println("@outputSchema(\"word:chararray\")\ndef helloworld():\n    return 'Hello, World'");
-        pw.close();
-
-        Path scriptPath = new Path(scriptName);
-        FileSystem fs = scriptPath.getFileSystem(new Configuration());
-        fs.copyFromLocalFile(new Path(scriptFile.getAbsolutePath()), scriptPath);
-
-        // find the absolute path for the directory so that it does not
-        // depend on configuration
-        String absPath = fs.getFileStatus(scriptPath).getPath().toString();
-
-        Storage.Data data = resetData(pig);
-        data.set("some_path", "(l:chararray)", tuple(tuple("first row")), tuple(tuple("second row")));
-
-        pig.registerCode(absPath, "jython", "pig");
-        pig.registerQuery("a = load 'some_path' USING mock.Storage();");
-        pig.registerQuery("b = foreach a generate pig.helloworld($0);");
-        Iterator<Tuple> iter = pig.openIterator("b");
-
-        assertTrue(iter.hasNext());
-        Tuple t = iter.next();
-        assertTrue(t.size() > 0);
-        assertEquals("Hello, World", t.get(0));
-
-        assertTrue(iter.hasNext());
-        t = iter.next();
-        assertTrue(t.size() > 0);
-        assertEquals("Hello, World", t.get(0));
-
-        assertFalse(iter.hasNext());
-    }
-    
     @Test
     public void testRegisterResourceMacro() throws Throwable {
+        PigServer pig = new PigServer(Util.getLocalTestMode());
+
         String macrosFile = "test/pig/macros.pig";
         File macrosJarFile = File.createTempFile("macros", ".jar");
-        
+
         System.out.println("Creating macros jar " + macrosJarFile);
-        
+
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
-        
+
         JarOutputStream jarStream = new JarOutputStream(new FileOutputStream(macrosJarFile), manifest);
-        
+
         JarEntry jarEntry = new JarEntry(macrosFile);
         jarEntry.setTime(System.currentTimeMillis());
-        jarStream.putNextEntry(jarEntry);        
-        
+        jarStream.putNextEntry(jarEntry);
+
         PrintWriter pw = new PrintWriter(jarStream);
         pw.println("DEFINE row_count_in_jar(X) RETURNS Z { Y = group $X all; $Z = foreach Y generate COUNT($X); };");
-        pw.close();        
-        
+        pw.close();
+
         jarStream.close();
-        
+
         Storage.Data data = resetData(pig);
         data.set("some_path", "(l:int)", tuple(tuple("1")), tuple(tuple("2")), tuple(tuple("3")), tuple(tuple("10")), tuple(tuple("11")));
-                
+
         System.out.println("Registering macros jar " + macrosJarFile);
         pig.registerJar(macrosJarFile.toString());
-        
+
         pig.registerQuery("import '" + macrosFile + "';");
         pig.registerQuery("a = load 'some_path' USING mock.Storage();");
         pig.registerQuery("b = row_count_in_jar(a);");
         Iterator<Tuple> iter = pig.openIterator("b");
-        
+
         assertTrue(((Long)iter.next().get(0))==5);
+
+        pig.shutdown();
     }
 }

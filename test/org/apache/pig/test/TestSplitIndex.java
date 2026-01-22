@@ -26,7 +26,6 @@ import java.util.Properties;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.lib.input.FileSplit;
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
 import org.apache.pig.builtin.PigStorage;
@@ -43,7 +42,7 @@ public class TestSplitIndex {
     File inputDir;
     @Before
     public void setUp() throws Exception{
-        pigServer = new PigServer(ExecType.LOCAL, new Properties());
+        pigServer = new PigServer(Util.getLocalTestMode(), new Properties());
         inputDir = File.createTempFile("tmp", "");
         inputDir.delete();
         inputDir.mkdir();
@@ -53,7 +52,7 @@ public class TestSplitIndex {
     
     @Test
     public void testSplitIndex() throws Exception {
-        pigServer.registerQuery("a = load '" + inputDir + "' using " + SplitSensitiveLoadFunc.class.getName() + "();");
+        pigServer.registerQuery("a = load '" + Util.encodeEscape(inputDir.toString()) + "' using " + SplitSensitiveLoadFunc.class.getName() + "();");
         Iterator<Tuple> iter = pigServer.openIterator("a");
         
         boolean file1exist=false, file2exist=false;
@@ -74,7 +73,7 @@ public class TestSplitIndex {
     @Test
     public void testSplitIndexNoCombine() throws Exception {
         pigServer.getPigContext().getProperties().setProperty("pig.splitCombination", "false");
-        pigServer.registerQuery("a = load '" + inputDir + "' using " + SplitSensitiveLoadFunc.class.getName() + "();");
+        pigServer.registerQuery("a = load '" + Util.encodeEscape(inputDir.toString()) + "' using " + SplitSensitiveLoadFunc.class.getName() + "();");
         Iterator<Tuple> iter = pigServer.openIterator("a");
         
         boolean file1exist=false, file2exist=false;

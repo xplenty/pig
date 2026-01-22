@@ -15,11 +15,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
+
 /**
  * Grammar file for Pig tree parser (visitor for default data type insertion).
  *
- * NOTE: THIS FILE IS BASED ON QueryParser.g, SO IF YOU CHANGE THAT FILE, YOU WILL 
+ * NOTE: THIS FILE IS BASED ON QueryParser.g, SO IF YOU CHANGE THAT FILE, YOU WILL
  *       PROBABLY NEED TO MAKE CORRESPONDING CHANGES TO THIS FILE AS WELL.
  */
 
@@ -50,7 +50,7 @@ import org.apache.commons.logging.LogFactory;
 private static Log log = LogFactory.getLog( AstValidator.class );
 
 @Override
-protected Object recoverFromMismatchedToken(IntStream input, int ttype, BitSet follow) 
+protected Object recoverFromMismatchedToken(IntStream input, int ttype, BitSet follow)
 throws RecognitionException {
     throw new MismatchedTokenException( ttype, input );
 }
@@ -64,7 +64,7 @@ throws RecognitionException {
 private void validateSchemaAliasName(Set<String> fieldNames, CommonTree node, String name)
 throws DuplicatedSchemaAliasException {
     if( fieldNames.contains( name ) ) {
-        throw new DuplicatedSchemaAliasException( input, 
+        throw new DuplicatedSchemaAliasException( input,
             new SourceLocation( (PigParserNode)node ), name );
     } else {
         fieldNames.add( name );
@@ -85,7 +85,22 @@ private void checkDuplication(int count, CommonTree node) throws ParserValidatio
     }
 }
 
-private Set<String> aliases = new HashSet<String>();
+private String lastRel = null;
+
+private String getLastRel(CommonTree node) throws UndefinedAliasException {
+    if (lastRel != null) {
+        return lastRel;
+    }
+    throw new UndefinedAliasException( input, new SourceLocation((PigParserNode)node), "@");
+}
+
+private Set<String> aliases = new HashSet<String>() {
+    @Override
+    public boolean add(String e) {
+        lastRel = e;
+        return super.add(e);
+    }
+};
 
 } // End of @members
 
@@ -101,12 +116,20 @@ query : ^( QUERY statement* )
 statement : general_statement
           | split_statement
           | realias_statement
+          | register_statement
+          | assert_statement
 ;
 
 split_statement : split_clause
 ;
 
 realias_statement : realias_clause
+;
+
+register_statement : ^( REGISTER QUOTEDSTRING (USING IDENTIFIER AS IDENTIFIER)? )
+;
+
+assert_statement : assert_clause
 ;
 
 general_statement : ^( STATEMENT ( alias { aliases.add( $alias.name ); } )? op_clause parallel_clause? )
@@ -123,13 +146,21 @@ parallel_clause : ^( PARALLEL INTEGER )
 
 alias returns[String name, CommonTree node]
  : IDENTIFIER
-   { 
+   {
        $name = $IDENTIFIER.text;
        $node = $IDENTIFIER;
    }
 ;
 
-op_clause : define_clause 
+previous_rel returns[String name, CommonTree node]
+ : ARROBA
+   {
+       $name = getLastRel($ARROBA);
+       $node = $ARROBA;
+   }
+;
+
+op_clause : define_clause
           | load_clause
           | group_clause
           | store_clause
@@ -147,6 +178,7 @@ op_clause : define_clause
           | split_clause
           | foreach_clause
           | cube_clause
+          | assert_clause
 ;
 
 define_clause : ^( DEFINE alias ( cmd | func_clause ) )
@@ -162,8 +194,8 @@ cmd
 }
  : ^( EXECCOMMAND ( ship_clause { checkDuplication( ++ship, $ship_clause.start ); }
                   | cache_clause { checkDuplication( ++cache, $cache_clause.start ); }
-                  | input_clause { checkDuplication( ++in, $input_clause.start ); } 
-                  | output_clause { checkDuplication( ++out, $output_clause.start ); } 
+                  | input_clause { checkDuplication( ++in, $input_clause.start ); }
+                  | output_clause { checkDuplication( ++out, $output_clause.start ); }
                   | error_clause { checkDuplication( ++error, $error_clause.start ); }
                   )*
    )
@@ -231,6 +263,8 @@ simple_type returns [byte typev]
   | LONG { $typev = DataType.LONG; }
   | FLOAT { $typev = DataType.FLOAT; }
   | DOUBLE { $typev = DataType.DOUBLE; }
+  | BIGINTEGER { $typev = DataType.BIGINTEGER; }
+  | BIGDECIMAL { $typev = DataType.BIGDECIMAL; }
   | DATETIME { $typev = DataType.DATETIME; }
   | CHARARRAY { $typev = DataType.CHARARRAY; }
   | BYTEARRAY { $typev = DataType.BYTEARRAY; }
@@ -242,7 +276,7 @@ tuple_type : ^( TUPLE_TYPE field_def_list? )
 bag_type : ^( BAG_TYPE IDENTIFIER? tuple_type? )
 ;
 
-map_type : ^( MAP_TYPE type? )
+map_type : ^( MAP_TYPE IDENTIFIER? type? )
 ;
 
 func_clause : ^( FUNC_REF func_name )
@@ -282,8 +316,8 @@ cube_by_expr_list
  : cube_by_expr+
 ;
 
-cube_by_expr 
- : col_range | expr | STAR 
+cube_by_expr
+ : col_range | expr | STAR
 ;
 
 group_clause
@@ -296,7 +330,7 @@ scope {
  : ^( ( GROUP | COGROUP ) group_item+ group_type? partition_clause? )
 ;
 
-group_type : QUOTEDSTRING 
+group_type : QUOTEDSTRING
 ;
 
 group_item
@@ -313,6 +347,7 @@ group_item
 ;
 
 rel : alias {  validateAliasRef( aliases, $alias.node, $alias.name ); }
+    | previous_rel { validateAliasRef( aliases, $previous_rel.node, $previous_rel.name ); }
     | op_clause parallel_clause?
 ;
 
@@ -325,6 +360,12 @@ flatten_clause : ^( FLATTEN expr )
 store_clause : ^( STORE rel filename func_clause? )
 ;
 
+assert_clause : ^( ASSERT rel cond comment? )
+; 
+
+comment : QUOTEDSTRING
+;
+
 filter_clause : ^( FILTER rel cond )
 ;
 
@@ -333,11 +374,15 @@ cond : ^( OR cond cond )
      | ^( NOT cond )
      | ^( NULL expr NOT? )
      | ^( rel_op expr expr )
+     | in_eval
      | func_eval
-     | ^( BOOL_COND expr )     
+     | ^( BOOL_COND expr )
 ;
 
-func_eval: ^( FUNC_EVAL func_name real_arg* )
+in_eval: ^( IN ( ^( IN_LHS expr ) ^( IN_RHS expr ) )+ )
+;
+
+func_eval: ^( FUNC_EVAL func_name real_arg* ) | ^( INVOKER_FUNC_EVAL func_name IDENTIFIER real_arg* )
 ;
 
 real_arg : expr | STAR | col_range
@@ -368,7 +413,7 @@ bag_type_cast : ^( BAG_TYPE_CAST tuple_type_cast? )
 var_expr : projectable_expr ( dot_proj | pound_proj )*
 ;
 
-projectable_expr: func_eval | col_ref | bin_expr
+projectable_expr: func_eval | col_ref | bin_expr | case_expr | case_cond
 ;
 
 dot_proj : ^( PERIOD col_alias_or_index+ )
@@ -391,6 +436,12 @@ pound_proj : ^( POUND ( QUOTEDSTRING | NULL ) )
 ;
 
 bin_expr : ^( BIN_EXPR cond expr expr )
+;
+
+case_expr: ^( CASE_EXPR ( ^( CASE_EXPR_LHS expr ) ( ^( CASE_EXPR_RHS expr) )+ )+ )
+;
+
+case_cond: ^( CASE_COND ^( WHEN cond+ ) ^( THEN expr+ ) )
 ;
 
 limit_clause : ^( LIMIT rel ( INTEGER | LONGINTEGER | expr ) )
@@ -560,7 +611,7 @@ split_branch
    }
 ;
 
-split_otherwise 	: ^( OTHERWISE alias )
+split_otherwise : ^( OTHERWISE alias ALL? )
    {
        aliases.add( $alias.name );
    }
@@ -584,7 +635,7 @@ literal : scalar | map | bag | tuple
 scalar : num_scalar | QUOTEDSTRING | NULL | TRUE | FALSE
 ;
 
-num_scalar : MINUS? ( INTEGER | LONGINTEGER | FLOATNUMBER | DOUBLENUMBER )
+num_scalar : MINUS? ( INTEGER | LONGINTEGER | FLOATNUMBER | DOUBLENUMBER | BIGINTEGERNUMBER | BIGDECIMALNUMBER )
 ;
 
 map : ^( MAP_VAL keyvalue* )
@@ -645,6 +696,8 @@ eid : rel_str_op
     | LONG
     | FLOAT
     | DOUBLE
+    | BIGINTEGER
+    | BIGDECIMAL
     | DATETIME
     | CHARARRAY
     | BYTEARRAY
@@ -675,6 +728,7 @@ eid : rel_str_op
     | TOBAG
     | TOMAP
     | TOTUPLE
+    | ASSERT
 ;
 
 // relational operator

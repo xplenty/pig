@@ -19,20 +19,20 @@
 package org.apache.pig.builtin;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 
 import org.apache.pig.EvalFunc;
 import org.apache.pig.FuncSpec;
-import org.apache.pig.data.Tuple;
-import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.data.DataType;
+import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.logicalLayer.FrontendException;
+import org.apache.pig.impl.logicalLayer.schema.Schema;
 
 /**
  * ABS implements a binding to the Java function
  * {@link java.lang.Math#abs(double) Math.abs(double)} for computing the
- * absolute value of the argument. The returned value will be a double which is 
+ * absolute value of the argument. The returned value will be a double which is
  * absolute value of the input.
  */
 public class ABS extends EvalFunc<Double>{
@@ -42,7 +42,7 @@ public class ABS extends EvalFunc<Double>{
 	 * @return output returns a single numeric value, absolute value of the argument
 	 */
 	public Double exec(Tuple input) throws IOException {
-        if (input == null || input.size() == 0)
+        if (input == null || input.size() == 0 || input.get(0) == null)
             return null;
 
         Double d;
@@ -57,7 +57,7 @@ public class ABS extends EvalFunc<Double>{
 
 		return Math.abs(d);
 	}
-	
+
 	@Override
 	public Schema outputSchema(Schema input) {
         return new Schema(new Schema.FieldSchema(getSchemaName(this.getClass().getName().toLowerCase(), input), DataType.DOUBLE));
@@ -74,7 +74,13 @@ public class ABS extends EvalFunc<Double>{
         funcList.add(new FuncSpec(FloatAbs.class.getName(),   new Schema(new Schema.FieldSchema(null, DataType.FLOAT))));
         funcList.add(new FuncSpec(IntAbs.class.getName(),  new Schema(new Schema.FieldSchema(null, DataType.INTEGER))));
         funcList.add(new FuncSpec(LongAbs.class.getName(),  new Schema(new Schema.FieldSchema(null, DataType.LONG))));
+        funcList.add(new FuncSpec(BigIntegerAbs.class.getName(),  new Schema(new Schema.FieldSchema(null, DataType.BIGINTEGER))));
+        funcList.add(new FuncSpec(BigDecimalAbs.class.getName(),  new Schema(new Schema.FieldSchema(null, DataType.BIGDECIMAL))));
         return funcList;
     }
 
+    @Override
+    public boolean allowCompileTimeCalculation() {
+        return true;
+    }
 }

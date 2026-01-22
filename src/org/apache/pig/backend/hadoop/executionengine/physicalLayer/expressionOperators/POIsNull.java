@@ -23,8 +23,8 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
 import org.apache.pig.data.DataType;
-import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.NodeIdGenerator;
+import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
 
 public class POIsNull extends UnaryComparisonOperator {
@@ -58,13 +58,15 @@ public class POIsNull extends UnaryComparisonOperator {
     }
 
     @Override
-    public Result getNext(Boolean b) throws ExecException {
+    public Result getNextBoolean() throws ExecException {
 
         Result res = null;
         switch(operandType) {
         case DataType.BYTEARRAY:
         case DataType.DOUBLE:
         case DataType.INTEGER:
+        case DataType.BIGINTEGER:
+        case DataType.BIGDECIMAL:
         case DataType.CHARARRAY:
         case DataType.BOOLEAN:
         case DataType.LONG:
@@ -73,7 +75,7 @@ public class POIsNull extends UnaryComparisonOperator {
         case DataType.MAP:
         case DataType.TUPLE:
         case DataType.BAG:
-            res = expr.getNext(getDummy(operandType), operandType);
+            res = expr.getNext(operandType);
             if(res.returnStatus == POStatus.STATUS_OK) {
                 if (res.result == null) {
                     res.result = true;

@@ -19,13 +19,11 @@
 package org.apache.pig.parser;
 
 import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -42,19 +40,22 @@ import org.antlr.runtime.tree.CommonTreeNodeStream;
 import org.antlr.runtime.tree.Tree;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.fs.Path;
 import org.apache.pig.PigException;
+import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.io.FileLocalizer.FetchFileRet;
 import org.apache.pig.impl.io.ResourceNotFoundException;
+import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.newplan.Operator;
 import org.apache.pig.newplan.logical.relational.LogicalPlan;
 import org.apache.pig.newplan.logical.relational.LogicalSchema;
-import org.apache.pig.parser.QueryParser.field_def_list_return;
 import org.apache.pig.parser.QueryParser.literal_return;
+import org.apache.pig.parser.QueryParser.schema_return;
 import org.apache.pig.tools.pigstats.ScriptState;
+import org.apache.pig.validator.BlackAndWhitelistFilter;
+import org.apache.pig.validator.PigCommandFilter;
 
 public class QueryParserDriver {
     private static final Log LOG = LogFactory.getLog(QueryParserDriver.class);
@@ -62,11 +63,14 @@ public class QueryParserDriver {
     private static final String MACRO_DEF = "MACRO_DEF";
     private static final String MACRO_INLINE = "MACRO_INLINE";
     private static final String IMPORT_DEF = "import";
+    private static final String REGISTER_DEF = "register";
 
     private PigContext pigContext;
+    private PigServer pigServer;
     private String scope;
     private Map<String, String>fileNameMap;
     private Map<String, Operator> operators;
+    private String lastRel;
     private Set<String> importSeen;
     private Set<String> macroSeen;
 
@@ -74,6 +78,7 @@ public class QueryParserDriver {
 
     public QueryParserDriver(PigContext pigContext, String scope, Map<String, String> fileNameMap) {
         this.pigContext = pigContext;
+        this.pigServer = null; // lazily instantiated for register statements
         this.scope = scope;
         this.fileNameMap = fileNameMap;
         importSeen = new HashSet<String>();
@@ -83,9 +88,9 @@ public class QueryParserDriver {
     private static Tree parseSchema(CommonTokenStream tokens) throws ParserException {
         QueryParser parser = QueryParserUtils.createParser(tokens);
 
-        field_def_list_return result = null;
+        schema_return result = null;
         try {
-            result = parser.field_def_list();
+            result = parser.schema();
         } catch (RecognitionException e) {
             String msg = parser.getErrorHeader(e) + " "
                     + parser.getErrorMessage(e, parser.getTokenNames());
@@ -179,6 +184,8 @@ public class QueryParserDriver {
 
         try{
             ast = validateAst( ast );
+            applyRegisters(ast);
+
             LogicalPlanGenerator planGenerator =
                 new LogicalPlanGenerator( new CommonTreeNodeStream( ast ), pigContext, scope, fileNameMap );
             planGenerator.query();
@@ -187,6 +194,7 @@ public class QueryParserDriver {
 
             plan = planGenerator.getLogicalPlan();
             operators = planGenerator.getOperators();
+            lastRel = planGenerator.getLastRel();
         } catch(RecognitionException ex) {
             throw new ParserException( ex );
         } catch(Exception ex) {
@@ -232,7 +240,8 @@ public class QueryParserDriver {
         } catch (RecognitionException e) {
             String msg = parser.getErrorHeader(e) + " "
                     + parser.getErrorMessage(e, parser.getTokenNames());
-            throw new ParserException(msg);
+            SourceLocation location = new SourceLocation(null, e.line,e.charPositionInLine);
+            throw new ParserException(msg, location);
         } catch(RuntimeException ex) {
             throw new ParserException( ex.getMessage() );
         }
@@ -289,7 +298,7 @@ public class QueryParserDriver {
             List<PigMacro> macroDefs) throws ParserException {
         for (CommonTree t : inlineNodes) {
             Set<String> macroStack = new HashSet<String>();
-            CommonTree newTree = PigMacro.macroInline(t, macroDefs, macroStack);
+            CommonTree newTree = PigMacro.macroInline(t, macroDefs, macroStack, pigContext);
 
             List<CommonTree> nodes = new ArrayList<CommonTree>();
             traverseInline(newTree, nodes);
@@ -300,6 +309,33 @@ public class QueryParserDriver {
                 inlineMacro(nodes, macroDefs);
             }
         }
+    }
+
+    private void applyRegisters(Tree t) throws ExecException, ParserException {
+        if (t.getText().equalsIgnoreCase(REGISTER_DEF)) {
+            String path = t.getChild(0).getText();
+            path = path.substring(1, path.length()-1);
+            try {
+                if (t.getChildCount() == 5) {
+                    new RegisterResolver(getPigServer()).parseRegister(path, t.getChild(2).getText(), t.getChild(4).getText());
+                } else {
+                    new RegisterResolver(getPigServer()).parseRegister(path, null, null);
+                }
+            } catch (IOException ioe) {
+                throw new ParserException(ioe.getMessage());
+            }
+        } else {
+            for (int i = 0; i < t.getChildCount(); i++) {
+                applyRegisters(t.getChild(i));
+            }
+        }
+    }
+
+    private PigServer getPigServer() throws ExecException {
+        if (pigServer == null) {
+            pigServer = new PigServer(pigContext, false);
+        }
+        return pigServer;
     }
 
     private void traverseInline(Tree t, List<CommonTree> nodes) {
@@ -316,8 +352,17 @@ public class QueryParserDriver {
     private boolean expandImport(Tree ast) throws ParserException {
         List<CommonTree> nodes = new ArrayList<CommonTree>();
         traverseImport(ast, nodes);
-        if (nodes.isEmpty()) return false;
+        if (nodes.isEmpty())
+            return false;
 
+        // Validate if imports are enabled/disabled
+        final BlackAndWhitelistFilter filter = new BlackAndWhitelistFilter(
+                this.pigContext);
+        try {
+            filter.validate(PigCommandFilter.Command.IMPORT);
+        } catch (FrontendException e) {
+            throw new ParserException(e.getMessage());
+        }
         for (CommonTree t : nodes) {
             macroImport(t);
         }
@@ -440,7 +485,7 @@ public class QueryParserDriver {
 
         // sometimes the script has no filename, like when a string is passed to PigServer for
         // example. See PIG-2866.
-        if (fname != null) {
+        if (!fname.isEmpty()) {
             FetchFileRet localFileRet = getMacroFile(fname);
             fname = localFileRet.file.getAbsolutePath();
         }
@@ -474,49 +519,64 @@ public class QueryParserDriver {
         String fname = t.getChild(0).getText();
         fname = QueryParserUtils.removeQuotes(fname);
         if (!importSeen.add(fname)) {
-            String msg = getErrorMessage(fname, t,
-                    ": Duplicated import file '" + fname + "'", null);
-            LOG.warn(msg);
-            // Disabling this exception, see https://issues.apache.org/jira/browse/PIG-2279
-            // throw new ParserException(msg);
+            // we've already imported this file, so just skip this import statement
+            LOG.debug("Ignoring duplicated import " + fname);
+            t.getParent().deleteChild(t.getChildIndex());
+            return;
         }
 
-        FetchFileRet localFileRet = getMacroFile(fname);
+        Tree macroAST = null;
+        if (pigContext.macros.containsKey(fname)) {
+            macroAST = pigContext.macros.get(fname);
+        } else {
+            FetchFileRet localFileRet = getMacroFile(fname);
 
-        BufferedReader in = null;
-        try {
-            in = new BufferedReader(new FileReader(localFileRet.file));
-        } catch (FileNotFoundException e) {
-            String msg = getErrorMessage(fname, t,
-                    "Failed to import file '" + fname + "'", e.getMessage());
-            throw new ParserException(msg);
-        }
-
-        StringBuilder sb = new StringBuilder();
-        String line = null;
-        try {
-            line = in.readLine();
-            while (line != null) {
-                sb.append(line).append("\n");
-                line = in.readLine();
+            BufferedReader in = null;
+            try {
+                in = new BufferedReader(new FileReader(localFileRet.file));
+            } catch (FileNotFoundException e) {
+                String msg = getErrorMessage(fname, t,
+                        "Failed to import file '" + fname + "'", e.getMessage());
+                throw new ParserException(msg);
             }
-        } catch (IOException e) {
-            String msg = getErrorMessage(fname, t,
-                    "Failed to read file '" + fname + "'", e.getMessage());
-            throw new ParserException(msg);
+
+            StringBuilder sb = new StringBuilder();
+            String line = null;
+            try {
+                line = in.readLine();
+                while (line != null) {
+                    sb.append(line).append("\n");
+                    line = in.readLine();
+                }
+            } catch (IOException e) {
+                String msg = getErrorMessage(fname, t,
+                        "Failed to read file '" + fname + "'", e.getMessage());
+                throw new ParserException(msg);
+            }
+
+            String macroText = null;
+            try {
+                in.close();
+                in = new BufferedReader(new StringReader(sb.toString()));
+                macroText = pigContext.doParamSubstitution(in);
+            } catch (IOException e) {
+                String msg = getErrorMessage(fname, t,
+                    "Parameter sustitution failed for macro.", e.getMessage());
+                throw new ParserException(msg);
+            }
+
+            // parse
+            CommonTokenStream tokenStream = tokenize(macroText, fname);
+
+            try {
+                macroAST = parse( tokenStream );
+                pigContext.macros.put(fname, macroAST);
+            } catch(RuntimeException ex) {
+                throw new ParserException( ex.getMessage() );
+            }
         }
 
-        // parse
-        CommonTokenStream tokenStream = tokenize(sb.toString(), fname);
-
-        Tree ast = null;
-        try {
-            ast = parse( tokenStream );
-        } catch(RuntimeException ex) {
-            throw new ParserException( ex.getMessage() );
-        }
-
-        QueryParserUtils.replaceNodeWithNodeList(t, (CommonTree)ast, fname);
+        QueryParserUtils.replaceNodeWithNodeList(t, (CommonTree)macroAST, fname);
     }
 
     private String getErrorMessage(String importFile,
@@ -529,7 +589,7 @@ public class QueryParserDriver {
             ScriptState ss = ScriptState.get();
             if (ss != null) file = ss.getFileName();
         }
-        if (file != null && !file.equals(importFile)) {
+        if (!file.isEmpty() && !file.equals(importFile)) {
             sb.append("at ").append(file).append(", ");
         }
         sb.append("line ").append(t.getLine()).append("> ").append(header);
@@ -537,5 +597,9 @@ public class QueryParserDriver {
             sb.append(". Reason: ").append(reason);
         }
         return sb.toString();
+    }
+
+    public String getLastRel() {
+        return lastRel;
     }
 }

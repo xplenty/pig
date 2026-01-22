@@ -20,14 +20,17 @@ package org.apache.pig.data;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 
-import org.apache.commons.codec.binary.Base64;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.classification.InterfaceAudience;
 import org.apache.pig.classification.InterfaceStability;
@@ -36,7 +39,6 @@ import org.apache.pig.data.utils.MethodHelper.NotImplemented;
 import org.apache.pig.data.utils.SedesHelper;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.util.ObjectSerializer;
-import org.mortbay.log.Log;
 
 import com.google.common.collect.Lists;
 
@@ -51,6 +53,7 @@ import com.google.common.collect.Lists;
 @InterfaceAudience.Public
 @InterfaceStability.Unstable
 public abstract class SchemaTuple<T extends SchemaTuple<T>> extends AbstractTuple implements TypeAwareTuple {
+    private static final Log LOG = LogFactory.getLog(SchemaTuple.class);
 
     private static final long serialVersionUID = 1L;
     private static final int ONE_MINUTE = 60000;
@@ -79,7 +82,7 @@ public abstract class SchemaTuple<T extends SchemaTuple<T>> extends AbstractTupl
      * was generated with. This is useful because when the classes
      * are resolved generically, this let's us know the identifier, which
      * is used when serlializing and deserializing tuples.
-     * @return
+     * @return the identifire as Int.
      */
     public abstract int getSchemaTupleIdentifier();
     protected abstract int schemaSize();
@@ -181,6 +184,14 @@ public abstract class SchemaTuple<T extends SchemaTuple<T>> extends AbstractTupl
         out.writeShort(v.getZone().getOffset(v) / ONE_MINUTE);
     }
 
+    protected static void write(DataOutput out, BigDecimal v) throws IOException {
+        bis.writeDatum(out, v, DataType.BIGDECIMAL);
+    }
+
+    protected static void write(DataOutput out, BigInteger v) throws IOException {
+        bis.writeDatum(out, v, DataType.BIGINTEGER);
+    }
+
     protected static void write(DataOutput out, byte[] v) throws IOException {
         SedesHelper.writeBytes(out, v);
     }
@@ -220,6 +231,14 @@ public abstract class SchemaTuple<T extends SchemaTuple<T>> extends AbstractTupl
 
     protected static DateTime read(DataInput in, DateTime v) throws IOException {
         return new DateTime(in.readLong(), DateTimeZone.forOffsetMillis(in.readShort() * ONE_MINUTE));
+    }
+
+    protected static BigDecimal read(DataInput in, BigDecimal v) throws IOException {
+        return (BigDecimal) bis.readDatum(in);
+    }
+
+    protected static BigInteger read(DataInput in, BigInteger v) throws IOException {
+        return (BigInteger) bis.readDatum(in);
     }
 
     protected static String read(DataInput in, String v) throws IOException {
@@ -389,6 +408,14 @@ public abstract class SchemaTuple<T extends SchemaTuple<T>> extends AbstractTupl
         return (DateTime)v;
     }
 
+    protected BigDecimal unbox(Object v, BigDecimal t) {
+        return (BigDecimal)v;
+    }
+
+    protected BigInteger unbox(Object v, BigInteger t) {
+        return (BigInteger)v;
+    }
+
     protected String unbox(Object v, String t) {
         return (String)v;
     }
@@ -483,6 +510,14 @@ public abstract class SchemaTuple<T extends SchemaTuple<T>> extends AbstractTupl
         return v;
     }
 
+    protected BigDecimal box(BigDecimal v) {
+        return v;
+    }
+
+    protected BigInteger box(BigInteger v) {
+        return v;
+    }
+
     protected int hashCodePiece(int hash, int v, boolean isNull) {
         return isNull ? hash : 31 * hash + v;
     }
@@ -505,6 +540,14 @@ public abstract class SchemaTuple<T extends SchemaTuple<T>> extends AbstractTupl
     }
 
     protected int hashCodePiece(int hash, DateTime v, boolean isNull) {
+        return isNull ? hash : 31 * hash + v.hashCode();
+    }
+
+    protected int hashCodePiece(int hash, BigDecimal v, boolean isNull) {
+        return isNull ? hash : 31 * hash + v.hashCode();
+    }
+
+    protected int hashCodePiece(int hash, BigInteger v, boolean isNull) {
         return isNull ? hash : 31 * hash + v.hashCode();
     }
 
@@ -614,6 +657,20 @@ public abstract class SchemaTuple<T extends SchemaTuple<T>> extends AbstractTupl
     protected abstract void generatedCodeSetDateTime(int fieldNum, DateTime val) throws ExecException;
 
     @Override
+    public void setBigDecimal(int fieldNum, BigDecimal val) throws ExecException {
+         generatedCodeSetBigDecimal(fieldNum, val);
+    }
+
+    protected abstract void generatedCodeSetBigDecimal(int fieldNum, BigDecimal val) throws ExecException;
+
+    @Override
+    public void setBigInteger(int fieldNum, BigInteger val) throws ExecException {
+         generatedCodeSetBigInteger(fieldNum, val);
+    }
+
+    protected abstract void generatedCodeSetBigInteger(int fieldNum, BigInteger val) throws ExecException;
+
+    @Override
     public void setString(int fieldNum, String val) throws ExecException {
          generatedCodeSetString(fieldNum, val);
     }
@@ -681,6 +738,16 @@ public abstract class SchemaTuple<T extends SchemaTuple<T>> extends AbstractTupl
 
     protected DateTime returnUnlessNull(boolean isNull, DateTime val) throws FieldIsNullException {
         errorIfNull(isNull, "DateTime");
+        return val;
+    }
+
+    protected BigDecimal returnUnlessNull(boolean isNull, BigDecimal val) throws FieldIsNullException {
+        errorIfNull(isNull, "BigDecimal");
+        return val;
+    }
+
+    protected BigInteger returnUnlessNull(boolean isNull, BigInteger val) throws FieldIsNullException {
+        errorIfNull(isNull, "BigInteger");
         return val;
     }
 
@@ -832,10 +899,34 @@ public abstract class SchemaTuple<T extends SchemaTuple<T>> extends AbstractTupl
         return (Map<String, Object>)val;
     }
 
+    @Override
+    public BigDecimal getBigDecimal(int fieldNum) throws ExecException {
+        return generatedCodeGetBigDecimal(fieldNum);
+    }
+
+    protected abstract BigDecimal generatedCodeGetBigDecimal(int fieldNum)
+            throws ExecException;
+
+    public BigDecimal unboxBigDecimal(Object val) {
+        return (BigDecimal) val;
+    }
+
+    @Override
+    public BigInteger getBigInteger(int fieldNum) throws ExecException {
+        return generatedCodeGetBigInteger(fieldNum);
+    }
+
+    protected abstract BigInteger generatedCodeGetBigInteger(int fieldNum)
+            throws ExecException;
+
+    public BigInteger unboxBigInteger(Object val) {
+        return (BigInteger) val;
+    }
+
     protected static Schema staticSchemaGen(String s) {
         try {
             if (s.equals("")) {
-                Log.warn("No Schema present in SchemaTuple generated class");
+                LOG.warn("No Schema present in SchemaTuple generated class");
                 return new Schema();
             }
             return (Schema) ObjectSerializer.deserialize(s);
@@ -1097,6 +1188,60 @@ public abstract class SchemaTuple<T extends SchemaTuple<T>> extends AbstractTupl
         boolean themNull;
         try {
             themVal = t.getDateTime(pos);
+            themNull = t.isNull(pos);
+        } catch (ExecException e) {
+            throw new RuntimeException("Unable to retrieve String field " + pos + " in given Tuple: " + t, e);
+        }
+        return compare(isNull, val, themNull, themVal);
+    }
+
+    protected int compare(boolean usNull, BigDecimal usVal, boolean themNull, BigDecimal themVal) {
+        if (usNull && themNull) {
+            return 0;
+        } else if (themNull) {
+            return 1;
+        } else if (usNull) {
+            return -1;
+        }
+        return compare(usVal, themVal);
+    }
+
+    protected int compare(BigDecimal val, BigDecimal themVal) {
+        return val.compareTo(themVal);
+    }
+
+    protected int compareWithElementAtPos(boolean isNull, BigDecimal val, SchemaTuple<?> t, int pos) {
+        BigDecimal themVal;
+        boolean themNull;
+        try {
+            themVal = t.getBigDecimal(pos);
+            themNull = t.isNull(pos);
+        } catch (ExecException e) {
+            throw new RuntimeException("Unable to retrieve String field " + pos + " in given Tuple: " + t, e);
+        }
+        return compare(isNull, val, themNull, themVal);
+    }
+
+    protected int compare(boolean usNull, BigInteger usVal, boolean themNull, BigInteger themVal) {
+        if (usNull && themNull) {
+            return 0;
+        } else if (themNull) {
+            return 1;
+        } else if (usNull) {
+            return -1;
+        }
+        return compare(usVal, themVal);
+    }
+
+    protected int compare(BigInteger val, BigInteger themVal) {
+        return val.compareTo(themVal);
+    }
+
+    protected int compareWithElementAtPos(boolean isNull, BigInteger val, SchemaTuple<?> t, int pos) {
+        BigInteger themVal;
+        boolean themNull;
+        try {
+            themVal = t.getBigInteger(pos);
             themNull = t.isNull(pos);
         } catch (ExecException e) {
             throw new RuntimeException("Unable to retrieve String field " + pos + " in given Tuple: " + t, e);

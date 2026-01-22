@@ -30,8 +30,8 @@ import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
 
 /**	
- * Flatten a bag into a string.  This UDF will the character '-' as the default delimiter 
- * if one is not provided.
+ * Flatten a bag into a string.  This UDF will use the character '_'
+ * as the default delimiter if one is not provided.
  * 
  * Example: 
  *
@@ -138,4 +138,8 @@ public class BagToString extends EvalFunc<String> {
 		}
 	}
 
+    @Override
+    public boolean allowCompileTimeCalculation() {
+        return true;
+    }
 }

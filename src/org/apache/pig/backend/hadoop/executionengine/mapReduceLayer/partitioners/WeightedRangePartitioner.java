@@ -17,30 +17,29 @@
  */
 package org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.partitioners;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.RawComparator;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.mapreduce.Partitioner;
-import org.apache.pig.ExecType;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.HDataType;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRConfiguration;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigMapReduce;
 import org.apache.pig.backend.hadoop.executionengine.util.MapRedUtil;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.InternalMap;
 import org.apache.pig.data.Tuple;
-import org.apache.pig.impl.PigContext;
+import org.apache.pig.impl.PigImplConstants;
 import org.apache.pig.impl.builtin.FindQuantiles;
+import org.apache.pig.impl.io.NullableBigDecimalWritable;
+import org.apache.pig.impl.io.NullableBigIntegerWritable;
 import org.apache.pig.impl.io.NullableBooleanWritable;
 import org.apache.pig.impl.io.NullableBytesWritable;
 import org.apache.pig.impl.io.NullableDateTimeWritable;
@@ -52,29 +51,30 @@ import org.apache.pig.impl.io.NullableText;
 import org.apache.pig.impl.io.NullableTuple;
 import org.apache.pig.impl.io.PigNullableWritable;
 import org.apache.pig.impl.io.ReadToEndLoader;
-import org.apache.pig.impl.util.ObjectSerializer;
 import org.apache.pig.impl.util.Utils;
 
-public class WeightedRangePartitioner extends Partitioner<PigNullableWritable, Writable>   
+public class WeightedRangePartitioner extends Partitioner<PigNullableWritable, Writable>
                                       implements Configurable {
-    PigNullableWritable[] quantiles;
-    RawComparator<PigNullableWritable> comparator;
-    PigContext pigContext;
-    final public static Map<PigNullableWritable,DiscreteProbabilitySampleGenerator> weightedParts 
-        = new HashMap<PigNullableWritable, DiscreteProbabilitySampleGenerator>();
-    
-    private static final Log log = LogFactory.getLog(WeightedRangePartitioner.class);
-    
-    Configuration job;
+
+    protected Map<PigNullableWritable, DiscreteProbabilitySampleGenerator> weightedParts =
+            new HashMap<PigNullableWritable, DiscreteProbabilitySampleGenerator>();
+    protected PigNullableWritable[] quantiles;
+    protected RawComparator<PigNullableWritable> comparator;
+    protected Configuration job;
+
+    protected boolean inited = false;
 
     @SuppressWarnings("unchecked")
     @Override
     public int getPartition(PigNullableWritable key, Writable value,
             int numPartitions){
+        if (!inited) {
+            init();
+        }
         if (comparator == null) {
             comparator = (RawComparator<PigNullableWritable>)PigMapReduce.sJobContext.getSortComparator();
         }
-        
+
         if(!weightedParts.containsKey(key)){
             int index = Arrays.binarySearch(quantiles, key, comparator);
             if (index < 0)
@@ -88,82 +88,80 @@ public class WeightedRangePartitioner extends Partitioner<PigNullableWritable, W
     }
 
     @SuppressWarnings("unchecked")
-    @Override
-    public void setConf(Configuration configuration) {
-        job = configuration;
-        
-        try {
-            pigContext = (PigContext)ObjectSerializer.deserialize(job.get("pig.pigContext"));
-        } catch (IOException e1) {
-            // should not happen
-            e1.printStackTrace();
-        }
+    public void init() {
+        weightedParts = new HashMap<PigNullableWritable, DiscreteProbabilitySampleGenerator>();
 
-        String quantilesFile = configuration.get("pig.quantilesFile", "");
-
+        String quantilesFile = job.get("pig.quantilesFile", "");
         if (quantilesFile.length() == 0) {
             throw new RuntimeException(this.getClass().getSimpleName()
                     + " used but no quantiles found");
         }
-        
+
         try{
             // use local file system to get the quantilesFile
+            Map<String, Object> quantileMap = null;
             Configuration conf;
-            if (pigContext.getExecType()==ExecType.MAPREDUCE) {
-                conf = new Configuration(true);
-            } else {
+            if (job.getBoolean(PigImplConstants.PIG_EXECTYPE_MODE_LOCAL, false)) {
                 conf = new Configuration(false);
+            } else {
+                conf = new Configuration(job);
             }
-            if (configuration.get("fs.file.impl") != null) {
-                conf.set("fs.file.impl", configuration.get("fs.file.impl"));
+            if (job.get("fs.file.impl") != null) {
+                conf.set("fs.file.impl", job.get("fs.file.impl"));
             }
-            if (configuration.get("fs.hdfs.impl") != null) {
-                conf.set("fs.hdfs.impl", configuration.get("fs.hdfs.impl"));
+            if (job.get("fs.hdfs.impl") != null) {
+                conf.set("fs.hdfs.impl", job.get("fs.hdfs.impl"));
             }
-            if (configuration.getBoolean("pig.tmpfilecompression", false)) {
-                conf.setBoolean("pig.tmpfilecompression", true);
-                if (configuration.get("pig.tmpfilecompression.codec") != null) {
-                    conf.set("pig.tmpfilecompression.codec", configuration.get("pig.tmpfilecompression.codec"));
-            }
-            }
+
+            MapRedUtil.copyTmpFileConfigurationValues(job, conf);
             conf.set(MapRedUtil.FILE_SYSTEM_NAME, "file:///");
-            
+
             ReadToEndLoader loader = new ReadToEndLoader(Utils.getTmpFileStorageObject(conf),
                     conf, quantilesFile, 0);
-            DataBag quantilesList;
             Tuple t = loader.getNext();
             if (t != null) {
                 // the Quantiles file has a tuple as under:
-                // (numQuantiles, bag of samples) 
+                // (numQuantiles, bag of samples)
                 // numQuantiles here is the reduce parallelism
-                Map<String, Object> quantileMap = (Map<String, Object>) t.get(0);
-                quantilesList = (DataBag) quantileMap.get(FindQuantiles.QUANTILES_LIST);
+                quantileMap = (Map<String, Object>) t.get(0);
+            }
+
+            if (quantileMap!=null) {
+                DataBag quantilesList = (DataBag) quantileMap.get(FindQuantiles.QUANTILES_LIST);
                 InternalMap weightedPartsData = (InternalMap) quantileMap.get(FindQuantiles.WEIGHTED_PARTS);
                 convertToArray(quantilesList);
-                for(Entry<Object, Object> ent : weightedPartsData.entrySet()){
+                long taskIdHashCode = job.get(MRConfiguration.TASK_ID).hashCode();
+                long randomSeed = ((long)taskIdHashCode << 32) | (taskIdHashCode & 0xffffffffL);
+                for (Entry<Object, Object> ent : weightedPartsData.entrySet()) {
                     Tuple key = (Tuple)ent.getKey(); // sample item which repeats
                     float[] probVec = getProbVec((Tuple)ent.getValue());
-                    weightedParts.put(getPigNullableWritable(key), 
-                            new DiscreteProbabilitySampleGenerator(probVec));
+                    weightedParts.put(getPigNullableWritable(key),
+                            new DiscreteProbabilitySampleGenerator(randomSeed, probVec));
                 }
             }
-            // else - the quantiles file is empty - unless we have a bug, the 
+            // else - the quantiles file is empty - unless we have a bug, the
             // input must also be empty in which case we don't need to put
             // anything in weightedParts since getPartition() should never get
             // called. If the quantiles file is empty due to either a bug or
             // a transient failure situation on the dfs, then weightedParts will
             // not be populated and the job will fail in getPartition()
-        }catch (Exception e){
+        } catch (Exception e) {
             throw new RuntimeException(e);
         }
+        inited = true;
+    }
+
+    @Override
+    public void setConf(Configuration configuration) {
+        job = configuration;
     }
 
     /**
      * @param value
      * @return
-     * @throws ExecException 
+     * @throws ExecException
      */
-    private float[] getProbVec(Tuple values) throws ExecException {
+    protected float[] getProbVec(Tuple values) throws ExecException {
         float[] probVec = new float[values.size()];
         for(int i = 0; i < values.size(); i++) {
             probVec[i] = (Float)values.get(i);
@@ -171,7 +169,7 @@ public class WeightedRangePartitioner extends Partitioner<PigNullableWritable, W
         return probVec;
     }
 
-    private PigNullableWritable getPigNullableWritable(Tuple t) {
+    protected PigNullableWritable getPigNullableWritable(Tuple t) {
         try {
             // user comparators work with tuples - so if user comparator
             // is being used OR if there are more than 1 sort cols, use
@@ -193,9 +191,9 @@ public class WeightedRangePartitioner extends Partitioner<PigNullableWritable, W
         }
     }
 
-    private void convertToArray(
-            DataBag quantilesListAsBag) {
+    protected void convertToArray(DataBag quantilesListAsBag) {
         ArrayList<PigNullableWritable> quantilesList = getList(quantilesListAsBag);
+
         if ("true".equals(job.get("pig.usercomparator")) ||
                 quantilesList.get(0).getClass().equals(NullableTuple.class)) {
             quantiles = quantilesList.toArray(new NullableTuple[0]);
@@ -203,6 +201,10 @@ public class WeightedRangePartitioner extends Partitioner<PigNullableWritable, W
             quantiles = quantilesList.toArray(new NullableBytesWritable[0]);
         } else if (quantilesList.get(0).getClass().equals(NullableDoubleWritable.class)) {
             quantiles = quantilesList.toArray(new NullableDoubleWritable[0]);
+        } else if (quantilesList.get(0).getClass().equals(NullableBigIntegerWritable.class)) {
+            quantiles = quantilesList.toArray(new NullableBigIntegerWritable[0]);
+        } else if (quantilesList.get(0).getClass().equals(NullableBigDecimalWritable.class)) {
+            quantiles = quantilesList.toArray(new NullableBigDecimalWritable[0]);
         } else if (quantilesList.get(0).getClass().equals(NullableFloatWritable.class)) {
             quantiles = quantilesList.toArray(new NullableFloatWritable[0]);
         } else if (quantilesList.get(0).getClass().equals(NullableBooleanWritable.class)) {
@@ -225,7 +227,6 @@ public class WeightedRangePartitioner extends Partitioner<PigNullableWritable, W
      * @return
      */
     private ArrayList<PigNullableWritable> getList(DataBag quantilesListAsBag) {
-        
         ArrayList<PigNullableWritable> list = new ArrayList<PigNullableWritable>();
         for (Tuple tuple : quantilesListAsBag) {
             list.add(getPigNullableWritable(tuple));
@@ -237,6 +238,5 @@ public class WeightedRangePartitioner extends Partitioner<PigNullableWritable, W
     public Configuration getConf() {
         return job;
     }
-
 
 }

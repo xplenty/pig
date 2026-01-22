@@ -17,27 +17,31 @@
  */
 package org.apache.pig.backend.hadoop;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Map;
-
-import org.joda.time.DateTime;
 
 import org.apache.pig.PigException;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.DataBag;
-import org.apache.pig.data.DataByteArray;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.io.NullableBag;
+import org.apache.pig.impl.io.NullableBigDecimalWritable;
+import org.apache.pig.impl.io.NullableBigIntegerWritable;
 import org.apache.pig.impl.io.NullableBooleanWritable;
 import org.apache.pig.impl.io.NullableBytesWritable;
+import org.apache.pig.impl.io.NullableDateTimeWritable;
 import org.apache.pig.impl.io.NullableDoubleWritable;
 import org.apache.pig.impl.io.NullableFloatWritable;
 import org.apache.pig.impl.io.NullableIntWritable;
 import org.apache.pig.impl.io.NullableLongWritable;
-import org.apache.pig.impl.io.NullableDateTimeWritable;
 import org.apache.pig.impl.io.NullableText;
 import org.apache.pig.impl.io.NullableTuple;
 import org.apache.pig.impl.io.PigNullableWritable;
+import org.joda.time.DateTime;
 
 /**
  * A class of helper methods for converting from pig data types to hadoop
@@ -51,17 +55,85 @@ public class HDataType {
     static NullableDoubleWritable doubleWrit = new NullableDoubleWritable();
     static NullableIntWritable intWrit = new NullableIntWritable();
     static NullableLongWritable longWrit = new NullableLongWritable();
+    static NullableBigIntegerWritable bigIntWrit = new NullableBigIntegerWritable();
+    static NullableBigDecimalWritable bigDecWrit = new NullableBigDecimalWritable();
     static NullableDateTimeWritable dtWrit = new NullableDateTimeWritable();
     static NullableBag defDB = new NullableBag();
     static NullableTuple defTup = new NullableTuple();
     static Map<Byte, String> typeToName = null;
 
+    private static final HashMap<String, Byte> classToTypeMap = new HashMap<String, Byte>();
+    static {
+        classToTypeMap.put("org.apache.pig.impl.io.NullableBag", DataType.BAG);
+        classToTypeMap.put("org.apache.pig.impl.io.NullableBigDecimalWritable", DataType.BIGDECIMAL);
+        classToTypeMap.put("org.apache.pig.impl.io.NullableBigIntegerWritable", DataType.BIGINTEGER);
+        classToTypeMap.put("org.apache.pig.impl.io.NullableBooleanWritable", DataType.BOOLEAN);
+        classToTypeMap.put("org.apache.pig.impl.io.NullableBytesWritable", DataType.BYTEARRAY);
+        classToTypeMap.put("org.apache.pig.impl.io.NullableDateTimeWritable", DataType.DATETIME);
+        classToTypeMap.put("org.apache.pig.impl.io.NullableDoubleWritable", DataType.DOUBLE);
+        classToTypeMap.put("org.apache.pig.impl.io.NullableFloatWritable", DataType.FLOAT);
+        classToTypeMap.put("org.apache.pig.impl.io.NullableIntWritable", DataType.INTEGER);
+        classToTypeMap.put("org.apache.pig.impl.io.NullableLongWritable", DataType.LONG);
+        classToTypeMap.put("org.apache.pig.impl.io.NullableText", DataType.CHARARRAY);
+        classToTypeMap.put("org.apache.pig.impl.io.NullableTuple", DataType.TUPLE);
+    }
+
+    public static PigNullableWritable getWritableComparable(String className) throws ExecException {
+        if (classToTypeMap.containsKey(className)) {
+            return getWritableComparableTypes(null, classToTypeMap.get(className));
+        } else {
+            throw new ExecException("Unable to map " + className + " to known types." + Arrays.toString(classToTypeMap.keySet().toArray()));
+        }
+    }
+
+    public static PigNullableWritable getNewWritableComparable(byte keyType) throws ExecException {
+        switch (keyType) {
+            case DataType.BAG:
+                return new NullableBag();
+            case DataType.BOOLEAN:
+                return new NullableBooleanWritable();
+            case DataType.BYTEARRAY:
+                return new NullableBytesWritable();
+            case DataType.CHARARRAY:
+                return new NullableText();
+            case DataType.DOUBLE:
+                return new NullableDoubleWritable();
+            case DataType.FLOAT:
+                return new NullableFloatWritable();
+            case DataType.INTEGER:
+                return new NullableIntWritable();
+            case DataType.BIGINTEGER:
+                return new NullableBigIntegerWritable();
+            case DataType.BIGDECIMAL:
+                return new NullableBigDecimalWritable();
+            case DataType.LONG:
+                return new NullableLongWritable();
+            case DataType.DATETIME:
+                return new NullableDateTimeWritable();
+            case DataType.TUPLE:
+                return new NullableTuple();
+            case DataType.MAP: {
+                int errCode = 1068;
+                String msg = "Using Map as key not supported.";
+                throw new ExecException(msg, errCode, PigException.INPUT);
+            }
+            default: {
+                if (typeToName == null) typeToName = DataType.genTypeToNameMap();
+                int errCode = 2044;
+                String msg = "The type "
+                    + typeToName.get(keyType) == null ? "" + keyType : typeToName.get(keyType)
+                    + " cannot be collected as a Key type";
+                throw new ExecException(msg, errCode, PigException.BUG);
+            }
+        }
+    }
+
     public static PigNullableWritable getWritableComparableTypes(Object o, byte keyType) throws ExecException{
-        
+
         byte newKeyType = keyType;
         if (o==null)
             newKeyType = DataType.NULL;
-        
+
         switch (newKeyType) {
         case DataType.BAG:
             return new NullableBag((DataBag)o);
@@ -71,28 +143,34 @@ public class HDataType {
 
         case DataType.BYTEARRAY:
             return new NullableBytesWritable(o);
-            
+
         case DataType.CHARARRAY:
             return new NullableText((String)o);
-            
+
         case DataType.DOUBLE:
             return new NullableDoubleWritable((Double)o);
-           
+
         case DataType.FLOAT:
             return new NullableFloatWritable((Float)o);
-            
+
         case DataType.INTEGER:
             return new NullableIntWritable((Integer)o);
-           
+
         case DataType.LONG:
             return new NullableLongWritable((Long)o);
+
+        case DataType.BIGINTEGER:
+            return new NullableBigIntegerWritable((BigInteger)o);
+
+        case DataType.BIGDECIMAL:
+            return new NullableBigDecimalWritable((BigDecimal)o);
 
         case DataType.DATETIME:
             return new NullableDateTimeWritable((DateTime)o);
 
         case DataType.TUPLE:
             return new NullableTuple((Tuple)o);
-         
+
         case DataType.MAP: {
             int errCode = 1068;
             String msg = "Using Map as key not supported.";
@@ -110,7 +188,7 @@ public class HDataType {
                 nboolWrit.setNull(true);
                 return nboolWrit;
             case DataType.BYTEARRAY:
-                NullableBytesWritable nBytesWrit = new NullableBytesWritable(); 
+                NullableBytesWritable nBytesWrit = new NullableBytesWritable();
                 nBytesWrit.setNull(true);
                 return nBytesWrit;
             case DataType.CHARARRAY:
@@ -129,6 +207,14 @@ public class HDataType {
                 NullableIntWritable nIntWrit = new NullableIntWritable();
                 nIntWrit.setNull(true);
                 return nIntWrit;
+            case DataType.BIGINTEGER:
+                NullableBigIntegerWritable nBigIntWrit = new NullableBigIntegerWritable();
+                nBigIntWrit.setNull(true);
+                return nBigIntWrit;
+            case DataType.BIGDECIMAL:
+                NullableBigDecimalWritable nBigDecWrit = new NullableBigDecimalWritable();
+                nBigDecWrit.setNull(true);
+                return nBigDecWrit;
             case DataType.LONG:
                 NullableLongWritable nLongWrit = new NullableLongWritable();
                 nLongWrit.setNull(true);
@@ -146,7 +232,7 @@ public class HDataType {
                 String msg = "Using Map as key not supported.";
                 throw new ExecException(msg, errCode, PigException.INPUT);
             }
-            
+
             }
             break;
         default:
@@ -161,7 +247,7 @@ public class HDataType {
         // should never come here
         return null;
     }
-    
+
     public static PigNullableWritable getWritableComparableTypes(byte type) throws ExecException{
         PigNullableWritable wcKey = null;
          switch (type) {
@@ -189,6 +275,12 @@ public class HDataType {
         case DataType.LONG:
             wcKey = longWrit;
             break;
+        case DataType.BIGINTEGER:
+            wcKey = bigIntWrit;
+            break;
+        case DataType.BIGDECIMAL:
+            wcKey = bigDecWrit;
+            break;
         case DataType.DATETIME:
             wcKey = dtWrit;
             break;
@@ -210,7 +302,15 @@ public class HDataType {
         }
         return wcKey;
     }
-    
+
+    public static byte findTypeFromClassName(String className) throws ExecException {
+        if (classToTypeMap.containsKey(className)) {
+            return classToTypeMap.get(className);
+        } else {
+            throw new ExecException("Unable to map " + className + " to known types." + Arrays.toString(classToTypeMap.keySet().toArray()));
+        }
+    }
+
     public static byte findTypeFromNullableWritable(PigNullableWritable o) throws ExecException {
         if (o instanceof NullableBooleanWritable)
             return DataType.BOOLEAN;
@@ -226,6 +326,10 @@ public class HDataType {
             return DataType.INTEGER;
         else if (o instanceof NullableLongWritable)
             return DataType.LONG;
+        else if (o instanceof NullableBigIntegerWritable)
+            return DataType.BIGINTEGER;
+        else if (o instanceof NullableBigDecimalWritable)
+            return DataType.BIGDECIMAL;
         else if (o instanceof NullableDateTimeWritable)
             return DataType.DATETIME;
         else if (o instanceof NullableBag)
@@ -237,5 +341,5 @@ public class HDataType {
             String msg = "Cannot find Pig type for " + o.getClass().getName();
             throw new ExecException(msg, errCode, PigException.BUG);
         }
-    }    
+    }
 }

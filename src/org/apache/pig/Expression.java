@@ -17,6 +17,8 @@
  */
 package org.apache.pig;
 
+import java.util.List;
+
 import org.apache.pig.classification.InterfaceAudience;
 import org.apache.pig.classification.InterfaceStability;
 
@@ -28,16 +30,16 @@ import org.apache.pig.classification.InterfaceStability;
 @InterfaceStability.Evolving
 public abstract class Expression {
 
- // Operator type                                                                                                                                                                                                                                                                                       
+ // Operator type
     public static  enum OpType {
-        
+
         // binary arith ops
         OP_PLUS (" + "),
         OP_MINUS(" - "),
         OP_TIMES(" * "),
         OP_DIV(" / "),
         OP_MOD(" % "),
-          
+
         //binary ops
         OP_EQ(" == "),
         OP_NE(" != "),
@@ -45,29 +47,38 @@ public abstract class Expression {
         OP_GE(" >= "),
         OP_LT(" < "),
         OP_LE(" <= "),
+        OP_MATCH(" matches "),
+
+        //Only used by PredicatePushdown, not used by PartitionPushdown
+        OP_IN (" in "),
+        OP_BETWEEN (" between "),
+
+        //unary ops
+        OP_NULL(" is null"),
+        OP_NOT(" not"),
 
         //binary logical
         OP_AND(" and "),
         OP_OR(" or "),
         TERM_COL(" Column "),
         TERM_CONST(" Constant ");
-        
+
         private String str = "";
         private OpType(String rep){
             this.str = rep;
         }
         private OpType(){
         }
-        
+
         @Override
         public String toString(){
             return this.str;
         }
-        
+
     }
-    
+
     protected OpType opType;
-    
+
     /**
      * @return the opType
      */
@@ -75,22 +86,100 @@ public abstract class Expression {
         return opType;
     }
 
-    
-    
-    
+    //TODO: Apply a optimizer to Expression from PredicatePushdownOptimizer and
+    // convert OR clauses to BETWEEN OR IN
+    public static class BetweenExpression extends Expression {
+
+        private Object lower;
+        private Object upper;
+
+        public BetweenExpression(Object lower, Object upper) {
+            this.opType = OpType.OP_BETWEEN;
+            this.lower = lower;
+            this.upper = upper;
+        }
+
+        public Object getLower() {
+            return lower;
+        }
+
+        public Object getUpper() {
+            return upper;
+        }
+
+        @Override
+        public String toString() {
+            return " between " + lower + " and " + upper;
+        }
+
+    }
+
+    public static class InExpression extends Expression {
+
+        private List<Object> values;
+
+        public InExpression(List<Object> values) {
+            this.opType = OpType.OP_IN;
+            this.values = values;
+        }
+
+        public List<Object> getValues() {
+            return values;
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            sb.append(" in (");
+            for (Object value : values) {
+                if (value instanceof String) {
+                    sb.append("'").append(value).append("', ");
+                } else {
+                    sb.append(value).append(", ");
+                }
+            }
+            sb.deleteCharAt(sb.length() - 1);
+            sb.append(")");
+            return sb.toString();
+        }
+
+    }
+
+    public static class UnaryExpression extends Expression {
+
+        Expression expr;
+
+        public UnaryExpression(Expression expr, OpType opType) {
+            this.opType = opType;
+            this.expr = expr;
+        }
+
+        public Expression getExpression() {
+            return expr;
+        }
+
+        @Override
+        public String toString() {
+            // TODO: Change toString() for OP_NOT to say (col is not null)
+            // instead of ((col is null) not). If any one relies on expr.toString() might be useful
+            return "(" + expr.toString() + opType.toString() + ")";
+        }
+
+    }
+
     public static class BinaryExpression extends Expression {
-        
+
         /**
          * left hand operand
          */
         Expression lhs;
-        
+
         /**
          * right hand operand
          */
         Expression rhs;
-    
-        
+
+
         /**
          * @param lhs
          * @param rhs
@@ -100,35 +189,35 @@ public abstract class Expression {
             this.lhs = lhs;
             this.rhs = rhs;
         }
-    
+
         /**
          * @return the left hand operand
          */
         public Expression getLhs() {
             return lhs;
         }
-    
+
         /**
          * @return the right hand operand
          */
         public Expression getRhs() {
             return rhs;
         }
-        
+
         @Override
         public String toString() {
             return "(" + lhs.toString() + opType.toString() + rhs.toString()
                                 + ")";
         }
     }
-    
+
     public static class Column extends Expression {
-        
+
         /**
          * name of column
          */
         private String name;
-    
+
         /**
          * @param name
          */
@@ -136,7 +225,7 @@ public abstract class Expression {
             this.opType = OpType.TERM_COL;
             this.name = name;
         }
-        
+
         @Override
         public String toString() {
             return name;
@@ -156,21 +245,21 @@ public abstract class Expression {
             this.name = name;
         }
     }
-    
+
     public static class Const extends Expression {
-        
+
         /**
          * value of the constant
          */
         Object value;
-    
+
         /**
          * @return the value
          */
         public Object getValue() {
             return value;
         }
-    
+
         /**
          * @param value
          */
@@ -178,10 +267,10 @@ public abstract class Expression {
             this.opType = OpType.TERM_CONST;
             this.value = value;
         }
-        
+
         @Override
         public String toString() {
-            return (value instanceof String) ? "\'" + value + "\'": 
+            return (value instanceof String) ? "\'" + value + "\'":
                 value.toString();
         }
     }

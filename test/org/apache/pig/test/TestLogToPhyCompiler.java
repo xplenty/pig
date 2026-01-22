@@ -17,6 +17,9 @@
  */
 package org.apache.pig.test;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -39,20 +42,43 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOpe
 import org.apache.pig.builtin.PigStorage;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.logicalLayer.FrontendException;
-import org.apache.pig.impl.plan.VisitorException;
-import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
-import org.apache.pig.newplan.logical.relational.LOFilter;
 import org.apache.pig.newplan.logical.relational.LogToPhyTranslationVisitor;
 import org.apache.pig.newplan.logical.relational.LogicalPlan;
+import org.apache.pig.test.junit.OrderedJUnit4Runner;
+import org.apache.pig.test.junit.OrderedJUnit4Runner.TestOrder;
 
+import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 
 /**
  * 
  * To generate golden files, update generate to true
  * 
  */
-public class TestLogToPhyCompiler extends junit.framework.TestCase {
+
+@RunWith(OrderedJUnit4Runner.class)
+@TestOrder({
+    "testComplexForeach",
+    "testSort",
+    "testDistinct",
+    "testCogroup",
+    "testArithmetic",
+    "testComparison",
+    "testBinCond",
+    "testGenerate",
+    "testUnion",
+    "testSplit",
+    "testIsNull",
+    "testLimit",
+    "testSortInfoAsc",
+    "testSortInfoAscDesc",
+    "testSortInfoNoOrderBy1",
+    "testSortInfoNoOrderBy2",
+    "testSortInfoOrderByLimit",
+    "testSortInfoMultipleStore",
+    "testSortInfoNoOrderBySchema" })
+public class TestLogToPhyCompiler {
     File A;
     final int MAX_RANGE = 10;
     
@@ -63,10 +89,9 @@ public class TestLogToPhyCompiler extends junit.framework.TestCase {
     
     PigServer pigServer = null;
     private static final int MAX_SIZE = 100000;;
-   
     
-    @Override
-    protected void setUp() throws Exception {
+    @Before
+    public void setUp() throws Exception {
     	pigServer = new PigServer( ExecType.LOCAL, new Properties() );
         pc.connect();
     }
@@ -86,6 +111,7 @@ public class TestLogToPhyCompiler extends junit.framework.TestCase {
         pp.explain(baos);
         baos.write((int)'\n');
         String compiledPlan = baos.toString();
+        compiledPlan = Util.standardizeNewline(compiledPlan);
         compiledPlan = removedUnaffectingChanges(compiledPlan);
 
         generateGolden(goldenFile, compiledPlan);
@@ -108,6 +134,7 @@ public class TestLogToPhyCompiler extends junit.framework.TestCase {
         int len = fis.read(b);
         fis.close();
         String goldenPlan = new String(b, 0, len);
+        goldenPlan = Util.standardizeNewline(goldenPlan);
         goldenPlan = removedUnaffectingChanges(goldenPlan);
         return goldenPlan;
     }
@@ -129,7 +156,8 @@ public class TestLogToPhyCompiler extends junit.framework.TestCase {
         System.out.println();
         System.out.println(compiledPlan);
         System.out.println("-------------" + testName);
-        assertEquals(compiledPlan, goldenPlan);
+
+        assertEquals(goldenPlan, compiledPlan);
     }
     
     @Test // Commented out due to PIG-2020
@@ -145,6 +173,7 @@ public class TestLogToPhyCompiler extends junit.framework.TestCase {
                 "testComplexForeach");
     }
  
+    @Test
     public void testSort() throws Exception {
         checkAgainstGolden(
                 "store (order (load 'a') by $0) into 'output';", 
@@ -153,7 +182,7 @@ public class TestLogToPhyCompiler extends junit.framework.TestCase {
                 "testSort");
     }
 
-        
+    @Test        
     public void testDistinct() throws Exception {
         checkAgainstGolden(
                 "store( distinct (load 'a') ) into 'output';", 
@@ -161,7 +190,8 @@ public class TestLogToPhyCompiler extends junit.framework.TestCase {
                 false, 
                 "testDistinct");
     }
-    
+
+    @Test
     public void testCogroup() throws Exception {
         checkAgainstGolden(
               "A = cogroup (load 'a') by ($0 + $1, $0 - $1), (load 'b') by ($0 + $1, $0 - $1);" +
@@ -170,7 +200,8 @@ public class TestLogToPhyCompiler extends junit.framework.TestCase {
               false, 
               "testCogroup");
     }
-    
+
+    @Test
     public void testArithmetic() throws Exception {
         checkAgainstGolden(
                 "A = foreach (load 'A') generate $0 + $1 + 5, $0 - 5 - $1, 'hello';" +
@@ -180,6 +211,7 @@ public class TestLogToPhyCompiler extends junit.framework.TestCase {
                 "testArithmetic");
     }
 
+    @Test
     public void testComparison() throws Exception {
         checkAgainstGolden(
                 "A = filter (load 'a' using " + PigStorage.class.getName() + "(':')) by $0 + $1 > ($0 - $1) * (4 / 2);" +
@@ -236,7 +268,9 @@ public class TestLogToPhyCompiler extends junit.framework.TestCase {
         //System.out.println("Length of first plan = " + len + " of second = " + test);
         String goldenPlan1 = new String(b1, 0, len);
         String goldenPlan2 = new String(b2, 0, len);
+        goldenPlan1 = Util.standardizeNewline(goldenPlan1);
         goldenPlan1 = removedUnaffectingChanges(goldenPlan1);
+        goldenPlan2 = Util.standardizeNewline(goldenPlan2);
         goldenPlan2 = removedUnaffectingChanges(goldenPlan2);
 
         System.out.println();
@@ -290,7 +324,9 @@ public class TestLogToPhyCompiler extends junit.framework.TestCase {
         //System.out.println("Length of first plan = " + len + " of second = " + test + " Length of compiled plan = " + compiledPlan.length());
         String goldenPlan1 = new String(b1, 0, len);
         String goldenPlan2 = new String(b2, 0, len);
+        goldenPlan1 = Util.standardizeNewline(goldenPlan1);
         goldenPlan1 = removedUnaffectingChanges(goldenPlan1);
+        goldenPlan2 = Util.standardizeNewline(goldenPlan2);
         goldenPlan2 = removedUnaffectingChanges(goldenPlan2);
 
         System.out.println();

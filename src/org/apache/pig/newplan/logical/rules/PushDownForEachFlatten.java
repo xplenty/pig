@@ -20,7 +20,6 @@ package org.apache.pig.newplan.logical.rules;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -44,6 +43,13 @@ import org.apache.pig.newplan.optimizer.Transformer;
 import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.util.Pair;
 
+/**
+ * It's generally a good idea to do flattens as late as possible as
+ * they tend to generate more rows (and so more I/O). This optimization
+ * swaps the order of SORTs, CROSSes and JOINs that come after 
+ * FOREACH..GENERATE..FLATTENs. FILTERs are re-ordered by the 
+ * {@link FilterAboveForeach} rule so are ignored here. 
+ */
 public class PushDownForEachFlatten extends Rule {
 
     public PushDownForEachFlatten(String name) {
@@ -153,6 +159,11 @@ public class PushDownForEachFlatten extends Rule {
                     for( int i = 0; i < preds.size(); i++ ) {
                         Operator op = preds.get( i );
                         if( op == foreach ) {
+                            // Don't optimize if the flattened side is outer side of an outer join
+                            // See PIG-3826
+                            if (join.getInnerFlags()[i]==false) {
+                                return false;
+                            }
                             Collection<LogicalExpressionPlan> exprs = join.getJoinPlan( i );
                             for( LogicalExpressionPlan expr : exprs ) {
                                 List<ProjectExpression> projs = getProjectExpressions( expr );
@@ -254,6 +265,7 @@ public class PushDownForEachFlatten extends Rule {
                                 fieldsToBeFlattaned.add(fieldCount);
                                 if (gen.getUserDefinedSchema()!=null && gen.getUserDefinedSchema().get(i)!=null) {
                                     cachedUserDefinedSchema.put(fieldCount, gen.getUserDefinedSchema().get(i));
+                                    cachedUserDefinedSchema.get(fieldCount).mergeUid(gen.getOutputPlanSchemas().get(i));
                                     gen.getUserDefinedSchema().set(i, null);
                                 }
                                 fieldCount++;

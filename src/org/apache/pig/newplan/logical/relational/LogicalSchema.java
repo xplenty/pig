@@ -150,6 +150,39 @@ public class LogicalSchema {
             }
             return true;
         }
+
+        // Check if fs1 is equal to fs2 with regard to type
+        public static boolean typeMatch(LogicalFieldSchema fs1, LogicalFieldSchema fs2) {
+            if (fs1==null && fs2==null) {
+                return true;
+            }
+            if (fs1==null || fs2==null) {
+                return false;
+            }
+            if (fs1.type!=fs2.type) {
+                return false;
+            }
+            if (DataType.isComplex(fs1.type)) {
+                LogicalSchema s1 = fs1.schema;
+                LogicalSchema s2 = fs2.schema;
+                if (s1==null && s2==null) {
+                    return true;
+                }
+                if (s1==null || s2==null) {
+                    return false;
+                }
+                if (s1.size()!=s2.size()) {
+                    return false;
+                }
+                for (int i=0;i<s1.size();i++) {
+                    if (!typeMatch(s1.getField(i), s2.getField(i))) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
         /**
          * Adds the uid from FieldSchema argument to this FieldSchema
          * If the argument is null, it stamps this FieldSchema with uid
@@ -363,7 +396,7 @@ public class LogicalSchema {
             if (mode==MergeMode.UnionInner) {
                 if (fs1.type!=fs2.type)
                     // We don't merge inner schema of different type for union, throw exception
-                    throw new FrontendException("Incompatable field schema: left is \"" + fs1.toString(false) + "\", right is \"" + fs2.toString(false) + "\"", 1031);
+                    throw new FrontendException("Incompatible field schema: left is \"" + fs1.toString(false) + "\", right is \"" + fs2.toString(false) + "\"", 1031);
                 else
                     mergedType = fs1.type;
             }
@@ -371,7 +404,7 @@ public class LogicalSchema {
                 if (fs1.type==DataType.NULL||fs1.type==DataType.BYTEARRAY)  // If declared schema does not have type part
                     mergedType = fs2.type;
                 else if (!DataType.castable(fs1.type, fs2.type))
-                    throw new FrontendException("Incompatable field schema: declared is \"" + fs1.toString(false) + "\", infered is \"" + fs2.toString(false) + "\"", 1031);
+                    throw new FrontendException("Incompatible field schema: declared is \"" + fs1.toString(false) + "\", infered is \"" + fs2.toString(false) + "\"", 1031);
                 else mergedType = fs1.type; // If compatible type, we take the declared type
             }
             else {
@@ -438,7 +471,7 @@ public class LogicalSchema {
                                 // Only check compatibility
                                 mergedSubSchema = LogicalSchema.merge(fs1.schema, fs2.schema, MergeMode.LoadForEachInner);
                             } catch (FrontendException e) {
-                                throw new FrontendException("Incompatable field schema: left is \"" + fs1.toString(false) + "\", right is \"" + fs2.toString(false) + "\"", 1031);
+                                throw new FrontendException("Incompatible field schema: left is \"" + fs1.toString(false) + "\", right is \"" + fs2.toString(false) + "\"", 1031);
                             }
                         }
                     }
@@ -447,7 +480,23 @@ public class LogicalSchema {
             LogicalFieldSchema mergedFS = new LogicalFieldSchema(mergedAlias, mergedSubSchema, mergedType);
             return mergedFS;
         }
-        
+
+        public static boolean isEqualUnlessUnknown(LogicalFieldSchema fs1, LogicalFieldSchema fs2) throws FrontendException {
+            if (fs1.type == DataType.BYTEARRAY) {
+                return true;
+            } else if (fs2.type == DataType.BYTEARRAY) {
+                return true;
+            } else if (fs1.type == fs2.type) {
+                if (DataType.isComplex(fs1.type)) {
+                    return LogicalSchema.isEqualUnlessUnknown(fs1.schema, fs2.schema);
+                } else {
+                    return true;
+                }
+            } else {
+                return false;
+            }
+        }
+
         /***
          * Old Pig field schema does not require a tuple schema inside a bag;
          * Now it is required to have that; this method is to fill the gap
@@ -757,7 +806,7 @@ public class LogicalSchema {
             if (mode==MergeMode.Union) // In union, incompatible type result a null schema
                 return null;
             else
-                throw new FrontendException("Incompatable schema: left is \"" + s1.toString(false) + "\", right is \"" + s2.toString(false) + "\"", 1031);    
+                throw new FrontendException("Incompatible schema: left is \"" + s1.toString(false) + "\", right is \"" + s2.toString(false) + "\"", 1031);    
         }
             
         LogicalSchema mergedSchema = new LogicalSchema();
@@ -770,7 +819,24 @@ public class LogicalSchema {
         }
         return mergedSchema;
     }
-    
+
+    public static boolean isEqualUnlessUnknown(LogicalSchema s1, LogicalSchema s2) throws FrontendException {
+        if (s1 == null) {
+            return true;
+        } else if (s2 == null) {
+            return true;
+        } else if (s1.size() != s2.size()) {
+            return false;
+        } else {
+            for (int i=0;i<s1.size();i++) {
+                if (!LogicalFieldSchema.isEqualUnlessUnknown(s1.getField(i), s1.getField(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
     public String toString(boolean verbose) {
         StringBuilder str = new StringBuilder();
         

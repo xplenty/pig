@@ -21,15 +21,14 @@ import java.util.HashMap;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-
 import org.apache.pig.PigException;
 import org.apache.pig.backend.executionengine.ExecException;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
 import org.apache.pig.data.DataType;
-import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.NodeIdGenerator;
+import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
 
 public class NotEqualToExpr extends BinaryComparisonOperator {
@@ -60,7 +59,7 @@ public class NotEqualToExpr extends BinaryComparisonOperator {
     }
 
     @Override
-    public Result getNext(Boolean bool) throws ExecException {
+    public Result getNextBoolean() throws ExecException {
         Result left, right;
 
         switch (operandType) {
@@ -69,18 +68,19 @@ public class NotEqualToExpr extends BinaryComparisonOperator {
         case DataType.FLOAT:
         case DataType.BOOLEAN:
         case DataType.INTEGER:
+        case DataType.BIGINTEGER:
+        case DataType.BIGDECIMAL:
         case DataType.LONG:
         case DataType.DATETIME:
         case DataType.CHARARRAY:
         case DataType.TUPLE:
         case DataType.MAP: {
-            Object dummy = getDummy(operandType);
-            Result r = accumChild(null, dummy, operandType);
+            Result r = accumChild(null, operandType);
             if (r != null) {
                 return r;
             }
-            left = lhs.getNext(dummy, operandType);
-            right = rhs.getNext(dummy, operandType);
+            left = lhs.getNext(operandType);
+            right = rhs.getNext(operandType);
             return doComparison(left, right);
         }
         default: {
@@ -95,9 +95,6 @@ public class NotEqualToExpr extends BinaryComparisonOperator {
 
     @SuppressWarnings("unchecked")
     private Result doComparison(Result left, Result right) throws ExecException {
-        if (trueRef == null) {
-            initializeRefs();
-        }
         if (left.returnStatus != POStatus.STATUS_OK) {
             return left;
         }
@@ -108,23 +105,23 @@ public class NotEqualToExpr extends BinaryComparisonOperator {
         // null
         if(left.result == null || right.result == null) {
             left.result = null;
-            left.returnStatus = POStatus.STATUS_NULL;
+            left.returnStatus = POStatus.STATUS_OK;
             return left;
         }
 
         if (left.result instanceof Comparable && right.result instanceof Comparable){
             if (((Comparable)left.result).compareTo(right.result) != 0) {
-                left.result = trueRef;
+                left.result = Boolean.TRUE;
             } else {
-                left.result = falseRef;
+                left.result = Boolean.FALSE;
             }
         }else if (left.result instanceof HashMap && right.result instanceof HashMap){
             HashMap leftMap=(HashMap)left.result;
             HashMap rightMap=(HashMap)right.result;
             if (leftMap.equals(rightMap)) {
-                left.result = falseRef;
+                left.result = Boolean.FALSE;
             } else {
-                left.result = trueRef;
+                left.result = Boolean.TRUE;
             }
         }else{
             throw new ExecException("The left side and right side has the different types");

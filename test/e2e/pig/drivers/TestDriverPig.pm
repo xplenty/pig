@@ -58,7 +58,7 @@ sub replaceParameters
 {
 ##!!! Move this to Util.pm
 
-    my ($self, $cmd, $outfile, $testCmd, $log) = @_;
+    my ($self, $cmd, $outfile, $testCmd, $log, $resources) = @_;
 
     # $self
     $cmd =~ s/:LATESTOUTPUTPATH:/$self->{'latestoutputpath'}/g;
@@ -73,10 +73,14 @@ sub replaceParameters
     $cmd =~ s/:INPATH:/$testCmd->{'inpathbase'}/g;
     $cmd =~ s/:OUTPATH:/$outfile/g;
     $cmd =~ s/:FUNCPATH:/$testCmd->{'funcjarPath'}/g;
+    $cmd =~ s/:PIGGYBANKJAR:/$testCmd->{'piggybankjarPath'}/g;
     $cmd =~ s/:PIGPATH:/$testCmd->{'pigpath'}/g;
     $cmd =~ s/:RUNID:/$testCmd->{'UID'}/g;
     $cmd =~ s/:USRHOMEPATH:/$testCmd->{'userhomePath'}/g;
     $cmd =~ s/:MAPREDJARS:/$testCmd->{'mapredjars'}/g;
+    $cmd =~ s/:HIVELIBDIR:/$testCmd->{'hivelibdir'}/g;
+    $cmd =~ s/:HIVEVERSION:/$testCmd->{'hiveversion'}/g;
+    $cmd =~ s/:HIVESHIMSVERSION:/$testCmd->{'hiveshimsversion'}/g;
     $cmd =~ s/:SCRIPTHOMEPATH:/$testCmd->{'scriptPath'}/g;
     $cmd =~ s/:DBUSER:/$testCmd->{'dbuser'}/g;
     $cmd =~ s/:DBNAME:/$testCmd->{'dbdb'}/g;
@@ -98,19 +102,24 @@ sub replaceParameters
           $param =~ s/:HCATBIN:/$testCmd->{'hcatbin'}/g;
       }
     }
+
+    foreach (keys(%$resources)) {
+        $cmd =~ s/:$_:/$resources->{$_}/g;
+    }
+
     return $cmd;
 }
 
 sub globalSetup
 {
     my ($self, $globalHash, $log) = @_;
-    my $subName = (caller(0))[3];
-
 
     # Setup the output path
     my $me = `whoami`;
-    chomp $me;
-    $globalHash->{'runid'} = $me . "." . time;
+    $me =~ s/[^a-zA-Z0-9]*//g;
+    my $jobId = $globalHash->{'job-id'};
+    my $timeId = time;
+    $globalHash->{'runid'} = $me . "-" . $timeId . "-" . $jobId;
 
     # if "-ignore false" was provided on the command line,
     # it means do run tests even when marked as 'ignore'
@@ -121,54 +130,67 @@ sub globalSetup
 
     $globalHash->{'outpath'} = $globalHash->{'outpathbase'} . "/" . $globalHash->{'runid'} . "/";
     $globalHash->{'localpath'} = $globalHash->{'localpathbase'} . "/" . $globalHash->{'runid'} . "/";
+    $globalHash->{'tmpPath'} = $globalHash->{'tmpPath'} . "/" . $globalHash->{'runid'} . "/";
+    $globalHash->{'orig_pig_classpath'} = $ENV{'PIG_CLASSPATH'};
+}
+
+sub globalSetupConditional() {
+    my ($self, $globalHash, $log) = @_;
 
     # add libexec location to the path
     if (defined($ENV{'PATH'})) {
-        $ENV{'PATH'} = $globalHash->{'scriptPath'} . ":" . $ENV{'PATH'};
-    }
-    else {
+
+        #detect os and modify path accordingly
+        if(Util::isWindows()) {
+            $ENV{'PATH'} = $globalHash->{'scriptPath'} . ";" . $ENV{'PATH'};
+        }
+        else {
+            $ENV{'PATH'} = $globalHash->{'scriptPath'} . ":" . $ENV{'PATH'};
+        }
+    } else {
         $ENV{'PATH'} = $globalHash->{'scriptPath'};
     }
 
     my @cmd = ($self->getPigCmd($globalHash, $log), '-e', 'mkdir', $globalHash->{'outpath'});
-
-
 	print $log "Going to run " . join(" ", @cmd) . "\n";
-    IPC::Run::run(\@cmd, \undef, $log, $log) or die "Cannot create HDFS directory " . $globalHash->{'outpath'} . ": $? - $!\n";
+    IPC::Run::run(\@cmd, \undef, $log, $log) or die "$0 at ".__LINE__.": Cannot create HDFS directory " . $globalHash->{'outpath'} . ": $? - $!\n";
 
-    IPC::Run::run(['mkdir', '-p', $globalHash->{'localpath'}], \undef, $log, $log) or 
-        die "Cannot create localpath directory " . $globalHash->{'localpath'} .
-        " " . "$ERRNO\n";
-
-    # Create the temporary directory
-    IPC::Run::run(['mkdir', '-p', $globalHash->{'tmpPath'}], \undef, $log, $log) or 
-        die "Cannot create temporary directory " . $globalHash->{'tmpPath'} .
-        " " . "$ERRNO\n";
+    File::Path::make_path(
+            $globalHash->{'localpath'},
+            $globalHash->{'tmpPath'});
 
     # Create the HDFS temporary directory
     @cmd = ($self->getPigCmd($globalHash, $log), '-e', 'mkdir', "tmp/$globalHash->{'runid'}");
 	print $log "Going to run " . join(" ", @cmd) . "\n";
-    IPC::Run::run(\@cmd, \undef, $log, $log) or die "Cannot create HDFS directory " . $globalHash->{'outpath'} . ": $? - $!\n";
+    IPC::Run::run(\@cmd, \undef, $log, $log) or die "$0 at ".__LINE__.": Cannot create HDFS directory " . "tmp/$globalHash->{'runid'}" . ": $? - $!\n";
 }
 
-sub globalCleanup
+sub globalCleanup()
 {
+    # noop there because the removal of temp directories, which are created in #globalSetupConditional(), is to be
+    # performed in method #globalCleanupConditional().
+}
+
+sub globalCleanupConditional() {
     my ($self, $globalHash, $log) = @_;
 
+    # NB: both local and HDFS output directories are not removed there, because these data may 
+    # be needed to investigate the tests failures.
+
     IPC::Run::run(['rm', '-rf', $globalHash->{'tmpPath'}], \undef, $log, $log) or 
-        warn "Cannot remove temporary directory " . $globalHash->{'tmpPath'} .
-        " " . "$ERRNO\n";
+       warn "Cannot remove temporary directory " . $globalHash->{'tmpPath'} .
+           " " . "$ERRNO\n";
 
     # Cleanup the HDFS temporary directory
     my @cmd = ($self->getPigCmd($globalHash, $log), '-e', 'fs', '-rmr', "tmp/$globalHash->{'runid'}");
-	print $log "Going to run " . join(" ", @cmd) . "\n";
-    IPC::Run::run(\@cmd, \undef, $log, $log) or die "Cannot create HDFS directory " . $globalHash->{'outpath'} . ": $? - $!\n";
+    print $log "Going to run: [" . join(" ", @cmd) . "]\n";
+    IPC::Run::run(\@cmd, \undef, $log, $log)
+       or die "$0 at ".__LINE__.": Cannot remove HDFS directory " . "tmp/$globalHash->{'runid'}" . ": $? - $!\n";
 }
-
 
 sub runTest
 {
-    my ($self, $testCmd, $log) = @_;
+    my ($self, $testCmd, $log, $resources) = @_;
     my $subName  = (caller(0))[3];
 
     # Check that we should run this test.  If the current execution type
@@ -183,31 +205,32 @@ sub runTest
 
     if ( $testCmd->{'pig'} && $self->hasCommandLineVerifications( $testCmd, $log) ) {
        my $oldpig;
-       if ( $testCmd->{'hadoopversion'} == '23' && $testCmd->{'pig23'}) {
+
+       if ((Util::isWindows() || Util::isCygwin()) && $testCmd->{'pig_win'}) {
            $oldpig = $testCmd->{'pig'};
-           $testCmd->{'pig'} = $testCmd->{'pig23'};
+           $testCmd->{'pig'} = $testCmd->{'pig_win'};
        }
-       if ( $testCmd->{'hadoopversion'} == '23' && $testCmd->{'expected_err_regex23'}) {
-           $testCmd->{'expected_err_regex'} = $testCmd->{'expected_err_regex23'};
-       }
-       my $res = $self->runPigCmdLine( $testCmd, $log, 1);
+
+       my $res = $self->runPigCmdLine( $testCmd, $log, 1, $resources );
        if ($oldpig) {
            $testCmd->{'pig'} = $oldpig;
        }
        return $res;
     } elsif( $testCmd->{'pig'} ){
        my $oldpig;
-       if ( $testCmd->{'hadoopversion'} == '23' && $testCmd->{'pig23'}) {
+
+       if ((Util::isWindows() || Util::isCygwin()) && $testCmd->{'pig_win'}) {
            $oldpig = $testCmd->{'pig'};
-           $testCmd->{'pig'} = $testCmd->{'pig23'};
+           $testCmd->{'pig'} = $testCmd->{'pig_win'};
        }
-       my $res = $self->runPig( $testCmd, $log, 1);
+
+       my $res = $self->runPig( $testCmd, $log, 1, $resources );
        if ($oldpig) {
            $testCmd->{'pig'} = $oldpig;
        }
        return $res;
     } elsif(  $testCmd->{'script'} ){
-       return $self->runScript( $testCmd, $log );
+       return $self->runScript( $testCmd, $log, $resources );
     } else {
        die "$subName FATAL Did not find a testCmd that I know how to handle";
     }
@@ -216,7 +239,7 @@ sub runTest
 
 sub runPigCmdLine
 {
-    my ($self, $testCmd, $log) = @_;
+    my ($self, $testCmd, $log, $copyResults, $resources) = @_;
     my $subName = (caller(0))[3];
     my %result;
 
@@ -235,7 +258,7 @@ sub runPigCmdLine
     }
 
     # Write the pig script to a file.
-    my $pigcmd = $self->replaceParameters( $testCmd->{'pig'}, $outfile, $testCmd, $log );
+    my $pigcmd = $self->replaceParameters( $testCmd->{'pig'}, $outfile, $testCmd, $log, $resources );
 
     open(FH, "> $pigfile") or die "Unable to open file $pigfile to write pig script, $ERRNO\n";
     print FH $pigcmd . "\n";
@@ -243,10 +266,11 @@ sub runPigCmdLine
 
     # Build the command
     my @baseCmd = $self->getPigCmd($testCmd, $log);
+    push(@baseCmd, ("-x", $testCmd->{'exectype'}));
     my @cmd = @baseCmd;
 
     # Add option -l giving location for secondary logs
-    ##!!! Should that even be here? 
+    ##!!! Should that even be here?
     my $locallog = $testCmd->{'localpath'} . $testCmd->{'group'} . "_" . $testCmd->{'num'} . ".log";
     push(@cmd, "-logfile");
     push(@cmd, $locallog);
@@ -278,7 +302,9 @@ sub runPigCmdLine
     $result{'rc'} = $? >> 8;
     $result{'output'} = $outfile;
     $result{'stdout'} = `cat $stdoutfile`;
+    $result{'stdout'} =~ s/\r\n/\n/g;
     $result{'stderr'} = `cat $stderrfile`;
+    $result{'stderr'} =~ s/\r\n/\n/g;
     $result{'stderr_file'} = $stderrfile;
 
     print $log "STD ERROR CONTAINS:\n$result{'stderr'}\n";
@@ -289,7 +315,7 @@ sub runPigCmdLine
 
 sub runScript
 {
-    my ($self, $testCmd, $log) = @_;
+    my ($self, $testCmd, $log, $resources) = @_;
     my $subName = (caller(0))[3];
     my %result;
 
@@ -308,7 +334,7 @@ sub runScript
     }
 
     # Write the script to a file
-    my $cmd = $self->replaceParameters( $testCmd->{'script'}, $outfile, $testCmd, $log );
+    my $cmd = $self->replaceParameters( $testCmd->{'script'}, $outfile, $testCmd, $log, $resources );
 
     open(FH, ">$script") or die "Unable to open file $script to write script, $ERRNO\n";
     print FH $cmd . "\n";
@@ -337,6 +363,17 @@ sub runScript
     return \%result;
 }
 
+sub hadoopLocalTmpDir($$)
+{
+    my ($self, $testCmd) = @_;
+
+    if (defined($testCmd->{'hadoop.mapred.local.dir'}) 
+         && (int($ENV{'FORK_FACTOR_GROUP'})>1 || int($ENV{'FORK_FACTOR_FILE'})>1)) {
+        return $testCmd->{'hadoop.mapred.local.dir'} . "/" . $PID;
+    } else {
+        return undef;
+    }
+}
 
 sub getPigCmd($$$)
 {
@@ -345,27 +382,64 @@ sub getPigCmd($$$)
     my @pigCmd;
 
     # set the PIG_CLASSPATH environment variable
-	my $pcp .= $testCmd->{'jythonjar'} if (defined($testCmd->{'jythonjar'}));
-    $pcp .= ":" . $testCmd->{'jrubyjar'} if (defined($testCmd->{'jrubyjar'}));
-    $pcp .= ":" . $testCmd->{'classpath'} if (defined($testCmd->{'classpath'}));
+	my $separator = ":";
+	if(Util::isWindows()||Util::isCygwin()) {
+	    $separator = ";";
+	}
+    my $pcp .= $separator . $testCmd->{'classpath'} if (defined($testCmd->{'classpath'}));
 
     # Set it in our current environment.  It will get inherited by the IPC::Run
     # command.
-    $ENV{'PIG_CLASSPATH'} = $pcp;
+    $ENV{'PIG_CLASSPATH'} = $testCmd->{'orig_pig_classpath'} . $separator . $pcp;
 
-    @pigCmd = ("$testCmd->{'pigpath'}/bin/pig");
+    if ($testCmd->{'usePython'} eq "true") {
+        @pigCmd = ("python");
+        push(@pigCmd, "$testCmd->{'pigpath'}/bin/pig.py");
+        # print ("Using pig too\n");
+    } else {
+        my $pigbin = "";
+        if(Util::isWindows()) {
+            $pigbin = "$testCmd->{'pigpath'}/bin/pig.cmd";
+        }
+        elsif (Util::isCygwin()) {
+            $pigbin = "$testCmd->{'pigpath'}/bin/pig.cmd";
+            $pigbin =~ s/\\/\//g;
+            $pigbin = `cygpath -u $pigbin`;
+            chomp($pigbin);
+        } else {
+            $pigbin = "$testCmd->{'pigpath'}/bin/pig";
+        }
+        @pigCmd = ($pigbin);
+    }
 
     if (defined($testCmd->{'additionaljars'})) {
         push(@pigCmd, '-Dpig.additional.jars='.$testCmd->{'additionaljars'});
     }
 
+    my $additionalJavaParams = undef;
     if ($testCmd->{'exectype'} eq "local") {
-		push(@{$testCmd->{'java_params'}}, "-Xmx1024m");
-        push(@pigCmd, ("-x", "local"));
+        $additionalJavaParams = "-Xmx1024m";
+        my $hadoopTmpDir = $self->hadoopLocalTmpDir($testCmd);
+        if (defined($hadoopTmpDir)) {
+           $additionalJavaParams .= " -Dmapred.local.dir=$hadoopTmpDir -Dmapreduce.cluster.local.dir=$hadoopTmpDir";
+        }
+        TestDriver::dbg("Additional java parameters: [$additionalJavaParams].\n");
     }
 
-    if (defined($testCmd->{'java_params'})) {
-		$ENV{'PIG_OPTS'} = join(" ", @{$testCmd->{'java_params'}});
+    # Several OutOfMemoryErrors - Perm space issues were seen during running E2E tests, here max Perm size is adjusted
+    if ($testCmd->{'exectype'} eq "spark") {
+        $additionalJavaParams = "-XX:MaxPermSize=512m";
+    }
+    
+    push(@pigCmd, ("-x", $testCmd->{'exectype'}));
+
+    if (defined($testCmd->{'java_params'}) || defined($additionalJavaParams)) {
+        if (defined($testCmd->{'java_params'})) {
+	   $ENV{'PIG_OPTS'} = join(" ", @{$testCmd->{'java_params'}}, $additionalJavaParams);
+        } else {
+           $ENV{'PIG_OPTS'} = $additionalJavaParams;
+        }
+        TestDriver::dbg("PIG_OPTS set to be: [$ENV{'PIG_OPTS'}].\n");
     } else {
         $ENV{'PIG_OPTS'} = undef;
     }
@@ -403,7 +477,7 @@ sub getPigCmd($$$)
 
 sub runPig
 {
-    my ($self, $testCmd, $log, $copyResults) = @_;
+    my ($self, $testCmd, $log, $copyResults, $resources) = @_;
     my $subName  = (caller(0))[3];
 
     my %result;
@@ -412,7 +486,7 @@ sub runPig
     my $pigfile = $testCmd->{'localpath'} . $testCmd->{'group'} . "_" . $testCmd->{'num'} . ".pig";
     my $outfile = $testCmd->{'outpath'} . $testCmd->{'group'} . "_" . $testCmd->{'num'} . ".out";
 
-    my $pigcmd = $self->replaceParameters( $testCmd->{'pig'}, $outfile, $testCmd, $log );
+    my $pigcmd = $self->replaceParameters( $testCmd->{'pig'}, $outfile, $testCmd, $log, $resources );
 
     open(FH, "> $pigfile") or die "Unable to open file $pigfile to write pig script, $ERRNO\n";
     print FH $pigcmd . "\n";
@@ -421,6 +495,7 @@ sub runPig
 
     # Build the command
     my @baseCmd = $self->getPigCmd($testCmd, $log);
+    push(@baseCmd, ("-x", $testCmd->{'exectype'}));
     my @cmd = @baseCmd;
 
     # Add option -l giving location for secondary logs
@@ -513,16 +588,30 @@ sub postProcessSingleOutputFile
     
     # Build command to:
     # 1. Combine part files
-    my $fppCmd = "cat $localdir/map* $localdir/part* 2>/dev/null";
+    my $fppCmd;
+    if(Util::isWindows()||Util::isCygwin()) {
+        my $delCmd = "del \"$localdir\\*.crc\" 2>NUL";
+        print $log "$delCmd\n";
+        system($delCmd);
+        $fppCmd = "cat $localdir\\map* $localdir\\part* 2>NUL";
+    }
+    else {
+        $fppCmd = "cat $localdir/map* $localdir/part* 2>/dev/null";
+    }
     
     # 2. Standardize float precision
     if (defined $testCmd->{'floatpostprocess'} &&
             defined $testCmd->{'delimiter'}) {
-        $fppCmd .= " | $toolpath/floatpostprocessor.pl '" .
-            $testCmd->{'delimiter'} . "'";
+        $fppCmd .= " | perl $toolpath/floatpostprocessor.pl \"" .
+            $testCmd->{'delimiter'} . "\" " . $testCmd->{'decimals'};
     }
     
     $fppCmd .= " > $localdir/out_original";
+    
+    #Need slashes to be consistent for windows
+    if (Util::isWindows() || Util::isCygwin()) {
+        $fppCmd =~ s/\\/\//g;
+    }
     
     # run command
     print $log "$fppCmd\n";
@@ -531,8 +620,27 @@ sub postProcessSingleOutputFile
     # Sort the results for the benchmark compare.
     my @sortCmd = ('sort', "$localdir/out_original");
     print $log join(" ", @sortCmd) . "\n";
-    IPC::Run::run(\@sortCmd, '>', "$localdir/out_sorted");
+    IPC::Run::run(\@sortCmd, '>', "$localdir/out_sorted") or die "Sort for benchmark comparison failed on $localdir/out_original";
 
+    # Remove extra \r from $localdir/out_sorted for Windows benchmark
+    if(Util::isWindows()||Util::isCygwin()) {
+        my $tmpfile = "$localdir/out_sorted.tmp";
+        link("$localdir/out_sorted", $tmpfile) or
+            die "Unable to create temporary file $tmpfile, $!\n";
+        unlink("$localdir/out_sorted") or
+            die "Unable to unlink file $localdir/out_sorted, $!\n";
+        open(IFH, "< $tmpfile") or
+            die "Unable to open file $tmpfile, $!\n";
+        open(OFH, "> $localdir/out_sorted") or
+            die "Unable to open file $localdir/out_sorted, $!\n";
+        while(<IFH>) {
+            $_ =~ s/\r$//g;
+            print OFH $_;
+        }
+        close(OFH);
+        close(IFH);
+        unlink($tmpfile);
+    }
     return "$localdir/out_sorted";
 }
 
@@ -569,8 +677,13 @@ sub generateBenchmark
 		$modifiedTestCmd{'pig'} = $testCmd->{'verify_pig_script'};
 	}
     else {
+        if ((Util::isWindows()||Util::isCygwin()) && $testCmd->{'pig_win'}) {
+           $modifiedTestCmd{'pig'} = $testCmd->{'pig_win'};
+       }
 		# Change so we're looking at the old version of Pig
-		$modifiedTestCmd{'pigpath'} = $testCmd->{'oldpigpath'};
+                if (defined $testCmd->{'oldpigpath'} && $testCmd->{'oldpigpath'} ne "") {
+		    $modifiedTestCmd{'pigpath'} = $testCmd->{'oldpigpath'};
+                }
                 if (defined($testCmd->{'oldconfigpath'})) {
 		    $modifiedTestCmd{'testconfigpath'} = $testCmd->{'oldconfigpath'};
                 }
@@ -595,6 +708,10 @@ sub generateBenchmark
                     $ENV{'YARN_CONF_DIR'} = $ENV{'OLD_YARN_CONF_DIR'};
                 }
 	}
+        # For exectype tez, we compare tez with mapreduce
+        if (defined $testCmd->{'benchmark_exectype'}) {
+            $modifiedTestCmd{'exectype'} = $testCmd->{'benchmark_exectype'};
+        }
 	# Modify the test number so we don't run over the actual test output
 	# and logs
 	$modifiedTestCmd{'num'} = $testCmd->{'num'} . "_benchmark";
@@ -654,7 +771,7 @@ sub hasCommandLineVerifications
 
 sub compare
 {
-    my ($self, $testResult, $benchmarkResult, $log, $testCmd) = @_;
+    my ($self, $testResult, $benchmarkResult, $log, $testCmd, $resources) = @_;
     my $subName  = (caller(0))[3];
 
     # Check that we should run this test.  If the current execution type
@@ -676,9 +793,9 @@ sub compare
     # doing the benchmark compare.
 
     if ( $testCmd->{'script'} || $self->hasCommandLineVerifications( $testCmd, $log) ){
-       return $self->compareScript ( $testResult, $log, $testCmd);
+       return $self->compareScript ( $testResult, $log, $testCmd, $resources);
     } elsif( $testCmd->{'pig'} ){
-       return $self->comparePig ( $testResult, $benchmarkResult, $log, $testCmd);
+       return $self->comparePig ( $testResult, $benchmarkResult, $log, $testCmd, $resources);
     } else {
        # Should have been caught by runTest, still...
        print $log "$0.$subName WARNING Did not find a testCmd that I know how to handle\n";
@@ -689,7 +806,7 @@ sub compare
 
 sub compareScript
 {
-    my ($self, $testResult, $log, $testCmd) = @_;
+    my ($self, $testResult, $log, $testCmd, $resources) = @_;
     my $subName  = (caller(0))[3];
 
 
@@ -720,6 +837,7 @@ sub compareScript
 
     # Standard Out
     if (defined $testCmd->{'expected_out'}) {
+      $testCmd->{'expected_out'} = $self->replaceParameters( $testCmd->{'expected_out'}, "", $testCmd, $log, $resources );
       print $log "$0::$subName INFO Checking test stdout' " .
               "as exact match against expected <$testCmd->{'expected_out'}>\n";
       if ($testResult->{'stdout'} ne $testCmd->{'expected_out'}) {
@@ -729,6 +847,7 @@ sub compareScript
     } 
 
     if (defined $testCmd->{'not_expected_out'}) {
+      $testCmd->{'not_expected_out'} = $self->replaceParameters( $testCmd->{'not_expected_out'}, "", $testCmd, $log, $resources );
       print $log "$0::$subName INFO Checking test stdout " .
               "as NOT exact match against expected <$testCmd->{'expected_out'}>\n";
       if ($testResult->{'stdout'} eq $testCmd->{'not_expected_out'}) {
@@ -738,6 +857,7 @@ sub compareScript
     } 
 
     if (defined $testCmd->{'expected_out_regex'}) {
+      $testCmd->{'expected_out_regex'} = $self->replaceParameters( $testCmd->{'expected_out_regex'}, "", $testCmd, $log, $resources );
       print $log "$0::$subName INFO Checking test stdout " .
               "for regular expression <$testCmd->{'expected_out_regex'}>\n";
       if ($testResult->{'stdout'} !~ $testCmd->{'expected_out_regex'}) {
@@ -747,6 +867,7 @@ sub compareScript
     } 
 
     if (defined $testCmd->{'not_expected_out_regex'}) {
+      $testCmd->{'not_expected_out_regex'} = $self->replaceParameters( $testCmd->{'not_expected_out_regex'}, "", $testCmd, $log, $resources );
       print $log "$0::$subName INFO Checking test stdout " .
               "for NON-match of regular expression <$testCmd->{'not_expected_out_regex'}>\n";
       if ($testResult->{'stdout'} =~ $testCmd->{'not_expected_out_regex'}) {
@@ -757,6 +878,7 @@ sub compareScript
 
     # Standard Error
     if (defined $testCmd->{'expected_err'}) {
+      $testCmd->{'expected_err'} = $self->replaceParameters( $testCmd->{'expected_err'}, "", $testCmd, $log, $resources );
       print $log "$0::$subName INFO Checking test stderr " .
               "as exact match against expected <$testCmd->{'expected_err'}>\n";
       if ($testResult->{'stderr'} ne $testCmd->{'expected_err'}) {
@@ -766,6 +888,7 @@ sub compareScript
     } 
 
     if (defined $testCmd->{'not_expected_err'}) {
+      $testCmd->{'not_expected_err'} = $self->replaceParameters( $testCmd->{'not_expected_err'}, "", $testCmd, $log, $resources );
       print $log "$0::$subName INFO Checking test stderr " .
               "as NOT an exact match against expected <$testCmd->{'expected_err'}>\n";
       if ($testResult->{'stderr'} eq $testCmd->{'not_expected_err'}) {
@@ -775,6 +898,7 @@ sub compareScript
     } 
 
     if (defined $testCmd->{'expected_err_regex'}) {
+      $testCmd->{'expected_err_regex'} = $self->replaceParameters( $testCmd->{'expected_err_regex'}, "", $testCmd, $log, $resources );
       print $log "$0::$subName INFO Checking test stderr " .
               "for regular expression <$testCmd->{'expected_err_regex'}>\n";
       if ($testResult->{'stderr'} !~ $testCmd->{'expected_err_regex'}) {
@@ -784,6 +908,7 @@ sub compareScript
     } 
 
     if (defined $testCmd->{'not_expected_err_regex'}) {
+      $testCmd->{'not_expected_err_regex'} = $self->replaceParameters( $testCmd->{'not_expected_err_regex'}, "", $testCmd, $log, $resources );
       print $log "$0::$subName INFO Checking test stderr " .
               "for NON-match of regular expression <$testCmd->{'not_expected_err_regex'}>\n";
       if ($testResult->{'stderr'} =~ $testCmd->{'not_expected_err_regex'}) {
@@ -798,7 +923,7 @@ sub compareScript
 
 sub comparePig
 {
-    my ($self, $testResult, $benchmarkResult, $log, $testCmd) = @_;
+    my ($self, $testResult, $benchmarkResult, $log, $testCmd, $resources) = @_;
     my $subName  = (caller(0))[3];
 
     my $result;
@@ -826,6 +951,17 @@ sub compareSingleOutput
 {
     my ($self, $testResult, $testOutput, $benchmarkOutput, $log) = @_;
 
+    if ($ENV{'SORT_BENCHMARKS'} eq 'true'){
+        # Sort the benchmark Output.
+        my $benchmarkOutput_new = $benchmarkOutput.'_new';
+        my @sortCmd = ('sort', "$benchmarkOutput");
+        print $log join(" ", @sortCmd) . "\n";
+        IPC::Run::run(\@sortCmd, '>', "$benchmarkOutput_new") or die "Sort for benchmark ouput failed on $benchmarkOutput_new";
+        my @renameCmd = ('mv', "$benchmarkOutput_new" , "$benchmarkOutput");
+        print $log join(" ", @renameCmd) . "\n";
+        IPC::Run::run(\@renameCmd, \undef, $log, $log) or die "Rename command failed";
+    }
+
     # cksum the the two files to see if they are the same
     my ($testChksm, $benchmarkChksm);
     IPC::Run::run((['cat', $testOutput], '|', ['cksum']), \$testChksm,
@@ -842,7 +978,7 @@ sub compareSingleOutput
         print $log "Test output checksum does not match benchmark checksum\n";
         print $log "Test checksum = <$testChksm>\n";
         print $log "Expected checksum = <$benchmarkChksm>\n";
-        print $log "RESULTS DIFFER: vimdiff " . cwd . "/$testOutput " . cwd . "/$benchmarkOutput\n";
+        print $log "RESULTS DIFFER: vimdiff " . cwd . "/$testOutput $benchmarkOutput\n";
     } else {
         $result = 1;
     }
@@ -900,19 +1036,17 @@ sub wrongExecutionMode($$)
 
     # Check that we should run this test.  If the current execution type
     # doesn't match the execonly flag, then skip this one.
-    my $wrong = ((defined $testCmd->{'execonly'} &&
-            $testCmd->{'execonly'} ne $testCmd->{'exectype'}));
+    my $wrong = 0;
 
-    if ($wrong) {
-        print $log "Skipping test $testCmd->{'group'}" . "_" .
-            $testCmd->{'num'} . " since it is executed only in " .
-            $testCmd->{'execonly'} . " mode and we are executing in " .
-            $testCmd->{'exectype'} . " mode.\n";
-        return $wrong;
-    }
-
-    if (defined $testCmd->{'ignore23'} && $testCmd->{'hadoopversion'}=='23') {
-        $wrong = 1;
+    if (defined $testCmd->{'execonly'}) {
+        my @exectypes = split(',', $testCmd->{'execonly'});
+        if (!grep /$testCmd->{'exectype'}/, @exectypes) {
+            print $log "Skipping test $testCmd->{'group'}" . "_" .
+                $testCmd->{'num'} . " since it is executed only in " .
+                $testCmd->{'execonly'} . " mode and we are executing in " .
+                $testCmd->{'exectype'} . " mode.\n";
+            return 1;
+        }
     }
 
     if ($wrong) {

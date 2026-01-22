@@ -22,8 +22,11 @@ import java.io.IOException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.mapred.Counters;
+import org.apache.hadoop.mapred.JobClient;
 import org.apache.hadoop.mapred.jobcontrol.Job;
 import org.apache.hadoop.mapred.jobcontrol.JobControl;
+import org.apache.hadoop.mapred.TaskReport;
 import org.apache.hadoop.mapreduce.JobContext;
 import org.apache.hadoop.mapreduce.JobID;
 import org.apache.hadoop.mapreduce.OutputCommitter;
@@ -32,7 +35,6 @@ import org.apache.hadoop.mapreduce.TaskAttemptID;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigOutputCommitter;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POStore;
 import org.apache.pig.backend.hadoop20.PigJobControl;
-import org.apache.pig.impl.PigContext;
 
 /**
  * We need to make Pig work with both hadoop 20 and hadoop 23 (PIG-2125). However,
@@ -98,5 +100,19 @@ public class HadoopShims {
     
     public static long getDefaultBlockSize(FileSystem fs, Path path) {
         return fs.getDefaultBlockSize();
+    }
+
+    public static Counters getCounters(Job job) throws IOException {
+        JobClient jobClient = job.getJobClient();
+        return jobClient.getJob(job.getAssignedJobID()).getCounters();
+    }
+
+    public static boolean isJobFailed(TaskReport report) {
+        float successfulProgress = 1.0f;
+        // if the progress reported is not 1.0f then the map or reduce
+        // job failed
+        // this comparison is in place for the backward compatibility
+        // for Hadoop 0.20
+        return report.getProgress() != successfulProgress;
     }
 }

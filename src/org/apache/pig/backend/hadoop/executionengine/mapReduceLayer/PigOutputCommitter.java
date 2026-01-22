@@ -18,7 +18,6 @@
 package org.apache.pig.backend.hadoop.executionengine.mapReduceLayer;
 
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -36,6 +35,7 @@ import org.apache.pig.backend.hadoop.executionengine.shims.HadoopShims;
 import org.apache.pig.backend.hadoop.executionengine.util.MapRedUtil;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.util.Pair;
+import org.apache.pig.PigConfiguration;
 
 /**
  * A specialization of the default FileOutputCommitter to allow
@@ -54,6 +54,8 @@ public class PigOutputCommitter extends OutputCommitter {
      */
     List<Pair<OutputCommitter, POStore>> reduceOutputCommitters;
     
+    boolean recoverySupported;
+    
     /**
      * @param context
      * @param mapStores 
@@ -66,7 +68,7 @@ public class PigOutputCommitter extends OutputCommitter {
         // create and store the map and reduce output committers
         mapOutputCommitters = getCommitters(context, mapStores);
         reduceOutputCommitters = getCommitters(context, reduceStores);
-        
+        recoverySupported = context.getConfiguration().getBoolean(PigConfiguration.PIG_OUTPUT_COMMITTER_RECOVERY, false);
     }
 
     /**
@@ -145,6 +147,65 @@ public class PigOutputCommitter extends OutputCommitter {
         }
     }
 
+    public boolean isRecoverySupported() {
+        if (!recoverySupported)
+            return false;
+        boolean allOutputCommitterSupportRecovery = true;
+        // call recoverTask on all map and reduce committers
+        for (Pair<OutputCommitter, POStore> mapCommitter : mapOutputCommitters) {
+            if (mapCommitter.first!=null) {
+                try {
+                    allOutputCommitterSupportRecovery = allOutputCommitterSupportRecovery && mapCommitter.first.isRecoverySupported();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+                if (!allOutputCommitterSupportRecovery)
+                    return false;
+            }
+        }
+        for (Pair<OutputCommitter, POStore> reduceCommitter :
+            reduceOutputCommitters) {
+            if (reduceCommitter.first!=null) {
+                try {
+                    allOutputCommitterSupportRecovery = allOutputCommitterSupportRecovery && reduceCommitter.first.isRecoverySupported();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+                if (!allOutputCommitterSupportRecovery)
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    public void recoverTask(TaskAttemptContext context) throws IOException {
+        // call recoverTask on all map and reduce committers
+        for (Pair<OutputCommitter, POStore> mapCommitter : mapOutputCommitters) {
+            if (mapCommitter.first!=null) {
+                TaskAttemptContext updatedContext = setUpContext(context,
+                        mapCommitter.second);
+                try {
+                    // Use reflection, Hadoop 1.x line does not have such method
+                    mapCommitter.first.recoverTask(updatedContext);
+                } catch (Exception e) {
+                    throw new IOException(e);
+                }
+            }
+        }
+        for (Pair<OutputCommitter, POStore> reduceCommitter :
+            reduceOutputCommitters) {
+            if (reduceCommitter.first!=null) {
+                TaskAttemptContext updatedContext = setUpContext(context,
+                        reduceCommitter.second);
+                try {
+                    reduceCommitter.first.recoverTask(updatedContext);
+                } catch (Exception e) {
+                    throw new IOException(e);
+                }
+            }
+        }
+    }
+    
     @Override
     public void cleanupJob(JobContext context) throws IOException {
         // call clean up on all map and reduce committers
@@ -177,10 +238,7 @@ public class PigOutputCommitter extends OutputCommitter {
                         mapCommitter.second);
                 // PIG-2642 promote files before calling storeCleanup/storeSchema 
                 try {
-                    // Use reflection, 20.2 does not have such method
-                    Method m = mapCommitter.first.getClass().getMethod("commitJob", JobContext.class);
-                    m.setAccessible(true);
-                    m.invoke(mapCommitter.first, updatedContext);
+                    mapCommitter.first.commitJob(updatedContext);
                 } catch (Exception e) {
                     throw new IOException(e);
                 }
@@ -194,10 +252,7 @@ public class PigOutputCommitter extends OutputCommitter {
                         reduceCommitter.second);
                 // PIG-2642 promote files before calling storeCleanup/storeSchema 
                 try {
-                    // Use reflection, 20.2 does not have such method
-                    Method m = reduceCommitter.first.getClass().getMethod("commitJob", JobContext.class);
-                    m.setAccessible(true);
-                    m.invoke(reduceCommitter.first, updatedContext);
+                    reduceCommitter.first.commitJob(updatedContext);
                 } catch (Exception e) {
                     throw new IOException(e);
                 }
@@ -214,10 +269,7 @@ public class PigOutputCommitter extends OutputCommitter {
                 JobContext updatedContext = setUpContext(context,
                         mapCommitter.second);
                 try {
-                    // Use reflection, 20.2 does not have such method
-                    Method m = mapCommitter.first.getClass().getMethod("abortJob", JobContext.class, State.class);
-                    m.setAccessible(true);
-                    m.invoke(mapCommitter.first, updatedContext, state);
+                    mapCommitter.first.abortJob(updatedContext, state);
                 } catch (Exception e) {
                     throw new IOException(e);
                 }
@@ -230,10 +282,7 @@ public class PigOutputCommitter extends OutputCommitter {
                 JobContext updatedContext = setUpContext(context,
                         reduceCommitter.second);
                 try {
-                    // Use reflection, 20.2 does not have such method
-                    Method m = reduceCommitter.first.getClass().getMethod("abortJob", JobContext.class, State.class);
-                    m.setAccessible(true);
-                    m.invoke(reduceCommitter.first, updatedContext, state);
+                    reduceCommitter.first.abortJob(updatedContext, state);
                 } catch (Exception e) {
                     throw new IOException(e);
                 }

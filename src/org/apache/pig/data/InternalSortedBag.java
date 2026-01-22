@@ -35,6 +35,7 @@ import java.util.PriorityQueue;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.pig.PigWarning;
 
 
 /**
@@ -110,25 +111,27 @@ public class InternalSortedBag extends SortedSpillBag{
     
     @Override
     public void add(Tuple t) {
-    	if(mReadStarted) {
-            throw new IllegalStateException("InternalSortedBag is closed for adding new tuples");
-        }
-                
-    	if (mContents.size() > memLimit.getCacheLimit()) {    		
-    		proactive_spill(mComp);
+    	synchronized(mContents) {
+	    	if(mReadStarted) {
+	            throw new IllegalStateException("InternalSortedBag is closed for adding new tuples");
+	        }
+	                
+	    	if (mContents.size() > memLimit.getCacheLimit()) {    		
+	    		proactive_spill(mComp);
+	    	}
+	    	        
+	        mContents.add(t);
+	        
+	        // check how many tuples memory can hold by getting average
+	        // size of first 100 tuples
+	        if(mSize < 100 && (mSpillFiles == null || mSpillFiles.isEmpty())&&t!=null)
+	        {
+	            memLimit.addNewObjSize(t.getMemorySize());
+	        }
+	                
+	        mSize++;
+	        markSpillableIfNecessary();
     	}
-    	        
-        mContents.add(t);
-        
-        // check how many tuples memory can hold by getting average
-        // size of first 100 tuples
-        if(mSize < 100 && (mSpillFiles == null || mSpillFiles.isEmpty())&&t!=null)
-        {
-            memLimit.addNewObjSize(t.getMemorySize());
-        }
-                
-        mSize++;
-        markSpillableIfNecessary();
     }
     
     @Override
@@ -192,12 +195,14 @@ public class InternalSortedBag extends SortedSpillBag{
         private int mCntr = 0;
 
         SortedDataBagIterator() {
-            // If this is the first read, we need to sort the data.            
-        	if (!mReadStarted) {
-                preMerge();
-                Collections.sort((ArrayList<Tuple>)mContents, mComp);
-                mReadStarted = true;
-            }            
+            // If this is the first read, we need to sort the data.
+        	synchronized(mContents) {
+	        	if (!mReadStarted) {
+	                preMerge();
+	                Collections.sort((ArrayList<Tuple>)mContents, mComp);
+	                mReadStarted = true;
+	            }            
+        	}
         }
 
         @Override
@@ -397,19 +402,27 @@ public class InternalSortedBag extends SortedSpillBag{
                     // the spill files list.  So I need to append it to my
                     // linked list as well so that it's still there when I
                     // move my linked list back to the spill files.
+                    DataOutputStream out = null;
                     try {
-                        DataOutputStream out = getSpillFile();
+                        out = getSpillFile();
                         ll.add(mSpillFiles.get(mSpillFiles.size() - 1));
                         Tuple t;
                         while ((t = readFromPriorityQ()) != null) {
                             t.write(out);
                         }
                         out.flush();
-                        out.close();
                     } catch (IOException ioe) {
                         String msg = "Unable to find our spill file.";
                         log.fatal(msg, ioe);
                         throw new RuntimeException(msg, ioe);
+                    } finally {
+                        if (out != null) {
+                            try {
+                                out.close();
+                            } catch (IOException e) {
+                                warn("Error closing spill", PigWarning.UNABLE_TO_CLOSE_SPILL_FILE, e);
+                            }
+                        }
                     }
                 }
                 // delete files that have been merged into new files
@@ -436,7 +449,17 @@ public class InternalSortedBag extends SortedSpillBag{
 
     @Override
     public long spill(){
-        return proactive_spill(mComp);
+    	return proactive_spill(mComp);
     }
+
+	@Override
+	public long proactive_spill(Comparator<Tuple> comp) {
+		synchronized(mContents) {
+	    	if (this.mReadStarted) {
+	    		return 0L;
+	    	}
+	    	return super.proactive_spill(comp);
+		}
+	}
 
 }

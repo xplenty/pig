@@ -16,37 +16,53 @@
 -->
 
 <project basedir="." default="jar" name="pigudf">
+
+    <taskdef resource="net/sf/antcontrib/antcontrib.properties">
+        <classpath>
+            <pathelement location="../../../ivy/ant-contrib-1.0b3.jar"/>
+        </classpath>
+    </taskdef>
+
     <property file="../../../build.properties" />
     <!-- javac properties -->
     <property name="javac.debug" value="on" />
     <property name="javac.level" value="source,lines,vars"/>
     <property name="javac.optimize" value="on" />
     <property name="javac.deprecation" value="off" />
-    <property name="javac.version" value="1.6" />
+    <property name="javac.version" value="1.7" />
     <property name="javac.args" value="" />
     <!-- TODO we should use warning...   <property name="javac.args.warnings" value="-Xlint:unchecked" /> -->
     <property name="javac.args.warnings" value="" />
+    <property name="build.encoding" value="UTF8" />
 
     <!-- build properties -->
     <property name="build.dir" value="${basedir}/build" />
     <property name="build.classes" value="${build.dir}/classes" />
     <property name="build.docs" value="${build.dir}/docs" />
     <property name="build.javadoc" value="${build.docs}/api" />
-    <property name="pigjar" value="../../../pig.jar" />
-    <property name="pigjar-withouthadoop" value="../../../pig-withouthadoop.jar" />
     <property name="pigtest" value="../../../build/test/classes" />
     <property name="udfjar" value="piggybank.jar" />
     <property name="src.dir" value="src/main/java/org/apache/pig/piggybank" />
     <property name="hsqldb.jar" value="../../../build/ivy/lib/Pig/hsqldb-1.8.0.10.jar"/>
 
-	<!-- JobHistoryLoader currently does not support 0.23 -->
-    <condition property="build.classes.excludes" value="**/HadoopJobHistoryLoader.java" else="">
+    <!--
+      Hadoop master version
+      (Value 23 is translated for backward compatibility in old build scripts)
+    -->
+    <if>
         <equals arg1="${hadoopversion}" arg2="23"/>
+        <then>
+            <echo>Property setting hadoopversion=23 is deprecated. Overwriting to hadoopversion=2</echo>
+            <var name="hadoopversion" unset="true"/>
+            <property name="hadoopversion" value="2" />
+        </then>
+    </if>
+    <property name="hadoopversion" value="2" />
+
+    <condition property="hadoopsuffix" value="2" else="">
+        <equals arg1="${hadoopversion}" arg2="2"/>
     </condition>
-    <condition property="test.classes.excludes" value="**/TestHadoopJobHistoryLoader.java" else="">
-        <equals arg1="${hadoopversion}" arg2="23"/>
-    </condition>
-	
+
     <!-- jar properties -->
     <property name=".javadoc" value="${build.docs}/api" />
     
@@ -61,7 +77,9 @@
     <path id="pigudf.classpath">
         <pathelement location="../../../build/classes"/>
         <pathelement location="${build.classes}"/>
-        <pathelement location="${pigjar-withouthadoop}"/>
+        <fileset dir="../../..">
+            <include name="pig-*-core-h${hadoopsuffix}.jar"/>
+        </fileset>
         <pathelement location="${pigtest}"/>
         <fileset dir="../../../build/ivy/lib">
             <include name="**/*.jar"/>
@@ -85,11 +103,12 @@
     </target>
     <target name="clean">
         <delete dir="build"/>
+        <delete file="${udfjar}"/>
     </target>
     <target depends="init" name="compile" description="compile all of the class files">
         <echo> *** Compiling Pig UDFs ***</echo>
         <javac srcdir="${src.dir}" debug="${javac.debug}" debuglevel="${javac.level}" destdir="${build.classes}" source="${javac.version}"
-        target="${javac.version}" optimize="${javac.optimize}" deprecation="${javac.deprecation}" excludes="${build.classes.excludes}">
+        target="${javac.version}" optimize="${javac.optimize}" deprecation="${javac.deprecation}" excludes="${build.classes.excludes}" encoding="${build.encoding}">
             <compilerarg line="${javac.args} ${javac.args.warnings}" />
             <classpath refid="pigudf.classpath"/>
         </javac>
@@ -112,11 +131,12 @@
         <echo> *** Running UDF tests ***</echo>
         <delete dir="${test.logs}"/>
         <mkdir dir="${test.logs}"/>
-        <tempfile property="junit.tmp.dir" prefix="piggybank_junit_tmp" destDir="${java.io.tmpdir}" />
+        <tempfile property="junit.tmp.dir" prefix="piggybank_junit_tmp" destDir="${user.dir}/build/test" />
         <mkdir dir="${junit.tmp.dir}/"/>
         <junit printsummary="yes" haltonfailure="no" fork="yes" maxmemory="512m" dir="${basedir}" timeout="${test.timeout}" errorProperty="tests.failed" failureProperty="tests.failed">        
             <sysproperty key="hadoop.log.dir" value="${test.logs}"/>
             <sysproperty key="java.io.tmpdir" value="${junit.tmp.dir}" />
+            <env key="MALLOC_ARENA_MAX" value="4"/>
             <classpath refid="test.classpath"/>
             <formatter type="${test.junit.output.format}" />
             <batchtest fork="yes" todir="${test.logs}" unless="testcase">
@@ -139,9 +159,6 @@
                author="true">
         <fileset dir="${src.dir}/evaluation" includes="**/*.java"/>
         <fileset dir="${src.dir}/storage" includes="**/*.java"/>
-        <fileset dir="${src.dir}/filtering" includes="**/*.java"/>
-        <fileset dir="${src.dir}/grouping" includes="**/*.java"/>
-        <fileset dir="${src.dir}/comparison" includes="**/*.java"/>
         <classpath refid="pigudf.classpath"/>
       </javadoc>
     </target>

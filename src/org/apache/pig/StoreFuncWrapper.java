@@ -22,6 +22,7 @@ import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.OutputFormat;
 import org.apache.hadoop.mapreduce.RecordWriter;
 import org.apache.pig.data.Tuple;
+import org.apache.pig.impl.util.Utils;
 
 import java.io.IOException;
 
@@ -106,10 +107,16 @@ public class StoreFuncWrapper implements StoreFuncInterface {
      * Returns a method in the call stack at the given depth. Depth 0 will return the method that
      * called this getMethodName, depth 1 the method that called it, etc...
      * @param depth
-     * @return
+     * @return method name as String
      */
     protected String getMethodName(final int depth) {
         final StackTraceElement[] ste = Thread.currentThread().getStackTrace();
-        return ste[2 + depth].getMethodName();
+        int index;
+        if (Utils.isVendorIBM()) {
+          index = 3 + depth;
+        } else {
+          index = 2 + depth;
+        }
+        return ste[index].getMethodName();
     }
 }

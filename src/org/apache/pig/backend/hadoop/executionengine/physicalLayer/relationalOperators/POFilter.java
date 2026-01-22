@@ -18,21 +18,17 @@
 package org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators;
 
 import java.util.List;
-import java.util.LinkedList;
 
 import org.apache.pig.backend.executionengine.ExecException;
-import org.apache.pig.data.DataType;
-import org.apache.pig.data.Tuple;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
+import org.apache.pig.data.DataType;
+import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
-import org.apache.pig.impl.util.IdentityHashSet;
-import org.apache.pig.pen.util.ExampleTuple;
-import org.apache.pig.pen.util.LineageTracer;
 
 /**
  * This is an implementation of the Filter operator. It has an Expression Plan
@@ -40,30 +36,29 @@ import org.apache.pig.pen.util.LineageTracer;
  * avoid many function calls, the filter operator, stores the Comparison
  * Operator that is the root of the Expression Plan and uses its getNext
  * directly.
- * 
+ *
  * Since the filter is supposed to return tuples only, getNext is not supported
  * on any other data type.
- * 
+ *
  */
 public class POFilter extends PhysicalOperator {
 
     /**
-     * 
+     *
      */
     private static final long serialVersionUID = 1L;
 
     // The expression plan
-    PhysicalPlan plan;
+    private PhysicalPlan plan;
 
     // The root comparison operator of the expression plan
-//    ComparisonOperator comOp;
-    PhysicalOperator comOp;
-    
+    // ComparisonOperator comOp;
+    private PhysicalOperator comOp;
 
     // The operand type for the comparison operator needed
     // to call the comparison operators getNext with the
     // appropriate type
-    byte compOperandType;
+    // private byte compOperandType;
 
     public POFilter(OperatorKey k) {
         this(k, -1, null);
@@ -88,7 +83,7 @@ public class POFilter extends PhysicalOperator {
      * can be passed through is found or EOP is reached.
      */
     @Override
-    public Result getNext(Tuple t) throws ExecException {
+    public Result getNextTuple() throws ExecException {
         Result res = null;
         Result inp = null;
         while (true) {
@@ -145,10 +140,9 @@ public class POFilter extends PhysicalOperator {
                     DataType.findTypeName(compOperandType));
             }
             */
-            res = comOp.getNext(dummyBool);
+            res = comOp.getNextBoolean();
             plan.detachInput();
-            if (res.returnStatus != POStatus.STATUS_OK 
-                    && res.returnStatus != POStatus.STATUS_NULL) 
+            if (res.returnStatus != POStatus.STATUS_OK)
                 return res;
 
             if (res.result != null) {
@@ -191,7 +185,7 @@ public class POFilter extends PhysicalOperator {
     public PhysicalPlan getPlan() {
         return plan;
     }
-    
+
     @Override
     public Tuple illustratorMarkup(Object in, Object out, int eqClassIndex) {
       if (illustrator != null) {
@@ -207,4 +201,12 @@ public class POFilter extends PhysicalOperator {
       }
       return (Tuple) out;
     }
+
+    @Override
+    public PhysicalOperator clone() throws CloneNotSupportedException {
+        POFilter opClone = (POFilter) super.clone();
+        opClone.setPlan(plan.clone());
+        return opClone;
+    }
+
 }

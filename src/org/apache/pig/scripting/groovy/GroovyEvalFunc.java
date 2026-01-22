@@ -21,12 +21,14 @@ package org.apache.pig.scripting.groovy;
 import groovy.util.ResourceException;
 import groovy.util.ScriptException;
 
+import java.io.File;
 import java.io.IOException;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.net.URL;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -64,8 +66,25 @@ public class GroovyEvalFunc<T> extends EvalFunc<T> {
     Class c = scriptClasses.get(path);
 
     if (null == c) {
+      File file = new File(path);
+      URL resource = null;
+      if (!file.exists()) {
+          resource = ScriptEngine.class.getResource(path);
+          if (resource == null) {
+              resource = ScriptEngine.class.getResource(File.separator + path);
+          }
+          if (resource == null) {
+            //Try loading the script from other locally available jars (needed for Spark mode)
+              resource = Thread.currentThread().getContextClassLoader().getResource(path);
+          }
+          if (resource == null) {
+              throw new IOException("Cannot find " + path);
+          }
+      } else {
+          resource = file.toURL();
+      }
       try {
-        c = GroovyScriptEngine.getEngine().loadScriptByName(path);
+        c = GroovyScriptEngine.getEngine().loadScriptByName(resource.toString());
       } catch (ScriptException se) {
         throw new IOException(se);
       } catch (ResourceException re) {

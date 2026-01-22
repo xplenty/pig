@@ -18,25 +18,35 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringReader;
-import java.io.StringWriter;
+import java.lang.Object;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-import junit.framework.Assert;
+import com.google.common.collect.Iterables;
+import org.junit.Assert;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.apache.pig.ExecType;
+import org.apache.pig.ExecTypeProvider;
+import org.apache.pig.PigException;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
+import org.apache.pig.impl.PigContext;
+import org.apache.pig.impl.io.FileLocalizer;
+import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.pigunit.pig.PigServer;
-import org.apache.pig.tools.parameters.ParameterSubstitutionPreprocessor;
 import org.apache.pig.tools.parameters.ParseException;
 
 /**
@@ -57,10 +67,11 @@ public class PigTest {
   /** The list of aliases to override in the script. */
   private final Map<String, String> aliasOverrides;
 
-  private static PigServer pig;
-  private static Cluster cluster;
+  private static ThreadLocal<PigServer> pig = new ThreadLocal<PigServer>();
+  private static ThreadLocal<Cluster> cluster = new ThreadLocal<Cluster>();
+
   private static final Logger LOG = Logger.getLogger(PigTest.class);
-  private static final String EXEC_CLUSTER = "pigunit.exectype.cluster";
+  private static final String EXEC_CLUSTER = "pigunit.exectype";
 
   /**
    * Initializes the Pig test.
@@ -107,30 +118,59 @@ public class PigTest {
   public PigTest(String scriptPath, String[] args, PigServer pig, Cluster cluster)
       throws IOException {
     this(args, null, readFile(scriptPath));
-    PigTest.pig = pig;
-    PigTest.cluster = cluster;
+    PigTest.pig.set(pig);
+    PigTest.cluster.set(cluster);
   }
 
   /**
    * Connects and starts if needed the PigServer.
    *
-   * @return The cluster where input files can be copied.
+   * @return Reference to the Cluster in ThreadLocal.
    * @throws ExecException If the PigServer can't be started.
    */
   public static Cluster getCluster() throws ExecException {
-    if (cluster == null) {
-      if (System.getProperties().containsKey(EXEC_CLUSTER)) {
-        LOG.info("Using cluster mode");
-        pig = new PigServer(ExecType.MAPREDUCE);
-      } else {
-        LOG.info("Using default local mode");
-        pig = new PigServer(ExecType.LOCAL);
+    try {
+      if (cluster.get() == null) {
+        ExecType execType = ExecType.LOCAL;
+        if (System.getProperties().containsKey(EXEC_CLUSTER)) {
+          if (System.getProperties().getProperty(EXEC_CLUSTER).equalsIgnoreCase("mr")) {
+            LOG.info("Using mr cluster mode");
+            execType = ExecType.MAPREDUCE;
+          } else if (System.getProperties().getProperty(EXEC_CLUSTER).equalsIgnoreCase("tez")) {
+            LOG.info("Using tez cluster mode");
+            execType = ExecTypeProvider.fromString("tez");
+          } else if (System.getProperties().getProperty(EXEC_CLUSTER).equalsIgnoreCase("tez_local")) {
+            LOG.info("Using tez local mode");
+            execType = ExecTypeProvider.fromString("tez_local");
+          } else if (System.getProperties().getProperty(EXEC_CLUSTER).equalsIgnoreCase("spark")) {
+              LOG.info("Using spark cluster mode");
+              execType = ExecTypeProvider.fromString("spark");
+          } else if (System.getProperties().getProperty(EXEC_CLUSTER).equalsIgnoreCase("spark_local")) {
+              LOG.info("Using spark local cluster mode");
+              execType = ExecTypeProvider.fromString("spark_local");
+          } else {
+            LOG.info("Using default local mode");
+          }
+        } else {
+          LOG.info("Using default local mode");
+        }
+        pig.set(new PigServer(execType));
+        cluster.set(new Cluster(pig.get().getPigContext()));
       }
-
-      cluster = new Cluster(pig.getPigContext());
+    } catch (PigException e) {
+      throw new ExecException(e);
     }
 
-    return cluster;
+    return cluster.get();
+  }
+
+  /**
+   * Return the PigServer.
+   *
+   * @return Reference to the PigServer in ThreadLocal.
+   */
+  public static PigServer getPigServer() {
+    return pig.get();
   }
 
   /**
@@ -140,15 +180,14 @@ public class PigTest {
    * @throws ParseException The pig script could not have all its variables substituted.
    */
   protected void registerScript() throws IOException, ParseException {
-    PigTest.getCluster();
+    getCluster();
 
-    BufferedReader pigIStream = new BufferedReader(new StringReader(this.originalTextPigScript));
-    StringWriter pigOStream = new StringWriter();
+    BufferedReader reader = new BufferedReader(new StringReader(this.originalTextPigScript));
+    PigContext context = getPigServer().getPigContext();
 
-    ParameterSubstitutionPreprocessor ps = new ParameterSubstitutionPreprocessor(50);
-    ps.genSubstitutedFile(pigIStream, pigOStream, args, argFiles);
-
-    String substitutedPig = pigOStream.toString();
+    String substitutedPig = context.doParamSubstitution(reader,
+                                                        args == null ? null : Arrays.asList(args),
+                                                        argFiles == null ? null : Arrays.asList(argFiles));
     LOG.info(substitutedPig);
 
     File f = File.createTempFile("tmp", "pigunit");
@@ -157,7 +196,7 @@ public class PigTest {
     pw.close();
 
     String pigSubstitutedFile = f.getCanonicalPath();
-    pig.registerScript(pigSubstitutedFile, aliasOverrides);
+    getPigServer().registerScript(pigSubstitutedFile, aliasOverrides);
   }
 
   /**
@@ -180,7 +219,15 @@ public class PigTest {
    */
   public Iterator<Tuple> getAlias(String alias) throws IOException, ParseException {
     registerScript();
-    return pig.openIterator(alias);
+    return getPigServer().openIterator(alias);
+  }
+  
+  /**
+   * Gets an iterator on the content of one alias of a cached script. The script itself
+   * must be already be registered with registerScript().
+   */
+  private Iterator<Tuple> getAliasFromCache(String alias) throws IOException, ParseException {
+    return getPigServer().openIterator(alias);
   }
 
   /**
@@ -193,7 +240,7 @@ public class PigTest {
     registerScript();
     String alias = aliasOverrides.get("LAST_STORE_ALIAS");
 
-    return getAlias(alias);
+    return getAliasFromCache(alias);
   }
 
   /**
@@ -220,51 +267,183 @@ public class PigTest {
     aliasOverrides.remove(alias);
   }
 
+  /**
+   * Returns a Map that has alias to it's schema.
+   *
+   * @return A map that has alias name as a key and the alias's schema as a value
+   * @throws FrontendException If there was an error dumping the schema
+   */
+  public Map<String, String> getAliasToSchemaMap() throws FrontendException, IOException, ParseException {
+    HashMap<String, String> aliasSchemas = new HashMap<String, String>();
+    registerScript();
+    PigServer server = getPigServer();
+    Set<String> aliasKeySet = server.getAliasKeySet();
+    for (String alias: aliasKeySet) {
+      try {
+        StringBuilder tsb = new StringBuilder();
+        Schema.stringifySchema(tsb, server.dumpSchema(alias), DataType.TUPLE, Integer.MIN_VALUE);
+        aliasSchemas.put(alias, tsb.toString());
+      } catch (FrontendException e) {
+        /**
+         * If PigServer fails to describe a schema for an alias a FrontendException is thrown.
+         * PigServer.getAliasKeySet() returns aliases that cannot have their schema described.
+         * We want to skip over these particular aliases.
+         */
+        if (e.getErrorCode() == 1001) {
+          //Let's print a warning
+          System.out.println(e.getMessage());
+        } else {
+          throw e;
+        }
+      }
+    }
+    return aliasSchemas;
+  }
+
+  /**
+   * Creates a temp file and populates it with the specified mock data.
+   *
+   * @param alias alias that the temp file is for
+   * @param mockData data that is being mocked for the alias
+   * @return path to the temp file
+   */
+  private String makeMockTempFile(String alias, String[] mockData) throws IOException {
+    //The FileLocalizer uses a random variable, but that can have collisions. By using the current time, thread,
+    //and alias we should be able to guaratee a unique file
+    String uniqueSuffix = alias + "." + System.currentTimeMillis() + "." + Thread.currentThread().getId();
+    //PigServer/Cluster is not initialized yet. Let's initialize it.
+    if (getPigServer() == null) {
+        getCluster();
+    }
+    String path = FileLocalizer.getTemporaryPath(getPigServer().getPigContext(), uniqueSuffix).toString();
+    getCluster().copyFromLocalFile(mockData, path, true);
+    return path;
+  }
+
+  private String getActualResults(String alias, boolean ignoreOrder) throws IOException, ParseException {
+    //Tuples are sortable, but we should sort it as Strings for convenience when comparing to expected data
+    Iterator<Tuple> iterator = getAliasFromCache(alias);
+    List<String> actualResults = new ArrayList<String>();
+    while (iterator.hasNext()) {
+      actualResults.add(iterator.next().toString());
+    }
+    
+    if (ignoreOrder) {
+      Collections.sort(actualResults);
+    }
+    return StringUtils.join(actualResults, "\n");
+  }
+
+  /**
+   * Allows you to mock a specific alias.
+   *
+   * This method will create a temporary file on the system that contains the mock data.  It will then change the pig
+   * script to actually replace the alias when being assigned a value with a load file command which loads the temporary
+   * file.
+   *
+   * @param alias The alias to be mocked
+   * @param mockData The data you wished to be contained in the alias where each element in the array is a tab-delimited
+   * @param aliasSchema The schema of the alias provided. Your mockData should fit this schema
+   */
+  public void mockAlias(String alias, String[] mockData, String aliasSchema) throws IOException {
+    mockAlias(alias, mockData, aliasSchema, "\\t");
+  }
+
+  /**
+   * Allows you to mock a specific alias.
+   *
+   * This method will create a temporary file on the system that contains the mock data.  It will then change the pig
+   * script to actually replace the alias when being assigned a value with a load file command which loads the temporary
+   * file.
+   *
+   * @param alias The alias to be mocked
+   * @param mockData String array where each element is an entry in the alias and the line has its elements delimited
+   *                 by the value provided by delimiter.
+   * @param aliasSchema This is the schema of the alias being mocked
+   * @param delimiter The delimiter used to separate data in mockData
+   */
+  public void mockAlias(String alias, String[] mockData, String aliasSchema, String delimiter) throws IOException {
+    String mockFile = makeMockTempFile(alias, mockData);
+    override(alias, String.format("%s = LOAD '%s' USING PigStorage('%s') AS %s;", alias, mockFile, delimiter, aliasSchema));
+  }
+  
+  /**
+   * Compares the expected results to the results of the last alias generated in the script. Order does not matter
+   * and as long as the result is located in any index of expected and any line of the output then this will pass.
+   * 
+   * @param expected The expected results
+   */
+  public void assertOutputAnyOrder(String[] expected) throws IOException, ParseException {
+    assertOutput(expected, true);
+  }
+  
   public void assertOutput(String[] expected) throws IOException, ParseException {
+    assertOutput(expected, false);
+  }
+
+  private void assertOutput(String[] expected, boolean ignoreOrder) throws IOException, ParseException {
     registerScript();
     String alias = aliasOverrides.get("LAST_STORE_ALIAS");
 
-    assertEquals(StringUtils.join(expected, "\n"), StringUtils.join(getAlias(alias), "\n"));
+    if (ignoreOrder) {
+      Arrays.sort(expected);
+    }
+    assertEquals(StringUtils.join(expected, "\n"), getActualResults(alias, ignoreOrder));
+  }
+  
+  /**
+   * Compares the expected results to the results of the provided alias's output. Order does not matter
+   * and as long as the result is located in any index of expected and any line of the output then this will pass.
+   * 
+   * @param alias The alias whose results we want to check
+   * @param expected The expected results
+   */
+  public void assertOutputAnyOrder(String alias, String[] expected) throws IOException, ParseException {
+    assertOutput(alias, expected, true);
+  }
+  
+  public void assertOutput(String alias, String[] expected) throws IOException, ParseException {
+    assertOutput(alias, expected, false);
   }
 
-  public void assertOutput(String alias, String[] expected) throws IOException, ParseException {
+  private void assertOutput(String alias, String[] expected, boolean ignoreOrder) throws IOException, ParseException {
     registerScript();
 
-    assertEquals(StringUtils.join(expected, "\n"), StringUtils.join(getAlias(alias), "\n"));
+    if (ignoreOrder) {
+      Arrays.sort(expected);
+    }
+    assertEquals(StringUtils.join(expected, "\n"), getActualResults(alias, ignoreOrder));
   }
 
   public void assertOutput(File expected) throws IOException, ParseException {
-    registerScript();
-    String alias = aliasOverrides.get("LAST_STORE_ALIAS");
-
-    assertEquals(readFile(expected), StringUtils.join(getAlias(alias), "\n"));
+    assertOutput(readFile(expected).split("(\\r\\n|\\n)"), false);
   }
-
+  
   public void assertOutput(String alias, File expected) throws IOException, ParseException {
-    registerScript();
-
-    assertEquals(readFile(expected), StringUtils.join(getAlias(alias), "\n"));
+    assertOutput(alias, readFile(expected).split("(\\r\\n|\\n)"), false);
   }
-
+  
   public void assertOutput(String aliasInput, String[] input, String alias, String[] expected)
+      throws IOException, ParseException {
+    assertOutput(aliasInput, input, alias, expected, "\\t");
+  }
+  
+  public void assertOutput(String aliasInput, String[] input, String alias, String[] expected, String delimiter)
       throws IOException, ParseException {
     registerScript();
 
     StringBuilder sb = new StringBuilder();
-    Schema.stringifySchema(sb, pig.dumpSchema(aliasInput), DataType.TUPLE) ;
+    Schema.stringifySchema(sb, getPigServer().dumpSchema(aliasInput), DataType.TUPLE) ;
 
-    final String destination = "pigunit-input-overriden.txt";
-    cluster.copyFromLocalFile(input, destination, true);
-    override(aliasInput,
-        String.format("%s = LOAD '%s' AS %s;", aliasInput, destination, sb.toString()));
+    mockAlias(aliasInput, input, sb.toString(), delimiter);
 
-    assertOutput(alias, expected);
+    assertOutput(alias, expected, false);
   }
 
   protected void assertEquals(String expected, String current) {
     Assert.assertEquals(expected, current);
   }
-
+  
   private static String readFile(String path) throws IOException {
     return readFile(new File(path));
   }

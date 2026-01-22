@@ -18,37 +18,36 @@
 
 package org.apache.pig.test;
 
+import static org.junit.Assert.assertEquals;
+
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Random;
 
-import junit.framework.TestCase;
-
 import org.apache.pig.Algebraic;
 import org.apache.pig.ComparisonFunc;
 import org.apache.pig.EvalFunc;
 import org.apache.pig.FuncSpec;
 import org.apache.pig.backend.executionengine.ExecException;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POUserComparisonFunc;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POUserFunc;
 import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
-import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
-import org.apache.pig.test.PORead;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POUserComparisonFunc;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POUserFunc;
+import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.test.utils.GenRandomData;
 import org.junit.Test;
 
-public class TestPOUserFunc extends TestCase {
-	Random r = new Random();
+public class TestPOUserFunc {
+	Random r = new Random(42L);
 	int MAX_TUPLES = 10;
 
 	public static class ARITY extends EvalFunc<Integer> {
@@ -66,7 +65,7 @@ public class TestPOUserFunc extends TestCase {
 
 		@Override
 		public Schema outputSchema(Schema input) {
-            return new Schema(new Schema.FieldSchema(null, DataType.INTEGER)); 
+            return new Schema(new Schema.FieldSchema(null, DataType.INTEGER));
 		}
 	}
 
@@ -108,7 +107,7 @@ public class TestPOUserFunc extends TestCase {
 		public Double exec(Tuple input) throws IOException {
 			double sum = 0;
 			double count = 0;
-			
+
 			try {
 				sum = sum(input);
 				count = count(input);
@@ -227,7 +226,7 @@ public class TestPOUserFunc extends TestCase {
 
 		@Override
 		public Schema outputSchema(Schema input) {
-            return new Schema(new Schema.FieldSchema(null, DataType.DOUBLE)); 
+            return new Schema(new Schema.FieldSchema(null, DataType.DOUBLE));
 		}
 
 	}
@@ -255,12 +254,12 @@ public class TestPOUserFunc extends TestCase {
 				-1, inputs, new FuncSpec(funcSpec));
 		Result res = new Result();
 		Integer i = null;
-		res = userFunc.getNext(i);
+		res = userFunc.getNextInteger();
 		while (res.returnStatus != POStatus.STATUS_EOP) {
 			// System.out.println(res.result);
 			int result = (Integer) res.result;
 			assertEquals(2, result);
-			res = userFunc.getNext(i);
+			res = userFunc.getNextInteger();
 		}
 	}
 
@@ -294,7 +293,7 @@ public class TestPOUserFunc extends TestCase {
 		userFunc.attachInput(t1, t2);
 		Integer i = null;
 		// System.out.println(t1 + " " + t2);
-		int result = (Integer) (userFunc.getNext(i).result);
+		int result = (Integer) (userFunc.getNextInteger().result);
 		assertEquals(-1, result);
 	}
 
@@ -302,7 +301,7 @@ public class TestPOUserFunc extends TestCase {
 	public void testAlgebraicAVG() throws IOException, ExecException {
 
 	     Integer input[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
-             algebraicAVG( input, 55, 10, 110, 20, 5.5 );
+             algebraicAVG( input, 55.0, 10L, 110.0, 20L, 5.5 );
 
         }
 
@@ -317,16 +316,15 @@ public class TestPOUserFunc extends TestCase {
 	public void testAlgebraicAVGWithNulls() throws IOException, ExecException {
 
 	     Integer input[] = { 1, 2, 3, 4, null, 6, 7, 8, 9, 10 };
-             algebraicAVG( input, 50, 10, 100, 20, 5 );
+             algebraicAVG( input, 50.0, 10L, 100.0, 20L, 5.0 );
 
         }
 
-	@Test
-	public void algebraicAVG( 
-                 Integer[] input 
-               , double initialExpectedSum, long initialExpectedCount
-               , double intermedExpectedSum, long intermedExpectedCount
-               , double expectedAvg
+	public void algebraicAVG(
+                 Integer[] input
+               , Double initialExpectedSum, Long initialExpectedCount
+               , Double intermedExpectedSum, Long intermedExpectedCount
+               , Double expectedAvg
          ) throws IOException, ExecException {
 
                 // generate data
@@ -348,15 +346,15 @@ public class TestPOUserFunc extends TestCase {
 		po.setAlgebraicFunction(INIT);
 		po.attachInput(tup1);
 		Tuple t = null;
-		Result res = po.getNext(t);
+		Result res = po.getNextTuple();
 		Tuple outputInitial1 = (res.returnStatus == POStatus.STATUS_OK) ? (Tuple) res.result
 				: null;
 		Tuple outputInitial2 = (res.returnStatus == POStatus.STATUS_OK) ? (Tuple) res.result
 				: null;
 		System.out.println(outputInitial1 + " " + outputInitial2);
 		assertEquals(outputInitial1, outputInitial2);
-		double sum = (Double) outputInitial1.get(0);
-		long count = (Long) outputInitial1.get(1);
+		Double sum = (Double) outputInitial1.get(0);
+		Long count = (Long) outputInitial1.get(1);
 		assertEquals(initialExpectedSum, sum);
 		assertEquals(initialExpectedCount, count);
 
@@ -371,7 +369,7 @@ public class TestPOUserFunc extends TestCase {
 				new FuncSpec(funcSpec));
 		po.setAlgebraicFunction(INTERMED);
 		po.attachInput(outputInitial);
-		res = po.getNext(t);
+		res = po.getNextTuple();
 		Tuple outputIntermed = (res.returnStatus == POStatus.STATUS_OK) ? (Tuple) res.result
 				: null;
 
@@ -386,11 +384,11 @@ public class TestPOUserFunc extends TestCase {
 				new FuncSpec(funcSpec));
 		po.setAlgebraicFunction(FINAL);
 		po.attachInput(outputInitial);
-		res = po.getNext(t);
+		res = po.getNextTuple();
 		Double output = (res.returnStatus == POStatus.STATUS_OK) ? (Double) res.result
 				: null;
 		// Double output = fin.exec(outputInitial);
-		assertEquals( expectedAvg, output);
+		assertEquals((Double)expectedAvg, output);
 		// System.out.println("output = " + output);
 
 	}

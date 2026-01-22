@@ -19,8 +19,8 @@ package org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOp
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Iterator;
 
+import org.apache.pig.PigConfiguration;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigMapReduce;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
@@ -38,9 +38,6 @@ import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.PlanException;
 import org.apache.pig.impl.plan.VisitorException;
-import org.apache.pig.pen.util.ExampleTuple;
-import org.apache.pig.pen.util.LineageTracer;
-import org.apache.pig.impl.util.IdentityHashSet;
 
 /**
  * The collected group operator is a special operator used when users give
@@ -71,7 +68,16 @@ public class POCollectedGroup extends PhysicalOperator {
 
     private Object prevKey = null;
 
-    private boolean useDefaultBag = false;
+    private transient boolean useDefaultBag;
+
+    //For Spark
+    private transient boolean endOfInput = false;
+    public boolean isEndOfInput() {
+        return endOfInput;
+    }
+    public void setEndOfInput (boolean isEndOfInput) {
+        endOfInput = isEndOfInput;
+    }
 
     public POCollectedGroup(OperatorKey k) {
         this(k, -1, null);
@@ -125,29 +131,22 @@ public class POCollectedGroup extends PhysicalOperator {
 
     @SuppressWarnings("unchecked")
     @Override
-    public Result getNext(Tuple t) throws ExecException {
-
-        // Since the output is buffered, we need to flush the last
-        // set of records when the close method is called by mapper.
-        if (this.parentPlan.endOfAllInput) {
-            if (outputBag != null) {
-                Tuple tup = mTupleFactory.newTuple(2);
-                tup.set(0, prevKey);
-                tup.set(1, outputBag);
-                outputBag = null;
-                return new Result(POStatus.STATUS_OK, tup);
-            }
-
-            return new Result(POStatus.STATUS_EOP, null);
-        }
+    public Result getNextTuple() throws ExecException {
 
         Result inp = null;
         Result res = null;
 
         while (true) {
             inp = processInput();
-            if (inp.returnStatus == POStatus.STATUS_EOP ||
-                    inp.returnStatus == POStatus.STATUS_ERR) {
+            if (inp.returnStatus == POStatus.STATUS_EOP) {
+                // Since the output is buffered, we need to flush the last
+                // set of records when the close method is called by mapper.
+                if (this.parentPlan.endOfAllInput || isEndOfInput()) {
+                    return getStreamCloseResult();
+                } else {
+                    break;
+                }
+            } else if (inp.returnStatus == POStatus.STATUS_ERR) {
                 break;
             }
 
@@ -161,7 +160,7 @@ public class POCollectedGroup extends PhysicalOperator {
 
             List<Result> resLst = new ArrayList<Result>();
             for (ExpressionOperator op : leafOps) {
-                res = op.getNext(getDummy(op.getResultType()), op.getResultType());
+                res = op.getNext(op.getResultType());
                 if (res.returnStatus != POStatus.STATUS_OK) {
                     return new Result();
                 }
@@ -175,7 +174,7 @@ public class POCollectedGroup extends PhysicalOperator {
             if (prevKey == null && outputBag == null) {
 
                 if (PigMapReduce.sJobConfInternal.get() != null) {
-                    String bagType = PigMapReduce.sJobConfInternal.get().get("pig.cachedbag.type");
+                    String bagType = PigMapReduce.sJobConfInternal.get().get(PigConfiguration.PIG_CACHEDBAG_TYPE);
                     if (bagType != null && bagType.equalsIgnoreCase("default")) {
                         useDefaultBag = true;
                     }
@@ -267,15 +266,27 @@ public class POCollectedGroup extends PhysicalOperator {
             leafOps.add(leaf);
         }
    }
-    
+
     private void setIllustratorEquivalenceClasses(Tuple tin) {
         if (illustrator != null) {
           illustrator.getEquivalenceClasses().get(0).add(tin);
         }
     }
-    
+
     @Override
     public Tuple illustratorMarkup(Object in, Object out, int eqClassIndex) {
         return null;
+    }
+
+    private Result getStreamCloseResult() throws ExecException {
+        if (outputBag != null) {
+            Tuple tup = mTupleFactory.newTuple(2);
+            tup.set(0, prevKey);
+            tup.set(1, outputBag);
+            outputBag = null;
+            return new Result(POStatus.STATUS_OK, tup);
+        }
+
+        return new Result(POStatus.STATUS_EOP, null);
     }
 }

@@ -19,15 +19,14 @@ package org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOp
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-
 import org.apache.pig.PigException;
 import org.apache.pig.backend.executionengine.ExecException;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
 import org.apache.pig.data.DataType;
-import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.NodeIdGenerator;
+import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
 
 public class GTOrEqualToExpr extends BinaryComparisonOperator {
@@ -58,7 +57,7 @@ public class GTOrEqualToExpr extends BinaryComparisonOperator {
     }
 
     @Override
-    public Result getNext(Boolean bool) throws ExecException {
+    public Result getNextBoolean() throws ExecException {
         Result left, right;
 
         switch (operandType) {
@@ -67,15 +66,16 @@ public class GTOrEqualToExpr extends BinaryComparisonOperator {
         case DataType.FLOAT:
         case DataType.INTEGER:
         case DataType.LONG:
+        case DataType.BIGINTEGER:
+        case DataType.BIGDECIMAL:
         case DataType.DATETIME:
         case DataType.CHARARRAY: {
-            Object dummy = getDummy(operandType);
-            Result r = accumChild(null, dummy, operandType);
+            Result r = accumChild(null, operandType);
             if (r != null) {
                 return r;
             }
-            left = lhs.getNext(dummy, operandType);
-            right = rhs.getNext(dummy, operandType);
+            left = lhs.getNext(operandType);
+            right = rhs.getNext(operandType);
             return doComparison(left, right);
         }
 
@@ -91,9 +91,6 @@ public class GTOrEqualToExpr extends BinaryComparisonOperator {
 
     @SuppressWarnings("unchecked")
     private Result doComparison(Result left, Result right) {
-        if (trueRef == null) {
-            initializeRefs();
-        }
         if (left.returnStatus != POStatus.STATUS_OK) {
             return left;
         }
@@ -104,15 +101,15 @@ public class GTOrEqualToExpr extends BinaryComparisonOperator {
         // null
         if(left.result == null || right.result == null) {
             left.result = null;
-            left.returnStatus = POStatus.STATUS_NULL;
+            left.returnStatus = POStatus.STATUS_OK;
             return left;
         }
         assert(left.result instanceof Comparable);
         assert(right.result instanceof Comparable);
         if (((Comparable)left.result).compareTo(right.result) >= 0) {
-            left.result = trueRef;
+            left.result = Boolean.TRUE;
         } else {
-            left.result = falseRef;
+            left.result = Boolean.FALSE;
         }
         illustratorMarkup(null, left.result, (Boolean) left.result ? 0 : 1);
         return left;

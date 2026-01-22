@@ -22,10 +22,12 @@ import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
+import java.util.Map.Entry;
 import java.util.Properties;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.pig.PigConfiguration;
 
 public class PropertiesUtil {
     private static final String DEFAULT_PROPERTIES_FILE = "/pig-default.properties";
@@ -44,7 +46,7 @@ public class PropertiesUtil {
         loadPropertiesFromClasspath(properties, DEFAULT_PROPERTIES_FILE);
         loadPropertiesFromClasspath(properties, PROPERTIES_FILE);
         setDefaultsIfUnset(properties);
-        
+
         //Now set these as system properties only if they are not already defined.
         if (log.isDebugEnabled()) {
             for (Object o: properties.keySet()) {
@@ -60,7 +62,13 @@ public class PropertiesUtil {
 
 		// Add System properties which include command line overrides
 		// Any existing keys will be overridden
-		properties.putAll(System.getProperties());
+        for (Entry<Object, Object> entry : System.getProperties().entrySet()) {
+            String key = (String) entry.getKey();
+            if (key.startsWith("sun.") || key.startsWith("java.")) {
+                continue;
+            }
+            properties.put(key, entry.getValue());
+        }
 
 		// For telling error fast when there are problems
 		ConfigurationValidator.validatePigProperties(properties) ;
@@ -143,8 +151,13 @@ public class PropertiesUtil {
             //by default we keep going on error on the backend
             properties.setProperty("stop.on.failure", ""+false);
         }
+
+        if (properties.getProperty(PigConfiguration.PIG_OPT_FETCH) == null) {
+            //by default fetch optimization is on
+            properties.setProperty(PigConfiguration.PIG_OPT_FETCH, ""+true);
+        }
     }
-    
+
     /**
      * Loads default properties.
      * @return default properties

@@ -18,8 +18,6 @@
 
 package org.apache.pig.test;
 
-import static org.apache.pig.ExecType.LOCAL;
-import static org.apache.pig.ExecType.MAPREDUCE;
 import static org.junit.Assert.assertEquals;
 
 import java.io.File;
@@ -27,34 +25,26 @@ import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
 
-import junit.framework.Assert;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
-import org.apache.pig.impl.plan.CompilationMessageCollector;
 import org.apache.pig.impl.util.Utils;
 import org.apache.pig.newplan.logical.expression.LogicalExpressionPlan;
 import org.apache.pig.newplan.logical.relational.LOCogroup;
 import org.apache.pig.newplan.logical.relational.LOJoin;
 import org.apache.pig.newplan.logical.relational.LOSort;
 import org.apache.pig.newplan.logical.relational.LogicalPlan;
-import org.apache.pig.newplan.logical.visitor.CastLineageSetter;
-import org.apache.pig.newplan.logical.visitor.ColumnAliasConversionVisitor;
-import org.apache.pig.newplan.logical.visitor.SchemaAliasVisitor;
-import org.apache.pig.newplan.logical.visitor.TypeCheckingRelVisitor;
-import org.apache.pig.newplan.logical.visitor.UnionOnSchemaSetter;
 import org.apache.pig.parser.ParserException;
 import org.apache.pig.parser.ParserTestingUtils;
 import org.apache.pig.test.utils.NewLogicalPlanUtil;
 import org.junit.After;
 import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -63,38 +53,21 @@ public class TestProjectRange  {
 
     protected final Log log = LogFactory.getLog(getClass());
 
-    protected static ExecType execType = LOCAL;
 
-    private static MiniCluster cluster;
+    private static MiniGenericCluster cluster = MiniGenericCluster.buildCluster();
     protected static PigServer pigServer;
     private static final String INP_FILE_5FIELDS = "TestProjectRange_5fields";
 
 
     @BeforeClass
     public static void oneTimeSetUp() throws Exception {
-
-        String execTypeString = System.getProperty("test.exectype");
-
-        if(execTypeString!=null && execTypeString.length()>0){
-            execType = ExecType.fromString(execTypeString);
-        }
-
         String[] input = {"10\t20\t30\t40\t50", "11\t21\t31\t41\t51"};
-        Util.createLocalInputFile(INP_FILE_5FIELDS, input);
-
-        if(execType == MAPREDUCE) {
-            cluster = MiniCluster.buildCluster();
-            Util.copyFromLocalToCluster(cluster, INP_FILE_5FIELDS, INP_FILE_5FIELDS);
-        }
+        Util.createInputFile(cluster, INP_FILE_5FIELDS, input);
     }
 
     @Before
-    public void setup() throws ExecException{
-        if(execType == MAPREDUCE) {
-            pigServer = new PigServer(MAPREDUCE, cluster.getProperties());
-        } else {
-            pigServer = new PigServer(LOCAL);
-        }
+    public void setup() throws ExecException {
+        pigServer = new PigServer(cluster.getExecType(), cluster.getProperties());
     }
 
     @After
@@ -671,13 +644,14 @@ public class TestProjectRange  {
 
         Iterator<Tuple> it = pigServer.openIterator("f");
 
-        List<Tuple> expectedRes =
-            Util.getTuplesFromConstantTupleStrings(
-                    new String[] {
-                            "(10,{(10,20,30,40,50)})",
-                            "(11,{(11,21,31,41,51)})",
-                    });
-        Util.checkQueryOutputs(it, expectedRes);
+        String[] expectedRes =
+                new String[] {
+                        "(10,{(10,20,30,40,50)})",
+                        "(11,{(11,21,31,41,51)})",
+                };
+        Schema s = pigServer.dumpSchema("f");
+        Util.checkQueryOutputs(it, expectedRes,org.apache.pig.newplan.logical.Util.translateSchema(s),
+                Util.isSparkExecType(cluster.getExecType()));
     }
 
     /**
@@ -759,12 +733,14 @@ public class TestProjectRange  {
 
         Iterator<Tuple> it = pigServer.openIterator("f");
 
-        List<Tuple> expectedRes =
-            Util.getTuplesFromConstantTupleStrings(
-                    new String[] {
-                            "(1,{(11,21,31,41,51),(10,20,30,40,50)})",
-                    });
-        Util.checkQueryOutputs(it, expectedRes);
+        String[] expectedRes =
+                new String[] {
+                        "(1,{(11,21,31,41,51),(10,20,30,40,50)})",
+                };
+        Schema s = pigServer.dumpSchema("f");
+        Util.checkQueryOutputs(it, expectedRes,org.apache.pig.newplan.logical.Util.translateSchema(s),
+                Util.isSparkExecType(cluster.getExecType()));
+
     }
 
     private LOSort checkNumExpressionPlansForSort(LogicalPlan lp, int numPlans, boolean[] isAsc) {
@@ -783,13 +759,7 @@ public class TestProjectRange  {
     private LogicalPlan createAndProcessLPlan(String query) throws FrontendException {
         //TODO: create a common util function for logical plan tests
         LogicalPlan lp = generateLogicalPlan(query);
-        new ColumnAliasConversionVisitor( lp ).visit();
-        new SchemaAliasVisitor( lp ).visit();
-
-        CompilationMessageCollector collector = new CompilationMessageCollector() ;
-        new TypeCheckingRelVisitor( lp, collector).visit();
-        new UnionOnSchemaSetter( lp ).visit();
-        new CastLineageSetter(lp, collector).visit();
+        lp.validate(pigServer.getPigContext(), "test", false);
 
         return lp;
 
@@ -958,8 +928,8 @@ public class TestProjectRange  {
             "  g = group l1 by   .. c,  l2 by .. c;"
             ;
         String expectedSchStr = "grp: (a: int,b: long,c: int)," +
-        		"l1: {t : (a: int,b: long,c: int,d: int,e: int)}," +
-        		"l2: {t : (a: int,b: long,c: int,d: int,e: int)}";
+                "l1: {t : (a: int,b: long,c: int,d: int,e: int)}," +
+                "l2: {t : (a: int,b: long,c: int,d: int,e: int)}";
 
         Schema expectedSch = getCleanedGroupSchema(expectedSchStr);
         compileAndCompareSchema(expectedSch, query, "g");
@@ -971,14 +941,15 @@ public class TestProjectRange  {
 
         Util.registerMultiLineQuery(pigServer, query);
 
-        List<Tuple> expectedRes =
-            Util.getTuplesFromConstantTupleStrings(
-                    new String[] {
-                            "((10,20,30),{(10,20,30,40,50)},{(10,20,30,40,50)})",
-                            "((11,21,31),{(11,21,31,41,51)},{(11,21,31,41,51)})",
-                    });
+        String[] expectedRes =
+                new String[] {
+                        "((10,20,30),{(10,20,30,40,50)},{(10,20,30,40,50)})",
+                        "((11,21,31),{(11,21,31,41,51)},{(11,21,31,41,51)})",
+                };
         Iterator<Tuple> it = pigServer.openIterator("g");
-        Util.checkQueryOutputs(it, expectedRes);
+        Schema s = pigServer.dumpSchema("g");
+        Util.checkQueryOutputs(it, expectedRes,org.apache.pig.newplan.logical.Util.translateSchema(s),
+                Util.isSparkExecType(cluster.getExecType()));
     }
 
     /**
@@ -1038,14 +1009,15 @@ public class TestProjectRange  {
 
         Util.registerMultiLineQuery(pigServer, query);
 
-        List<Tuple> expectedRes =
-            Util.getTuplesFromConstantTupleStrings(
-                    new String[] {
-                            "((30,30,40,50),{(10,20,30,40,50)},{(10,20,30,40,50)})",
-                            "((32,31,41,51),{(11,21,31,41,51)},{(11,21,31,41,51)})",
-                    });
+        String[] expectedRes =
+                new String[] {
+                        "((30,30,40,50),{(10,20,30,40,50)},{(10,20,30,40,50)})",
+                        "((32,31,41,51),{(11,21,31,41,51)},{(11,21,31,41,51)})",
+                };
         Iterator<Tuple> it = pigServer.openIterator("g");
-        Util.checkQueryOutputs(it, expectedRes);
+        Schema s = pigServer.dumpSchema("g");
+        Util.checkQueryOutputs(it,expectedRes, org.apache.pig.newplan.logical.Util.translateSchema(s),
+                Util.isSparkExecType(cluster.getExecType()));
     }
 
     @Test
@@ -1089,14 +1061,15 @@ public class TestProjectRange  {
 
         Util.registerMultiLineQuery(pigServer, query);
 
-        List<Tuple> expectedRes =
-            Util.getTuplesFromConstantTupleStrings(
-                    new String[] {
-                            "((30,40,50),{(10,20,30,40,50)})",
-                            "((31,41,51),{(11,21,31,41,51)})",
-                    });
+        String[] expectedRes =
+                new String[] {
+                        "((30,40,50),{(10,20L,30,40,50)})",
+                        "((31,41,51),{(11,21L,31,41,51)})",
+                };
         Iterator<Tuple> it = pigServer.openIterator("lim");
-        Util.checkQueryOutputs(it, expectedRes);
+        Schema s = pigServer.dumpSchema("lim");
+        Util.checkQueryOutputs(it, expectedRes,org.apache.pig.newplan.logical.Util.translateSchema(s),
+                Util.isSparkExecType(cluster.getExecType()));
     }
 
 
@@ -1151,14 +1124,15 @@ public class TestProjectRange  {
 
         Util.registerMultiLineQuery(pigServer, query);
 
-        List<Tuple> expectedRes =
-            Util.getTuplesFromConstantTupleStrings(
-                    new String[] {
-                            "((30,40,50),{(10,20,30,40,50)})",
-                            "((31,41,51),{(11,21,31,41,51)})",
-                    });
+        String[] expectedRes =
+                new String[] {
+                        "((30,40,50),{(10,20,30,40,50)})",
+                        "((31,41,51),{(11,21,31,41,51)})",
+                };
         Iterator<Tuple> it = pigServer.openIterator("g");
-        Util.checkQueryOutputs(it, expectedRes);
+        Schema s = pigServer.dumpSchema("g");
+        Util.checkQueryOutputs(it, expectedRes, org.apache.pig.newplan.logical.Util.translateSchema(s),
+                Util.isSparkExecType(cluster.getExecType()));
     }
 
     private void setAliasesToNull(Schema schema) {
@@ -1190,14 +1164,15 @@ public class TestProjectRange  {
 
         Util.registerMultiLineQuery(pigServer, query);
 
-        List<Tuple> expectedRes =
-            Util.getTuplesFromConstantTupleStrings(
-                    new String[] {
-                            "(10,20,30,40,50,10,20,30,40,50)",
-                            "(11,21,31,41,51,11,21,31,41,51)",
-                    });
+        String[] expectedRes =
+                new String[] {
+                        "(10,20,30,40,50,10,20,30,40,50)",
+                        "(11,21,31,41,51,11,21,31,41,51)",
+                };
         Iterator<Tuple> it = pigServer.openIterator("j");
-        Util.checkQueryOutputs(it, expectedRes);
+        Schema s = pigServer.dumpSchema("j");
+        Util.checkQueryOutputs(it, expectedRes, org.apache.pig.newplan.logical.Util.translateSchema(s),
+                Util.isSparkExecType(cluster.getExecType()));
     }
 
     @Test
@@ -1218,14 +1193,15 @@ public class TestProjectRange  {
 
         Util.registerMultiLineQuery(pigServer, query);
 
-        List<Tuple> expectedRes =
-            Util.getTuplesFromConstantTupleStrings(
-                    new String[] {
-                            "(10,20,30,40,50,10,20,30,40,50)",
-                            "(11,21,31,41,51,11,21,31,41,51)",
-                    });
+        String[] expectedRes =
+                new String[] {
+                        "(10,20,30,40,50,10,20,30,40,50)",
+                        "(11,21,31,41,51,11,21,31,41,51)",
+                };
         Iterator<Tuple> it = pigServer.openIterator("j");
-        Util.checkQueryOutputs(it, expectedRes);
+        Schema s = pigServer.dumpSchema("j");
+        Util.checkQueryOutputs(it, expectedRes, org.apache.pig.newplan.logical.Util.translateSchema(s),
+                Util.isSparkExecType(cluster.getExecType()));
     }
 
     @Test
@@ -1237,7 +1213,7 @@ public class TestProjectRange  {
             "  l2 = load '" + INP_FILE_5FIELDS +  "';" +
             "  g = cogroup l1 by  ($0 ..  ),  l2 by ($0 .. );";
         Util.checkExceptionMessage(query, "g", "Cogroup/Group by '*' or 'x..' " +
-        		"(range of columns to the end) " +
+                "(range of columns to the end) " +
                         "is only allowed if the input has a schema");
     }
 

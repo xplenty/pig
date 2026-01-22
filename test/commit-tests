@@ -2,6 +2,7 @@
 **/TestBagFormat.java
 **/TestBoolean.java
 **/TestBuiltin.java
+**/TestCase.java
 **/TestCmdLineParser.java
 **/TestCommit.java
 **/TestConstExpr.java
@@ -17,6 +18,8 @@
 **/TestFuncSpec.java
 **/TestGTOrEqual.java
 **/TestGreaterThan.java
+**/TestIn.java
+**/TestInUdf.java
 **/TestInputOutputFileValidator.java
 **/TestInstantiateFunc.java
 **/TestLTOrEqual.java
@@ -50,6 +53,7 @@
 **/TestSchema.java
 **/TestSchemaUtil.java
 **/TestStore.java
+**/TestSUBTRACT.java
 **/TestTextDataParse.java
 **/TestTupleFormat.java
 **/TestStringUDFs.java

@@ -23,7 +23,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 import java.util.Map.Entry;
 
 import org.apache.commons.logging.Log;
@@ -38,10 +37,8 @@ import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.logicalLayer.FrontendException;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.logicalLayer.schema.Schema.FieldSchema;
-import org.apache.pig.impl.util.UDFContext;
 import org.apache.pig.impl.util.Utils;
 import org.apache.pig.parser.ParserException;
-
 import org.mozilla.javascript.Context;
 import org.mozilla.javascript.NativeJavaObject;
 import org.mozilla.javascript.NativeObject;
@@ -98,7 +95,7 @@ public class JsFunction extends EvalFunc<Object> {
 
     private void debugConvertPigToJS(int depth, String pigType, Object value, Schema schema) {
         if (LOG.isDebugEnabled()) {
-            LOG.debug(indent(depth)+"converting from Pig " + pigType + " " + value + " using " + stringify(schema));
+            LOG.debug(indent(depth)+"converting from Pig " + pigType + " " + toString(value) + " using " + stringify(schema));
         }
     }
 
@@ -175,13 +172,20 @@ public class JsFunction extends EvalFunc<Object> {
     public JsFunction(String functionName) {
         this.jsScriptEngine = JsScriptEngine.getInstance();
         this.functionName = functionName;
-
-        String outputSchemaDef;
-        outputSchemaDef = jsScriptEngine.jsEval(this.getClass().getName()+"(String)", functionName+".outputSchema").toString();
-        try {
-            this.outputSchema = Utils.getSchemaFromString(outputSchemaDef);
-        } catch (ParserException e) {
-            throw new IllegalArgumentException(functionName+".outputSchema is not a valid schema: "+e.getMessage(), e); 
+        Object outputSchemaObj = jsScriptEngine.jsEval(this.getClass().getName() + "(String)",
+                functionName + ".outputSchema");
+        //if no schema defined, fall back to bytearray
+        if (outputSchemaObj == null || outputSchemaObj instanceof Undefined) {
+            this.outputSchema = new Schema(new Schema.FieldSchema(null, DataType.BYTEARRAY));
+        }
+        else {
+            try {
+                this.outputSchema = Utils.getSchemaFromString(outputSchemaObj.toString());
+            }
+            catch (ParserException e) {
+                throw new IllegalArgumentException(functionName
+                        + ".outputSchema is not a valid schema: " + e.getMessage(), e);
+            }
         }
 
     }
@@ -213,8 +217,10 @@ public class JsFunction extends EvalFunc<Object> {
             LOG.debug( "call "+functionName+"("+Arrays.toString(passedParams)+") => "+toString(result));
         }
 
-        // result is always a tuple: automatically wrapping when necessary to simplify UDFs 
-        if (outputSchema.size() == 1 && !(result instanceof NativeObject)) {
+        // We wrap the result with an object in the following cases:
+        //   1. Result is not an object type.
+        //   2. OutputSchema is a tuple type. 
+        if (!(result instanceof NativeObject) || outputSchema.getField(0).type == DataType.TUPLE) {
             Scriptable wrapper = jsScriptEngine.jsNewObject();
             wrapper.put(outputSchema.getField(0).alias, wrapper, result);
             result = wrapper;

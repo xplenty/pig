@@ -1,35 +1,57 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.pig.builtin.mock;
 
-import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertTrue;
-import static junit.framework.Assert.fail;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.fail;
 import static org.apache.pig.builtin.mock.Storage.resetData;
 import static org.apache.pig.builtin.mock.Storage.schema;
 import static org.apache.pig.builtin.mock.Storage.tuple;
+import static org.apache.pig.builtin.mock.Storage.bag;
+import static org.apache.pig.builtin.mock.Storage.map;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecJob;
 import org.apache.pig.backend.executionengine.ExecJob.JOB_STATUS;
 import org.apache.pig.builtin.mock.Storage.Data;
 import org.apache.pig.data.Tuple;
+import org.apache.pig.test.Util;
 import org.junit.Test;
 
 public class TestMockStorage {
 
   @Test
   public void testMockStoreAndLoad() throws Exception {
-    PigServer pigServer = new PigServer(ExecType.LOCAL);
+    PigServer pigServer = new PigServer(Util.getLocalTestMode());
     Data data = resetData(pigServer);
 
     data.set("foo",
         tuple("a"),
         tuple("b"),
-        tuple("c")
+        tuple("c"),
+        tuple(map("d","e", "f","g")),
+        tuple(bag(tuple("h"),tuple("i")))
         );
 
     pigServer.registerQuery("A = LOAD 'foo' USING mock.Storage();");
@@ -39,11 +61,13 @@ public class TestMockStorage {
     assertEquals(tuple("a"), out.get(0));
     assertEquals(tuple("b"), out.get(1));
     assertEquals(tuple("c"), out.get(2));
+    assertEquals(tuple(map("f", "g", "d", "e" )), out.get(3));
+    assertEquals(tuple(bag(tuple("h"),tuple("i"))), out.get(4));
   }
-  
+
   @Test
   public void testMockSchema() throws Exception {
-    PigServer pigServer = new PigServer(ExecType.LOCAL);
+    PigServer pigServer = new PigServer(Util.getLocalTestMode());
     Data data = resetData(pigServer);
 
     data.set("foo", "blah:chararray",
@@ -66,7 +90,7 @@ public class TestMockStorage {
 
   @Test
   public void testMockStoreUnion() throws Exception {
-    PigServer pigServer = new PigServer(ExecType.LOCAL);
+    PigServer pigServer = new PigServer(Util.getLocalTestMode());
     Data data = resetData(pigServer);
 
     data.set("input1",
@@ -105,7 +129,7 @@ public class TestMockStorage {
   
   @Test
   public void testBadUsage1() throws Exception {
-    PigServer pigServer = new PigServer(ExecType.LOCAL);
+    PigServer pigServer = new PigServer(Util.getLocalTestMode());
     Data data = resetData(pigServer);
 
     data.set("input1",
@@ -128,7 +152,7 @@ public class TestMockStorage {
   
   @Test
   public void testBadUsage2() throws Exception {
-    PigServer pigServer = new PigServer(ExecType.LOCAL);
+    PigServer pigServer = new PigServer(Util.getLocalTestMode());
     Data data = resetData(pigServer);
 
     data.set("input",
@@ -150,6 +174,10 @@ public class TestMockStorage {
             failed = true;
             break;
         }
+    }
+    if (Util.getLocalTestMode().toString().equals("TEZ_LOCAL")) {
+        assertFalse("job should have success in tez_local mode since we have two vertex, each for a single store", failed);
+        return;
     }
     assertTrue("job should have failed for storing twice in the same location", failed);
 

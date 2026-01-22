@@ -25,7 +25,6 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
-import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
@@ -37,20 +36,20 @@ import org.apache.pig.pen.util.LineageTracer;
 
 /**
  * Recover this class for nested cross operation.
- * 
- * 
+ *
+ *
  */
 public class POCross extends PhysicalOperator {
 
     private static final long serialVersionUID = 1L;
 
-    protected DataBag[] inputBags;
+    protected transient DataBag[] inputBags;
 
-    protected Tuple[] data;
+    protected transient Tuple[] data;
 
     protected transient Iterator<Tuple>[] its;
-    
-    protected Tuple tupleOfLastBag;
+
+    protected transient Tuple tupleOfLastBag;
 
     public POCross(OperatorKey k) {
         super(k);
@@ -109,7 +108,7 @@ public class POCross extends PhysicalOperator {
     }
 
     @Override
-    public Result getNext(Tuple t) throws ExecException {
+    public Result getNextTuple() throws ExecException {
         Result res = new Result();
         int noItems = inputs.size();
         if (inputBags == null) {
@@ -137,8 +136,8 @@ public class POCross extends PhysicalOperator {
                 // if one bag is empty, there doesn't exist non-null cross product.
                 // simply clear all the input tuples of the first bag and finish.
                 int index = inputs.size() - 1;
-                for (Result resOfLastBag = inputs.get(index).getNext(dummyTuple); resOfLastBag.returnStatus !=
-                    POStatus.STATUS_EOP; resOfLastBag = inputs.get(index).getNext(dummyTuple));
+                for (Result resOfLastBag = inputs.get(index).getNextTuple(); resOfLastBag.returnStatus !=
+                    POStatus.STATUS_EOP; resOfLastBag = inputs.get(index).getNextTuple());
                 res.returnStatus = POStatus.STATUS_EOP;
                 clearMemory();
                 return res;
@@ -197,10 +196,10 @@ public class POCross extends PhysicalOperator {
         its = new Iterator[length];
         for (int i = 0; i < length; ++i) {
             PhysicalOperator op = inputs.get(i);
-            DataBag bag = BagFactory.getInstance().newDefaultBag();
+            DataBag bag = mBagFactory.newDefaultBag();
             inputBags[count] = bag;
-            for (Result res = op.getNext(dummyTuple); res.returnStatus != POStatus.STATUS_EOP; res = op
-                    .getNext(dummyTuple)) {
+            for (Result res = op.getNextTuple(); res.returnStatus != POStatus.STATUS_EOP; res = op
+                    .getNextTuple()) {
                 if (res.returnStatus == POStatus.STATUS_NULL)
                     continue;
                 if (res.returnStatus == POStatus.STATUS_ERR)
@@ -226,12 +225,12 @@ public class POCross extends PhysicalOperator {
 
         return illustratorMarkup(out, out, 0);
     }
-    
+
     private boolean loadLastBag() throws ExecException {
         Result resOfLastBag = null;
         int index = inputs.size() - 1;
-        for (resOfLastBag = inputs.get(index).getNext(dummyTuple); resOfLastBag.returnStatus ==
-                POStatus.STATUS_NULL; inputs.get(index).getNext(dummyTuple));
+        for (resOfLastBag = inputs.get(index).getNextTuple(); resOfLastBag.returnStatus ==
+                POStatus.STATUS_NULL; inputs.get(index).getNextTuple());
         switch (resOfLastBag.returnStatus) {
         case POStatus.STATUS_EOP:
             return false;
@@ -247,7 +246,7 @@ public class POCross extends PhysicalOperator {
                     "Error accumulating data in the local Cross operator");
         }
     }
-    
+
     private void clearMemory() {
         // reset inputBags, its, data and tupleOfLastBag to null so that in the
         // next round of getNext, the new input data will be loaded.
@@ -255,6 +254,11 @@ public class POCross extends PhysicalOperator {
         inputBags = null;
         its = null;
         data = null;
+    }
+
+    @Override
+    public void reset() {
+        clearMemory();
     }
 
 }

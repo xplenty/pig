@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.StreamTokenizer;
 import java.io.StringReader;
 import java.io.StringWriter;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -36,8 +37,10 @@ import org.antlr.runtime.tree.CommonTreeNodeStream;
 import org.antlr.runtime.tree.Tree;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.pig.impl.PigContext;
 import org.apache.pig.parser.PigParserNode.InvocationPoint;
 import org.apache.pig.tools.parameters.ParameterSubstitutionPreprocessor;
+import org.apache.pig.tools.parameters.PreprocessorContext;
 
 class PigMacro {
 
@@ -50,6 +53,7 @@ class PigMacro {
     private List<String> rets;
     private Map<String, PigMacro> seen;
     private Set<String> macroStack;
+    private PigContext pigContext;
     private long idx = 0;
     
     // The start line number of this macro in the script
@@ -81,6 +85,10 @@ class PigMacro {
     
     int getStartLine() {
         return startLine;
+    }
+
+    void setPigContext(PigContext pigContext) {
+        this.pigContext = pigContext;
     }
     
     private CommonTree inline(String[] inputs, String[] outputs, CommonTree t,
@@ -150,19 +158,30 @@ class PigMacro {
                 args[params.size() + i] = rets.get(i) + "=" + outputs[i];
             }
         }
+
         StringWriter writer = new StringWriter();
         BufferedReader in = new BufferedReader(new StringReader(body));
+
         try {
-            ParameterSubstitutionPreprocessor psp = new ParameterSubstitutionPreprocessor(
-                    50);
-            psp.genSubstitutedFile(in, writer, args, null);
+            PreprocessorContext pc = new PreprocessorContext(50);
+            pc.loadParamVal(Arrays.asList(args), null);
+
+            Map<String, String> paramVal = pc.getParamVal();
+            for (Map.Entry<String, String> e : pigContext.getParamVal().entrySet()) {
+                // overwrite=false since macro parameters should have precedence
+                // over commandline parameters (if keys overlap)
+                pc.processOrdLine(e.getKey(), e.getValue(), false);
+            }
+            
+            ParameterSubstitutionPreprocessor psp = new ParameterSubstitutionPreprocessor(pc);
+            psp.genSubstitutedFile(in, writer);
         } catch (Exception e) {
             // catch both ParserException and RuntimeException
             String msg = getErrorMessage(file, line,
                     "Macro inline failed for macro '" + name + "'",
                     e.getMessage() + "\n Macro content: " + body);
             throw new ParserException(msg);
-        } 
+        }
         
         LOG.debug("--- after substition:\n" + writer.toString());
         
@@ -195,6 +214,7 @@ class PigMacro {
         try {
             result = parser.query();
         } catch (RecognitionException e) {
+            e.line += startLine -1;
             String msg = (fileName == null) ? parser.getErrorHeader(e)
                     : QueryParserUtils.generateErrorHeader(e, fileName);
             msg += " " + parser.getErrorMessage(e, parser.getTokenNames());
@@ -212,7 +232,7 @@ class PigMacro {
         if (!macroDefNodes.isEmpty()) {
             String fname = ((PigParserNode)ast).getFileName();
             String msg = getErrorMessage(fname, ast.getLine(),
-                    "Invalide macro definition", "macro '" + name
+                    "Invalid macro definition", "macro '" + name
                             + "' contains macro definition.\nmacro content: "
                             + body);
             throw new ParserException(msg);
@@ -234,7 +254,7 @@ class PigMacro {
 
         for (CommonTree t : inlineNodes) {
             CommonTree newTree = macroInline(t,
-                    new ArrayList<PigMacro>(seen.values()), macroStack);
+                    new ArrayList<PigMacro>(seen.values()), macroStack, pigContext);
             QueryParserUtils.replaceNodeWithNodeList(t, newTree, null);
         }
         
@@ -249,6 +269,7 @@ class PigMacro {
         try {
             result2 = walker.query();
         } catch (RecognitionException e) {
+            e.line += startLine - 1;
             String msg = walker.getErrorHeader(e) + " "
                     + walker.getErrorMessage(e, walker.getTokenNames());
             String msg2 = getErrorMessage(file, line, "Failed to mask macro '"
@@ -298,7 +319,7 @@ class PigMacro {
                 testSet.add(st.sval.substring(1));
             } else if (matchDollarAlias(st, false)) {
                 String prevWord = st.sval;
-                if (matchWord(st, "if", true)) {
+                if (matchWord(st, "if", true) || matchWord(st, "otherwise", true)) {
                     testSet.add(prevWord.substring(1));
                 } else if (matchChar(st, '=', true) && !matchChar(st, '=', true)) {
                      testSet.add(prevWord.substring(1)); 
@@ -406,8 +427,10 @@ class PigMacro {
      *      1: list of return values
      *      2: list of parameters
      */
-    static CommonTree macroInline(CommonTree t, List<PigMacro> macroDefs, Set<String> macroStack)
-            throws ParserException {
+    static CommonTree macroInline(CommonTree t,
+                                  List<PigMacro> macroDefs, Set<String> macroStack,
+                                  PigContext pigContext)
+                                  throws ParserException {
         // get name
         String mn = t.getChild(0).getText();
 
@@ -440,6 +463,10 @@ class PigMacro {
         Set<String> newStack = new HashSet<String>(macroStack);
         newStack.add(macro.name);
         macro.setStack(newStack);
+
+        // inform the macro of the PigContext
+        // so it can substitute parameters from the main pigscript
+        macro.setPigContext(pigContext);
         
         // get return values
         int n = t.getChild(1).getChildCount();

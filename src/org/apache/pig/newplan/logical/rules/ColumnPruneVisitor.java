@@ -267,6 +267,14 @@ public class ColumnPruneVisitor extends LogicalRelationalNodesVisitor {
 
     @Override
     public void visit( LOCogroup cg ) throws FrontendException {
+        LogicalPlan p = (LogicalPlan) cg.getPlan();
+        List<Operator> successors = p.getSuccessors(cg);
+        // if there is already a LOForEach after this operator,
+        // skip adding another foreach since it can conflict with
+        // AccumulatorOptimizerUtil.addAccumulator()
+        if (successors.size() == 1 && successors.get(0) instanceof LOForEach) {
+            return;
+        }
         addForEachIfNecessary(cg);
     }
 
@@ -448,7 +456,7 @@ public class ColumnPruneVisitor extends LogicalRelationalNodesVisitor {
         LogicalPlan p = (LogicalPlan)op.getPlan();
         List<Operator> ll = p.getPredecessors(op);
         if (ll != null) {
-            for(Operator pred: ll) {
+            for(Operator pred: ll.toArray(new Operator[ll.size()])) {
                 removeSubTree((LogicalRelationalOperator)pred);
             }
         }

@@ -27,25 +27,24 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlan
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
-import org.apache.pig.impl.plan.NodeIdGenerator;
 import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
 import org.apache.pig.pen.util.ExampleTuple;
 
 public class POLimit extends PhysicalOperator {
 	   /**
-     * 
+     *
      */
     private static final long serialVersionUID = 1L;
 
-    // Counts for outputs processed
-    private long soFar = 0;
-    
     // Number of limited outputs
-    long mLimit;
+    private long mLimit;
 
     // The expression plan
-    PhysicalPlan expressionPlan;
+    private PhysicalPlan expressionPlan;
+
+    // Counts for outputs processed
+    private transient long soFar = 0;
 
     public POLimit(OperatorKey k) {
         this(k, -1, null);
@@ -62,11 +61,11 @@ public class POLimit extends PhysicalOperator {
     public POLimit(OperatorKey k, int rp, List<PhysicalOperator> inputs) {
         super(k, rp, inputs);
     }
-    
+
     public void setLimit(long limit) {
     	mLimit = limit;
     }
-    
+
     public long getLimit() {
     	return mLimit;
     }
@@ -80,11 +79,11 @@ public class POLimit extends PhysicalOperator {
     }
 
     /**
-     * Counts the number of tuples processed into static variable soFar, if the number of tuples processed reach the 
-     * limit, return EOP; Otherwise, return the tuple 
+     * Counts the number of tuples processed into static variable soFar, if the number of tuples processed reach the
+     * limit, return EOP; Otherwise, return the tuple
      */
     @Override
-    public Result getNext(Tuple t) throws ExecException {
+    public Result getNextTuple() throws ExecException {
         // if it is the first time, evaluate the expression. Otherwise reuse the computed value.
         if (this.getLimit() < 0 && expressionPlan != null) {
             PhysicalOperator expression = expressionPlan.getLeaves().get(0);
@@ -92,14 +91,14 @@ public class POLimit extends PhysicalOperator {
             Result returnValue;
             switch (expression.getResultType()) {
             case DataType.LONG:
-                returnValue = expression.getNext(dummyLong);
+                returnValue = expression.getNextLong();
                 if (returnValue.returnStatus != POStatus.STATUS_OK || returnValue.result == null)
                     throw new RuntimeException("Unable to evaluate Limit expression: "
                             + returnValue);
                 variableLimit = (Long) returnValue.result;
                 break;
             case DataType.INTEGER:
-                returnValue = expression.getNext(dummyInt);
+                returnValue = expression.getNextInteger();
                 if (returnValue.returnStatus != POStatus.STATUS_OK || returnValue.result == null)
                     throw new RuntimeException("Unable to evaluate Limit expression: "
                             + returnValue);
@@ -108,21 +107,23 @@ public class POLimit extends PhysicalOperator {
             default:
                 throw new RuntimeException("Limit requires an integer parameter");
             }
-            if (variableLimit <= 0)
-                throw new RuntimeException("Limit requires a positive integer parameter");
+            if (variableLimit < 0)
+                throw new RuntimeException("Limit requires a zero or a positive integer parameter");
             this.setLimit(variableLimit);
         }
         Result inp = null;
         while (true) {
+            // illustrator ignore LIMIT before the post processing
+            if ((illustrator == null || illustrator.getOriginalLimit() != -1) && soFar >= mLimit) {
+                inp = RESULT_EOP;
+                break;
+            }
             inp = processInput();
             if (inp.returnStatus == POStatus.STATUS_EOP || inp.returnStatus == POStatus.STATUS_ERR)
                 break;
-            
+
             illustratorMarkup(inp.result, null, 0);
-            // illustrator ignore LIMIT before the post processing
-            if ((illustrator == null || illustrator.getOriginalLimit() != -1) && soFar>=mLimit)
-            	inp.returnStatus = POStatus.STATUS_EOP;
-            
+
             soFar++;
             break;
         }
@@ -157,15 +158,13 @@ public class POLimit extends PhysicalOperator {
 
     @Override
     public POLimit clone() throws CloneNotSupportedException {
-        POLimit newLimit = new POLimit(new OperatorKey(this.mKey.scope,
-            NodeIdGenerator.getGenerator().getNextNodeId(this.mKey.scope)),
-            this.requestedParallelism, this.inputs);
-        newLimit.mLimit = this.mLimit;
-        newLimit.expressionPlan = this.expressionPlan.clone();
-        newLimit.addOriginalLocation(alias, getOriginalLocations());
-        return newLimit;
+        POLimit clone = (POLimit) super.clone();
+        if (this.expressionPlan != null) {
+            clone.expressionPlan = this.expressionPlan.clone();
+        }
+        return clone;
     }
-    
+
     @Override
     public Tuple illustratorMarkup(Object in, Object out, int eqClassIndex) {
         if(illustrator != null) {

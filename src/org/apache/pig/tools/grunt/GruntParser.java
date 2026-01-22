@@ -26,15 +26,14 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
 import java.io.PrintStream;
 import java.io.Reader;
 import java.io.StringReader;
-import java.io.StringWriter;
 import java.util.AbstractList;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
-import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -42,17 +41,15 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
-import jline.ConsoleReader;
-import jline.ConsoleReaderInputStream;
+import jline.console.ConsoleReader;
 
+import org.apache.commons.io.output.NullOutputStream;
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FsShell;
-import org.apache.hadoop.mapred.JobClient;
-import org.apache.hadoop.mapred.JobConf;
-import org.apache.hadoop.mapred.JobID;
-import org.apache.hadoop.mapred.RunningJob;
+import org.apache.hadoop.fs.Path;
 import org.apache.pig.LoadFunc;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.datastorage.ContainerDescriptor;
@@ -62,34 +59,50 @@ import org.apache.pig.backend.datastorage.ElementDescriptor;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.datastorage.ConfigurationUtil;
 import org.apache.pig.backend.hadoop.datastorage.HDataStorage;
-import org.apache.pig.backend.hadoop.executionengine.HExecutionEngine;
 import org.apache.pig.data.Tuple;
+import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.io.FileLocalizer.FetchFileRet;
 import org.apache.pig.impl.util.LogUtils;
 import org.apache.pig.impl.util.TupleFormat;
-import org.apache.pig.tools.parameters.ParameterSubstitutionPreprocessor;
+import org.apache.pig.parser.RegisterResolver;
 import org.apache.pig.tools.pigscript.parser.ParseException;
 import org.apache.pig.tools.pigscript.parser.PigScriptParser;
 import org.apache.pig.tools.pigscript.parser.PigScriptParserTokenManager;
+import org.apache.pig.tools.pigscript.parser.TokenMgrError;
 import org.apache.pig.tools.pigstats.JobStats;
 import org.apache.pig.tools.pigstats.PigStats;
 import org.apache.pig.tools.pigstats.PigStats.JobGraph;
+import org.apache.pig.validator.BlackAndWhitelistFilter;
+import org.apache.pig.validator.PigCommandFilter;
 import org.fusesource.jansi.Ansi;
 import org.fusesource.jansi.AnsiConsole;
 
-@SuppressWarnings("deprecation")
+import com.google.common.collect.Lists;
+
 public class GruntParser extends PigScriptParser {
 
     private static final Log log = LogFactory.getLog(GruntParser.class);
+    private PigCommandFilter filter;
 
-    public GruntParser(Reader stream) {
-        super(stream);
+    public GruntParser(Reader reader) {
+        this(reader, null);
+        init();
+    }
+
+    public GruntParser(Reader reader, PigServer pigServer) {
+        super(reader);
+        mPigServer = pigServer;
         init();
     }
 
     public GruntParser(InputStream stream, String encoding) {
+        this(stream, encoding, null);
+    }
+
+    public GruntParser(InputStream stream, String encoding, PigServer pigServer) {
         super(stream, encoding);
+        mPigServer = pigServer;
         init();
     }
 
@@ -98,8 +111,19 @@ public class GruntParser extends PigScriptParser {
         init();
     }
 
+    public GruntParser(InputStream stream, PigServer pigServer) {
+        super(stream);
+        mPigServer = pigServer;
+        init();
+    }
+
     public GruntParser(PigScriptParserTokenManager tm) {
+        this(tm, null);
+    }
+
+    public GruntParser(PigScriptParserTokenManager tm, PigServer pigServer) {
         super(tm);
+        mPigServer = pigServer;
         init();
     }
 
@@ -108,16 +132,27 @@ public class GruntParser extends PigScriptParser {
         mLoadOnly = false;
         mExplain = null;
         mScriptIllustrate = false;
+
+        setProps();
+
+        filter = new BlackAndWhitelistFilter(mPigServer);
+    }
+
+    private void setProps() {
+        mDfs = mPigServer.getPigContext().getDfs();
+        mLfs = mPigServer.getPigContext().getLfs();
+        mConf = mPigServer.getPigContext().getProperties();
+        shell = new FsShell(ConfigurationUtil.toConfiguration(mConf));
     }
 
     @Override
-    public void setInteractive(boolean isInteractive){
+    public void setInteractive(boolean isInteractive) {
         super.setInteractive(isInteractive);
-        if(isInteractive){
+        if(isInteractive) {
             setValidateEachStatement(true);
         }
     }
-    
+
     public void setValidateEachStatement(boolean b) {
         mPigServer.setValidateEachStatement(b);
     }
@@ -143,11 +178,12 @@ public class GruntParser extends PigScriptParser {
                         mNumFailedJobs++;
                         Exception exp = (js.getException() != null) ? js.getException()
                                 : new ExecException(
-                                        "Job failed, hadoop does not return any error message",
-                                        2244);                        
-                        LogUtils.writeLog(exp, 
-                                mPigServer.getPigContext().getProperties().getProperty("pig.logfile"), 
-                                log, 
+                                        "Job " + (js.getJobId() == null ? "" : js.getJobId() + " ") +
+                                        "failed, hadoop does not return any error message",
+                                        2244);
+                        LogUtils.writeLog(exp,
+                                mPigServer.getPigContext().getProperties().getProperty("pig.logfile"),
+                                log,
                                 "true".equalsIgnoreCase(mPigServer.getPigContext().getProperties().getProperty("verbose")),
                                 "Pig Stack Trace");
                     } else {
@@ -166,12 +202,12 @@ public class GruntParser extends PigScriptParser {
 
     public int[] parseStopOnError() throws IOException, ParseException
     {
-	return parseStopOnError(false);
+        return parseStopOnError(false);
     }
-    
-    /** 
-     * Parses Pig commands in either interactive mode or batch mode. 
-     * In interactive mode, executes the plan right away whenever a 
+
+    /**
+     * Parses Pig commands in either interactive mode or batch mode.
+     * In interactive mode, executes the plan right away whenever a
      * STORE command is encountered.
      *
      * @throws IOException, ParseException
@@ -184,6 +220,7 @@ public class GruntParser extends PigScriptParser {
 
         if (!mInteractive && !sameBatch) {
             setBatchOn();
+            mPigServer.setSkipParseInRegisterForBatch(true);
         }
 
         try {
@@ -192,10 +229,18 @@ public class GruntParser extends PigScriptParser {
             while(!mDone) {
                 parse();
             }
-            
+
             if (!sameBatch) {
                 executeBatch();
             }
+        } catch (TokenMgrError tme) {
+            // This error from PigScriptParserTokenManager is not intuitive and always refers to the
+            // last line, if we are reading whole query without parsing it line by line during batch
+            // So executeBatch and get the error from QueryParser
+            if (!mInteractive && !sameBatch) {
+                executeBatch();
+            }
+            throw tme;
         } finally {
             if (!sameBatch) {
                 discardBatch();
@@ -205,42 +250,23 @@ public class GruntParser extends PigScriptParser {
         return res;
     }
 
-    public void setLoadOnly(boolean loadOnly) 
+    public void setLoadOnly(boolean loadOnly)
     {
         mLoadOnly = loadOnly;
-    }
-
-    public void setParams(PigServer pigServer)
-    {
-        mPigServer = pigServer;
-        
-        mDfs = mPigServer.getPigContext().getDfs();
-        mLfs = mPigServer.getPigContext().getLfs();
-        mConf = mPigServer.getPigContext().getProperties();
-        shell = new FsShell(ConfigurationUtil.toConfiguration(mConf));
-        
-        // TODO: this violates the abstraction layer decoupling between
-        // front end and back end and needs to be changed.
-        // Right now I am not clear on how the Job Id comes from to tell
-        // the back end to kill a given job (mJobClient is used only in 
-        // processKill)
-        //
-        HExecutionEngine execEngine = mPigServer.getPigContext().getExecutionEngine();
-        mJobConf = execEngine.getJobConf();
     }
 
     public void setScriptIllustrate() {
         mScriptIllustrate = true;
     }
-    
+
     @Override
     public void prompt()
     {
         if (mInteractive) {
-            mConsoleReader.setDefaultPrompt("grunt> ");
+            mConsoleReader.setPrompt("grunt> ");
         }
     }
-    
+
     @Override
     protected void quit()
     {
@@ -263,14 +289,25 @@ public class GruntParser extends PigScriptParser {
         while(!mDone) {
             parse();
         }
-    }    
-    
+    }
+
     @Override
     protected void processDescribe(String alias) throws IOException {
         String nestedAlias = null;
         if(mExplain == null) { // process only if not in "explain" mode
+
+            if (mPigServer.isBatchOn()) {
+                mPigServer.parseAndBuild();
+            }
+
             if(alias==null) {
                 alias = mPigServer.getPigContext().getLastAlias();
+                // if describe is used immediately after launching grunt shell then
+                // last defined alias will be null
+                if (alias == null) {
+                    throw new IOException(
+                            "No previously defined alias found. Please define an alias and use 'describe' operator.");
+                }
             }
             if(alias.contains("::")) {
                 nestedAlias = alias.substring(alias.indexOf("::") + 2);
@@ -278,6 +315,9 @@ public class GruntParser extends PigScriptParser {
                 mPigServer.dumpSchemaNested(alias, nestedAlias);
             }
             else {
+                if ("@".equals(alias)) {
+                    alias = mPigServer.getLastRel();
+                }
                 mPigServer.dumpSchema(alias);
             }
         } else {
@@ -286,34 +326,44 @@ public class GruntParser extends PigScriptParser {
     }
 
     @Override
-    protected void processExplain(String alias, String script, boolean isVerbose, 
-                                  String format, String target, 
-                                  List<String> params, List<String> files) 
+    protected void processExplain(String alias, String script, boolean isVerbose,
+                                  String format, String target,
+                                  List<String> params, List<String> files)
     throws IOException, ParseException {
-        processExplain(alias, script, isVerbose, format, target, params, files, 
+        if (mPigServer.isBatchOn()) {
+            mPigServer.parseAndBuild();
+        }
+        if (alias == null && script == null) {
+            if (mInteractive) {
+                alias = mPigServer.getPigContext().getLastAlias();
+                // if explain is used immediately after launching grunt shell then
+                // last defined alias will be null
+                if (alias == null) {
+                    throw new ParseException("'explain' statement must be on an alias or on a script.");
+                }
+            }
+        }
+        if ("@".equals(alias)) {
+            alias = mPigServer.getLastRel();
+        }
+        processExplain(alias, script, isVerbose, format, target, params, files,
                 false);
     }
 
-    protected void processExplain(String alias, String script, boolean isVerbose, 
-                                  String format, String target, 
+    protected void processExplain(String alias, String script, boolean isVerbose,
+                                  String format, String target,
                                   List<String> params, List<String> files,
-                                  boolean dontPrintOutput) 
+                                  boolean dontPrintOutput)
         throws IOException, ParseException {
-        
+        filter.validate(PigCommandFilter.Command.EXPLAIN);
         if (null != mExplain) {
             return;
         }
 
         try {
             mExplain = new ExplainState(alias, target, script, isVerbose, format);
-            
+
             if (script != null) {
-                if (!"true".equalsIgnoreCase(mPigServer.
-                                             getPigContext()
-                                             .getProperties().
-                                             getProperty("opt.multiquery","true"))) {
-                    throw new ParseException("Cannot explain script if multiquery is disabled.");
-                }
                 setBatchOn();
                 try {
                     loadScript(script, true, true, false, params, files);
@@ -341,28 +391,10 @@ public class GruntParser extends PigScriptParser {
         explainCurrentBatch(false);
     }
 
-    /**
-     * A {@link PrintStream} implementation which does not write anything 
-     * Used with '-check' command line option to pig Main 
-     * (through {@link GruntParser#explainCurrentBatch(boolean) } )
-     */
-    static class NullPrintStream extends PrintStream {
-        public NullPrintStream(String fileName) throws FileNotFoundException {
-            super(fileName);
-        }
-        @Override
-        public void write(byte[] buf, int off, int len) {}
-        @Override
-        public void write(int b) {}
-        @Override
-        public void write(byte [] b) {}
-    }
-    
     protected void explainCurrentBatch(boolean dontPrintOutput) throws IOException {
-        PrintStream lp = (dontPrintOutput) ? new NullPrintStream("dummy") : System.out;
-        PrintStream pp = (dontPrintOutput) ? new NullPrintStream("dummy") : System.out;
-        PrintStream ep = (dontPrintOutput) ? new NullPrintStream("dummy") : System.out;
-        
+        PrintStream lp = (dontPrintOutput) ? new PrintStream(new NullOutputStream()) : System.out;
+        PrintStream ep = (dontPrintOutput) ? new PrintStream(new NullOutputStream()) : System.out;
+
         if (!(mExplain.mLast && mExplain.mCount == 0)) {
             if (mPigServer.isBatchEmpty()) {
                 return;
@@ -374,29 +406,27 @@ public class GruntParser extends PigScriptParser {
 
         if (mExplain.mTarget != null) {
             File file = new File(mExplain.mTarget);
-            
+
             if (file.isDirectory()) {
                 String sCount = (mExplain.mLast && mExplain.mCount == 1)?"":"_"+mExplain.mCount;
-                lp = new PrintStream(new File(file, "logical_plan-"+mExplain.mTime+sCount+"."+mExplain.mFormat));
-                pp = new PrintStream(new File(file, "physical_plan-"+mExplain.mTime+sCount+"."+mExplain.mFormat));
-                ep = new PrintStream(new File(file, "exec_plan-"+mExplain.mTime+sCount+"."+mExplain.mFormat));
-                mPigServer.explain(mExplain.mAlias, mExplain.mFormat, 
-                                   mExplain.mVerbose, markAsExecuted, lp, pp, ep);
+                String suffix = mExplain.mTime+sCount+"."+mExplain.mFormat;
+                lp = new PrintStream(new File(file, "logical_plan-"+suffix));
+                mPigServer.explain(mExplain.mAlias, mExplain.mFormat,
+                                   mExplain.mVerbose, markAsExecuted, lp, null, file, suffix);
                 lp.close();
-                pp.close();
                 ep.close();
             }
             else {
                 boolean append = !(mExplain.mCount==1);
-                lp = pp = ep = new PrintStream(new FileOutputStream(mExplain.mTarget, append));
-                mPigServer.explain(mExplain.mAlias, mExplain.mFormat, 
-                                   mExplain.mVerbose, markAsExecuted, lp, pp, ep);
+                lp = ep = new PrintStream(new FileOutputStream(mExplain.mTarget, append));
+                mPigServer.explain(mExplain.mAlias, mExplain.mFormat,
+                                   mExplain.mVerbose, markAsExecuted, lp, ep, null, null);
                 lp.close();
             }
         }
         else {
-            mPigServer.explain(mExplain.mAlias, mExplain.mFormat, 
-                               mExplain.mVerbose, markAsExecuted, lp, pp, ep);
+            mPigServer.explain(mExplain.mAlias, mExplain.mFormat,
+                               mExplain.mVerbose, markAsExecuted, lp, ep, null, null);
         }
     }
 
@@ -410,7 +440,7 @@ public class GruntParser extends PigScriptParser {
     }
 
     @Override
-	protected void printClear() {
+    protected void printClear() {
         AnsiConsole.systemInstall();
         Ansi ansi = Ansi.ansi();
         System.out.println( ansi.eraseScreen() );
@@ -420,52 +450,46 @@ public class GruntParser extends PigScriptParser {
 
     @Override
     protected void processRegister(String jar) throws IOException {
+        filter.validate(PigCommandFilter.Command.REGISTER);
+        jar = parameterSubstitutionInGrunt(jar);
         mPigServer.registerJar(jar);
     }
 
     @Override
     protected void processRegister(String path, String scriptingLang, String namespace) throws IOException, ParseException {
-        if(path.endsWith(".jar")) {
-            if(scriptingLang != null || namespace != null) {
-                throw new ParseException("Cannot register a jar with a scripting language or namespace");
-            }
-            mPigServer.registerJar(path);
-        }
-        else {
-            mPigServer.registerCode(path, scriptingLang, namespace);
-        }
-    }    
+        filter.validate(PigCommandFilter.Command.REGISTER);
+        path = parameterSubstitutionInGrunt(path);
+        scriptingLang = parameterSubstitutionInGrunt(scriptingLang);
+        namespace = parameterSubstitutionInGrunt(namespace);
+        new RegisterResolver(mPigServer).parseRegister(path, scriptingLang, namespace);
+    }
 
-    private String runPreprocessor(String script, List<String> params, 
-                                   List<String> files) 
+    private String runPreprocessor(String scriptPath, List<String> params, List<String> paramFiles)
         throws IOException, ParseException {
 
-        ParameterSubstitutionPreprocessor psp = new ParameterSubstitutionPreprocessor(50);
-        StringWriter writer = new StringWriter();
-
-        try{
-            psp.genSubstitutedFile(new BufferedReader(new FileReader(script)), 
-                                   writer,  
-                                   params.size() > 0 ? params.toArray(new String[0]) : null, 
-                                   files.size() > 0 ? files.toArray(new String[0]) : null);
-        } catch (org.apache.pig.tools.parameters.ParseException pex) {
-            throw new ParseException(pex.getMessage());
-        }
-
-        return writer.toString();
+        PigContext context = mPigServer.getPigContext();
+        BufferedReader reader = new BufferedReader(new FileReader(scriptPath));
+        String result = context.doParamSubstitution(reader, params, paramFiles);
+        reader.close();
+        return result;
     }
 
     @Override
-    protected void processScript(String script, boolean batch, 
-                                 List<String> params, List<String> files) 
+    protected void processScript(String script, boolean batch,
+                                 List<String> params, List<String> files)
         throws IOException, ParseException {
-        
+        if(batch) {
+            filter.validate(PigCommandFilter.Command.EXEC);
+        } else {
+            filter.validate(PigCommandFilter.Command.RUN);
+        }
+
         if(mExplain == null) { // process only if not in "explain" mode
             if (script == null) {
                 executeBatch();
                 return;
             }
-            
+
             if (batch) {
                 setBatchOn();
                 mPigServer.setJobName(script);
@@ -484,13 +508,21 @@ public class GruntParser extends PigScriptParser {
     }
 
     private void loadScript(String script, boolean batch, boolean loadOnly, boolean illustrate,
-                            List<String> params, List<String> files) 
+                            List<String> params, List<String> files)
         throws IOException, ParseException {
-        
+
         Reader inputReader;
         ConsoleReader reader;
         boolean interactive;
-         
+
+        PigContext pc = mPigServer.getPigContext();
+
+        if( !loadOnly ) {
+          pc.getPreprocessorContext().paramScopePush();
+        }
+        pc.setParams(params);
+        pc.setParamFiles(files);
+
         try {
             FetchFileRet fetchFile = FileLocalizer.fetchFile(mConf, script);
             String cmds = runPreprocessor(fetchFile.file.getAbsolutePath(), params, files);
@@ -500,7 +532,7 @@ public class GruntParser extends PigScriptParser {
                 cmds = cmds.replaceAll("\t","    ");
 
                 reader = new ConsoleReader(new ByteArrayInputStream(cmds.getBytes()),
-                                           new OutputStreamWriter(System.out));
+                                           System.out);
                 reader.setHistory(mConsoleReader.getHistory());
                 InputStream in = new ConsoleReaderInputStream(reader);
                 inputReader = new BufferedReader(new InputStreamReader(in));
@@ -516,15 +548,14 @@ public class GruntParser extends PigScriptParser {
             throw new ParseException("Cannot access file: " + script);
         }
 
-        GruntParser parser = new GruntParser(inputReader);
-        parser.setParams(mPigServer);
+        GruntParser parser = new GruntParser(inputReader, mPigServer);
         parser.setConsoleReader(reader);
         parser.setInteractive(interactive);
         parser.setLoadOnly(loadOnly);
         if (illustrate)
             parser.setScriptIllustrate();
         parser.mExplain = mExplain;
-        
+
         parser.prompt();
         while(!parser.isDone()) {
             parser.parse();
@@ -533,107 +564,141 @@ public class GruntParser extends PigScriptParser {
         if (interactive) {
             System.out.println("");
         }
+        if( ! loadOnly ) {
+          pc.getPreprocessorContext().paramScopePop();
+        }
     }
 
     @Override
     protected void processSet(String key, String value) throws IOException, ParseException {
+        filter.validate(PigCommandFilter.Command.SET);
+        key = parameterSubstitutionInGrunt(key);
+        value = parameterSubstitutionInGrunt(value);
         if (key.equals("debug"))
         {
-            if (value.equals("on"))
-                mPigServer.debugOn();
-            else if (value.equals("off"))
-                mPigServer.debugOff();
-            else
-                throw new ParseException("Invalid value " + value + " provided for " + key);
+            if (value != null) {
+                if (value.equals("on"))
+                    mPigServer.debugOn();
+                else if (value.equals("off"))
+                    mPigServer.debugOff();
+                else
+                    throw new ParseException("Invalid value " + value + " provided for " + key);
+            } else {
+                System.out.println(key + "=" + mPigServer.isDebugOn());
+            }
         }
         else if (key.equals("job.name"))
         {
-            mPigServer.setJobName(value);
+            if (value != null) {
+                mPigServer.setJobName(value);
+            } else {
+                System.out.println(key + "=" + mPigServer.getJobName());
+            }
         }
         else if (key.equals("job.priority"))
         {
-            mPigServer.setJobPriority(value);
+            if (value != null) {
+                mPigServer.setJobPriority(value);
+            } else {
+                System.out.println(key + "=" + mPigServer.getJobPriority());
+            }
         }
         else if (key.equals("stream.skippath")) {
-            // Validate
-            File file = new File(value);
-            if (!file.exists() || file.isDirectory()) {
-                throw new IOException("Invalid value for stream.skippath:" + 
-                                      value); 
+            if (value != null) {
+                // Validate
+                File file = new File(value);
+                if (!file.exists() || file.isDirectory()) {
+                    throw new IOException("Invalid value for stream.skippath:" +
+                                          value);
+                }
+                mPigServer.addPathToSkip(value);
+            } else {
+                System.out.println(key + "=" + StringUtils.join(mPigServer.getPigContext().getPathsToSkip(), ","));
             }
-            mPigServer.addPathToSkip(value);
         }
         else if (key.equals("default_parallel")) {
-            // Validate
-            try {
-                mPigServer.setDefaultParallel(Integer.parseInt(value));
-            } catch (NumberFormatException e) {
-                throw new ParseException("Invalid value for default_parallel");
+            if (value != null) {
+                // Validate
+                try {
+                    mPigServer.setDefaultParallel(Integer.parseInt(value));
+                } catch (NumberFormatException e) {
+                    throw new ParseException("Invalid value for default_parallel");
+                }
+            } else {
+                System.out.println(key + "=" + mPigServer.getPigContext().getDefaultParallel());
             }
         }
         else
         {
-            //mPigServer.getPigContext().getProperties().setProperty(key, value);
-            // PIG-2508 properties need to be managed through JobConf
-            // since all other code depends on access to properties, 
-            // we need to re-populate from updated JobConf 
-            //java.util.HashSet<?> keysBefore = new java.util.HashSet<Object>(mPigServer.getPigContext().getProperties().keySet());        	
-            // set current properties on jobConf
-            Properties properties = mPigServer.getPigContext().getProperties();
-            Configuration jobConf = mPigServer.getPigContext().getExecutionEngine().getJobConf();
-            Enumeration<Object> propertiesIter = properties.keys();
-            while (propertiesIter.hasMoreElements()) {
-                String pkey = (String) propertiesIter.nextElement();
-                String val = properties.getProperty(pkey);
-                // We do not put user.name, See PIG-1419
-                if (!pkey.equals("user.name"))
-                   jobConf.set(pkey, val);
+            if (value != null) {
+                mPigServer.getPigContext().getExecutionEngine().setProperty(key, value);
+            } else {
+                if (mPigServer.getPigContext().getProperties().containsKey(key)) {
+                    System.out.println(key + "=" + mPigServer.getPigContext().getProperties().getProperty(key));
+                } else {
+                    System.out.println(key + " is not defined");
+                }
             }
-            // set new value, JobConf will handle deprecation etc.
-            jobConf.set(key, value);
-            // re-initialize to reflect updated JobConf
-            properties.clear();
-            Iterator<Map.Entry<String, String>> iter = jobConf.iterator();
-            while (iter.hasNext()) {
-                Map.Entry<String, String> entry = iter.next();
-                properties.put(entry.getKey(), entry.getValue());
-            } 
-            //keysBefore.removeAll(mPigServer.getPigContext().getProperties().keySet());
-            //log.info("PIG-2508: keys dropped from properties: " + keysBefore);
         }
     }
-    
+
     @Override
-    protected void processCat(String path) throws IOException
-    {
+    protected void processSet() throws IOException, ParseException {
+        filter.validate(PigCommandFilter.Command.SET);
+        Properties jobProps = mPigServer.getPigContext().getProperties();
+        Properties sysProps = System.getProperties();
+
+        List<String> jobPropsList = Lists.newArrayList();
+        List<String> sysPropsList = Lists.newArrayList();
+
+        for (Object key : jobProps.keySet()) {
+            String propStr = key + "=" + jobProps.getProperty((String) key);
+            if (sysProps.containsKey(key)) {
+                sysPropsList.add("system: " + propStr);
+            } else {
+                jobPropsList.add(propStr);
+            }
+        }
+        Collections.sort(jobPropsList);
+        Collections.sort(sysPropsList);
+        jobPropsList.addAll(sysPropsList);
+        for (String prop : jobPropsList) {
+            System.out.println(prop);
+        }
+    }
+
+    @Override
+    protected void processCat(String path) throws IOException {
+        filter.validate(PigCommandFilter.Command.CAT);
+        path = parameterSubstitutionInGrunt(path);
         if(mExplain == null) { // process only if not in "explain" mode
-            
+
             executeBatch();
 
             try {
                 byte buffer[] = new byte[65536];
                 ElementDescriptor dfsPath = mDfs.asElement(path);
                 int rc;
-                
+
                 if (!dfsPath.exists())
                     throw new IOException("Directory " + path + " does not exist.");
-        
+
                 if (mDfs.isContainer(path)) {
                     ContainerDescriptor dfsDir = (ContainerDescriptor) dfsPath;
                     Iterator<ElementDescriptor> paths = dfsDir.iterator();
-                    
+
                     while (paths.hasNext()) {
                         ElementDescriptor curElem = paths.next();
-                        
+
                         if (mDfs.isContainer(curElem.toString())) {
                             continue;
                         }
-                        
+
                         InputStream is = curElem.open();
                         while ((rc = is.read(buffer)) > 0) {
                             System.out.write(buffer, 0, rc);
                         }
-                        is.close();                
+                        is.close();
                     }
                 }
                 else {
@@ -641,7 +706,7 @@ public class GruntParser extends PigScriptParser {
                     while ((rc = is.read(buffer)) > 0) {
                         System.out.write(buffer, 0, rc);
                     }
-                    is.close();            
+                    is.close();
                 }
             }
             catch (DataStorageException e) {
@@ -653,10 +718,14 @@ public class GruntParser extends PigScriptParser {
     }
 
     @Override
-    protected void processCD(String path) throws IOException
-    {    
+    protected void processCD(String path) throws IOException {
+        filter.validate(PigCommandFilter.Command.CD);
+        path = parameterSubstitutionInGrunt(path);
         ContainerDescriptor container;
         if(mExplain == null) { // process only if not in "explain" mode
+
+            executeBatch();
+
             try {
                 if (path == null) {
                     container = mDfs.asContainer(((HDataStorage)mDfs).getHFS().getHomeDirectory().toString());
@@ -665,21 +734,21 @@ public class GruntParser extends PigScriptParser {
                 else
                 {
                     container = mDfs.asContainer(path);
-        
+
                     if (!container.exists()) {
                         throw new IOException("Directory " + path + " does not exist.");
                     }
-                    
+
                     if (!mDfs.isContainer(path)) {
                         throw new IOException(path + " is not a directory.");
                     }
-                    
+
                     mDfs.setActiveContainer(container);
                 }
             }
             catch (DataStorageException e) {
-                throw new IOException("Failed to change working directory to " + 
-                                      ((path == null) ? (((HDataStorage)mDfs).getHFS().getHomeDirectory().toString()) 
+                throw new IOException("Failed to change working directory to " +
+                                      ((path == null) ? (((HDataStorage)mDfs).getHFS().getHomeDirectory().toString())
                                                          : (path)), e);
             }
         } else {
@@ -688,10 +757,28 @@ public class GruntParser extends PigScriptParser {
     }
 
     @Override
-    protected void processDump(String alias) throws IOException
-    {
+    protected void processDump(String alias) throws IOException {
+        filter.validate(PigCommandFilter.Command.DUMP);
+        if (alias == null) {
+            if (mPigServer.isBatchOn()) {
+                mPigServer.parseAndBuild();
+            }
+            alias = mPigServer.getPigContext().getLastAlias();
+            // if dump is used immediately after launching grunt shell then
+            // last defined alias will be null
+            if (alias == null) {
+                throw new IOException(
+                        "No previously defined alias found. Please define an alias and use 'dump' operator.");
+            }
+        }
+
         if(mExplain == null) { // process only if not in "explain" mode
-        	executeBatch();
+
+            executeBatch();
+
+            if ("@".equals(alias)) {
+                alias = mPigServer.getLastRel();
+            }
             Iterator<Tuple> result = mPigServer.openIterator(alias);
             while (result.hasNext())
             {
@@ -702,10 +789,11 @@ public class GruntParser extends PigScriptParser {
             log.warn("'dump' statement is ignored while processing 'explain -script' or '-check'");
         }
     }
-    
+
     @Override
     protected void processIllustrate(String alias, String script, String target, List<String> params, List<String> files) throws IOException, ParseException
     {
+        filter.validate(PigCommandFilter.Command.ILLUSTRATE);
         if (mScriptIllustrate)
             throw new ParseException("'illustrate' statement can not appear in a script that is illustrated opon.");
 
@@ -733,7 +821,21 @@ public class GruntParser extends PigScriptParser {
                         throw e;
                     }
                 } else if (alias == null) {
-                    throw new ParseException("'illustrate' statement must be on an alias or on a script.");
+                    if (mPigServer.isBatchOn()) {
+                        mPigServer.parseAndBuild();
+                    }
+                    alias = mPigServer.getPigContext().getLastAlias();
+                    // if illustrate is used immediately after launching grunt shell then
+                    // last defined alias will be null
+                    if (alias == null) {
+                        throw new ParseException("'illustrate' statement must be on an alias or on a script.");
+                    }
+                }
+                if ("@".equals(alias)) {
+                    if (mPigServer.isBatchOn()) {
+                        mPigServer.parseAndBuild();
+                    }
+                    alias = mPigServer.getLastRel();
                 }
                 mPigServer.getExamples(alias);
             } finally {
@@ -747,45 +849,40 @@ public class GruntParser extends PigScriptParser {
     @Override
     protected void processKill(String jobid) throws IOException
     {
-        if (mJobConf != null) {
-            JobClient jc = new JobClient(mJobConf);
-            JobID id = JobID.forName(jobid);
-            RunningJob job = jc.getJob(id);
-            if (job == null)
-                System.out.println("Job with id " + jobid + " is not active");
-            else
-            {    
-                job.killJob();
-                log.info("Kill " + id + " submitted.");
-            }
-        }
+        filter.validate(PigCommandFilter.Command.KILL);
+        mPigServer.getPigContext().getExecutionEngine().killJob(jobid);
     }
-        
+
     @Override
-    protected void processLS(String path) throws IOException
-    {
-        if(mExplain == null) { // process only if not in "explain" mode
+    protected void processLS(String path) throws IOException {
+        filter.validate(PigCommandFilter.Command.LS);
+        path = parameterSubstitutionInGrunt(path);
+
+        if (mExplain == null) { // process only if not in "explain" mode
+
+            executeBatch();
+
             try {
                 ElementDescriptor pathDescriptor;
-                
+
                 if (path == null) {
                     pathDescriptor = mDfs.getActiveContainer();
                 }
                 else {
                     pathDescriptor = mDfs.asElement(path);
                 }
-    
+
                 if (!pathDescriptor.exists()) {
-                    throw new IOException("File or directory " + path + " does not exist.");                
+                    throw new IOException("File or directory " + path + " does not exist.");
                 }
-                
+
                 if (mDfs.isContainer(pathDescriptor.toString())) {
                     ContainerDescriptor container = (ContainerDescriptor) pathDescriptor;
                     Iterator<ElementDescriptor> elems = container.iterator();
-                    
+
                     while (elems.hasNext()) {
                         ElementDescriptor curElem = elems.next();
-                        
+
                         if (mDfs.isContainer(curElem.toString())) {
                                System.out.println(curElem.toString() + "\t<dir>");
                         } else {
@@ -814,53 +911,58 @@ public class GruntParser extends PigScriptParser {
 
         System.out.println(elem.toString() + "<r " + replication + ">\t" + len);
     }
-    
+
     @Override
-    protected void processPWD() throws IOException 
+    protected void processPWD() throws IOException
     {
+        filter.validate(PigCommandFilter.Command.PWD);
         if(mExplain == null) { // process only if not in "explain" mode
+
+            executeBatch();
+
             System.out.println(mDfs.getActiveContainer().toString());
         } else {
             log.warn("'pwd' statement is ignored while processing 'explain -script' or '-check'");
         }
     }
-    
+
     @Override
-	protected void processHistory(boolean withNumbers) {
-    	mPigServer.printHistory(withNumbers);
+    protected void processHistory(boolean withNumbers) {
+        mPigServer.printHistory(withNumbers);
     }
-    
+
     @Override
-    protected void printHelp() 
+    protected void printHelp()
     {
         System.out.println("Commands:");
         System.out.println("<pig latin statement>; - See the PigLatin manual for details: http://hadoop.apache.org/pig");
         System.out.println("File system commands:");
-	System.out.println("    fs <fs arguments> - Equivalent to Hadoop dfs command: http://hadoop.apache.org/common/docs/current/hdfs_shell.html");	
+        System.out.println("    fs <fs arguments> - Equivalent to Hadoop dfs command: http://hadoop.apache.org/common/docs/current/hdfs_shell.html");
         System.out.println("Diagnostic commands:");
         System.out.println("    describe <alias>[::<alias] - Show the schema for the alias. Inner aliases can be described as A::B.");
-        System.out.println("    explain [-script <pigscript>] [-out <path>] [-brief] [-dot] [-param <param_name>=<param_value>]");
+        System.out.println("    explain [-script <pigscript>] [-out <path>] [-brief] [-dot|-xml] [-param <param_name>=<param_value>]");
         System.out.println("        [-param_file <file_name>] [<alias>] - Show the execution plan to compute the alias or for entire script.");
         System.out.println("        -script - Explain the entire script.");
         System.out.println("        -out - Store the output into directory rather than print to stdout.");
         System.out.println("        -brief - Don't expand nested plans (presenting a smaller graph for overview).");
         System.out.println("        -dot - Generate the output in .dot format. Default is text format.");
+        System.out.println("        -xml - Generate the output in .xml format. Default is text format.");
         System.out.println("        -param <param_name - See parameter substitution for details.");
         System.out.println("        -param_file <file_name> - See parameter substitution for details.");
         System.out.println("        alias - Alias to explain.");
         System.out.println("    dump <alias> - Compute the alias and writes the results to stdout.");
         System.out.println("Utility Commands:");
-        System.out.println("    exec [-param <param_name>=param_value] [-param_file <file_name>] <script> - ");    
+        System.out.println("    exec [-param <param_name>=param_value] [-param_file <file_name>] <script> - ");
         System.out.println("        Execute the script with access to grunt environment including aliases.");
         System.out.println("        -param <param_name - See parameter substitution for details.");
         System.out.println("        -param_file <file_name> - See parameter substitution for details.");
         System.out.println("        script - Script to be executed.");
-        System.out.println("    run [-param <param_name>=param_value] [-param_file <file_name>] <script> - ");    
+        System.out.println("    run [-param <param_name>=param_value] [-param_file <file_name>] <script> - ");
         System.out.println("        Execute the script with access to grunt environment. ");
         System.out.println("        -param <param_name - See parameter substitution for details.");
         System.out.println("        -param_file <file_name> - See parameter substitution for details.");
         System.out.println("        script - Script to be executed.");
-        System.out.println("    sh  <shell command> - Invoke a shell command."); 
+        System.out.println("    sh  <shell command> - Invoke a shell command.");
         System.out.println("    kill <job_id> - Kill the hadoop job specified by the hadoop job id.");
         System.out.println("    set <key> <value> - Provide execution parameters to Pig. Keys and values are case sensitive.");
         System.out.println("        The following keys are supported: ");
@@ -879,18 +981,21 @@ public class GruntParser extends PigScriptParser {
     @Override
     protected void processMove(String src, String dst) throws IOException
     {
+        filter.validate(PigCommandFilter.Command.MV);
+        src = parameterSubstitutionInGrunt(src);
+        dst = parameterSubstitutionInGrunt(dst);
         if(mExplain == null) { // process only if not in "explain" mode
 
             executeBatch();
-        
+
             try {
                 ElementDescriptor srcPath = mDfs.asElement(src);
                 ElementDescriptor dstPath = mDfs.asElement(dst);
-                
+
                 if (!srcPath.exists()) {
-                    throw new IOException("File or directory " + src + " does not exist.");                
+                    throw new IOException("File or directory " + src + " does not exist.");
                 }
-                
+
                 srcPath.rename(dstPath);
             }
             catch (DataStorageException e) {
@@ -900,18 +1005,21 @@ public class GruntParser extends PigScriptParser {
             log.warn("'mv' statement is ignored while processing 'explain -script' or '-check'");
         }
     }
-    
+
     @Override
     protected void processCopy(String src, String dst) throws IOException
     {
+        filter.validate(PigCommandFilter.Command.CP);
+        src = parameterSubstitutionInGrunt(src);
+        dst = parameterSubstitutionInGrunt(dst);
         if(mExplain == null) { // process only if not in "explain" mode
 
             executeBatch();
-        
+
             try {
                 ElementDescriptor srcPath = mDfs.asElement(src);
                 ElementDescriptor dstPath = mDfs.asElement(dst);
-                
+
                 srcPath.copy(dstPath, mConf, false);
             }
             catch (DataStorageException e) {
@@ -921,18 +1029,21 @@ public class GruntParser extends PigScriptParser {
             log.warn("'cp' statement is ignored while processing 'explain -script' or '-check'");
         }
     }
-    
+
     @Override
     protected void processCopyToLocal(String src, String dst) throws IOException
     {
+        filter.validate(PigCommandFilter.Command.COPYTOLOCAL);
+        src = parameterSubstitutionInGrunt(src);
+        dst = parameterSubstitutionInGrunt(dst);
         if(mExplain == null) { // process only if not in "explain" mode
-            
+
             executeBatch();
-        
+
             try {
                 ElementDescriptor srcPath = mDfs.asElement(src);
                 ElementDescriptor dstPath = mLfs.asElement(dst);
-                
+
                 srcPath.copy(dstPath, false);
             }
             catch (DataStorageException e) {
@@ -946,14 +1057,17 @@ public class GruntParser extends PigScriptParser {
     @Override
     protected void processCopyFromLocal(String src, String dst) throws IOException
     {
+        filter.validate(PigCommandFilter.Command.COPYFROMLOCAL);
+        src = parameterSubstitutionInGrunt(src);
+        dst = parameterSubstitutionInGrunt(dst);
         if(mExplain == null) { // process only if not in "explain" mode
-            
+
             executeBatch();
-        
+
             try {
                 ElementDescriptor srcPath = mLfs.asElement(src);
                 ElementDescriptor dstPath = mDfs.asElement(dst);
-                
+
                 srcPath.copy(dstPath, false);
             }
             catch (DataStorageException e) {
@@ -963,50 +1077,80 @@ public class GruntParser extends PigScriptParser {
             log.warn("'copyFromLocal' statement is ignored while processing 'explain -script' or '-check'");
         }
     }
-    
+
     @Override
     protected void processMkdir(String dir) throws IOException
     {
+        filter.validate(PigCommandFilter.Command.MKDIR);
+        dir = parameterSubstitutionInGrunt(dir);
         if(mExplain == null) { // process only if not in "explain" mode
+
+            executeBatch();
+
             ContainerDescriptor dirDescriptor = mDfs.asContainer(dir);
             dirDescriptor.create();
         } else {
             log.warn("'mkdir' statement is ignored while processing 'explain -script' or '-check'");
         }
     }
-    
+
     @Override
     protected void processPig(String cmd) throws IOException
     {
         int start = 1;
+        cmd = parameterSubstitutionInGrunt(cmd);
         if (!mInteractive) {
             start = getLineNumber();
         }
-        
+
         if (cmd.charAt(cmd.length() - 1) != ';') {
             mPigServer.registerQuery(cmd + ";", start);
         }
-        else { 
+        else {
             mPigServer.registerQuery(cmd, start);
         }
     }
 
     @Override
-    protected void processRemove(String path, String options ) throws IOException
-    {
-        if(mExplain == null) { // process only if not in "explain" mode
+    protected void processRemove(String path, String options) throws IOException {
+        filter.validate(PigCommandFilter.Command.RM);
+        filter.validate(PigCommandFilter.Command.RMF);
+        path = parameterSubstitutionInGrunt(path);
+        int MAX_MS_TO_WAIT_FOR_FILE_DELETION = 10 * 60 * 1000;
+        int MS_TO_SLEEP_WHILE_WAITING_FOR_FILE_DELETION = 250;
 
-            ElementDescriptor dfsPath = mDfs.asElement(path);    
+        if(mExplain == null) { // process only if not in "explain" mode
+            Path filePath = new Path(path);
+            ElementDescriptor dfsPath = null;
+            FileSystem fs = filePath.getFileSystem(ConfigurationUtil.toConfiguration(mConf));
+
             executeBatch();
-        
-            if (!dfsPath.exists()) {
+            if (!fs.exists(filePath)) {
                 if (options == null || !options.equalsIgnoreCase("force")) {
-                    throw new IOException("File or directory " + path + " does not exist."); 
+                    throw new IOException("File or directory " + path + " does not exist.");
                 }
             }
             else {
-                
-                dfsPath.delete();
+                boolean deleteSuccess = fs.delete(filePath, true);
+                if (!deleteSuccess) {
+                    log.warn("Unable to delete " + path);
+                    return;
+                }
+                long startTime = System.currentTimeMillis();
+                long duration = 0;
+                while(fs.exists(filePath)) {
+                    duration = System.currentTimeMillis() - startTime;
+                    if (duration > MAX_MS_TO_WAIT_FOR_FILE_DELETION) {
+                        throw new IOException("Timed out waiting to delete file: " + dfsPath);
+                    } else {
+                        try {
+                            Thread.sleep(MS_TO_SLEEP_WHILE_WAITING_FOR_FILE_DELETION);
+                        } catch (InterruptedException e) {
+                            throw new IOException("Error waiting for file deletion", e);
+                        }
+                    }
+                }
+                log.info("Waited " + duration + "ms to delete file");
             }
         } else {
             log.warn("'rm/rmf' statement is ignored while processing 'explain -script' or '-check'");
@@ -1014,19 +1158,23 @@ public class GruntParser extends PigScriptParser {
     }
 
     @Override
-    protected void processFsCommand(String[] cmdTokens) throws IOException{
+    protected void processFsCommand(String[] cmdTokens) throws IOException {
+        filter.validate(PigCommandFilter.Command.FS);
+        for (int i = 0 ; i < cmdTokens.length ; i++) {
+            cmdTokens[i] = parameterSubstitutionInGrunt(cmdTokens[i]);
+        }
         if(mExplain == null) { // process only if not in "explain" mode
-            
+
             executeBatch();
-            
+
             int retCode = -1;
-            
+
             try {
                 retCode = shell.run(cmdTokens);
             } catch (Exception e) {
                 throw new IOException(e);
             }
-            
+
             if (retCode != 0 && !mInteractive) {
                 String s = LoadFunc.join(
                         (AbstractList<String>) Arrays.asList(cmdTokens), " ");
@@ -1037,20 +1185,51 @@ public class GruntParser extends PigScriptParser {
             log.warn("'fs' statement is ignored while processing 'explain -script' or '-check'");
         }
     }
-    
+
     @Override
-    protected void processShCommand(String[] cmdTokens) throws IOException{
+    protected void processShCommand(String[] cmdTokens) throws IOException {
+        filter.validate(PigCommandFilter.Command.SH);
+        for (int i = 0 ; i < cmdTokens.length ; i++) {
+            cmdTokens[i] = parameterSubstitutionInGrunt(cmdTokens[i]);
+        }
         if(mExplain == null) { // process only if not in "explain" mode
             try {
                 executeBatch();
-                
-                Process executor = Runtime.getRuntime().exec(cmdTokens);
+
+                // For sh command, create a process with the following syntax
+                // <shell exe> <invoke arg> <command-as-string>
+                String  shellName = "sh";
+                String  shellInvokeArg = "-c";
+
+                // Insert cmd /C in front of the array list to execute to
+                // support built-in shell commands like mkdir on Windows
+                if (System.getProperty("os.name").startsWith("Windows")) {
+                    shellName      = "cmd";
+                    shellInvokeArg = "/C";
+                }
+
+                List<String> stringList = new ArrayList<String>();
+                stringList.add(shellName);
+                stringList.add(shellInvokeArg);
+
+                StringBuffer commandString = new StringBuffer();
+                for (String currToken : cmdTokens) {
+                    commandString.append(" ");
+                    commandString.append(currToken);
+                }
+
+                stringList.add(commandString.toString());
+
+                String[] newCmdTokens = stringList.toArray(new String[0]);
+
+                Process executor = Runtime.getRuntime().exec(newCmdTokens);
+
                 StreamPrinter outPrinter = new StreamPrinter(executor.getInputStream(), null, System.out);
                 StreamPrinter errPrinter = new StreamPrinter(executor.getErrorStream(), null, System.err);
-    
+
                 outPrinter.start();
                 errPrinter.start();
-    
+
                 int ret = executor.waitFor();
                 outPrinter.join();
                 errPrinter.join();
@@ -1067,13 +1246,25 @@ public class GruntParser extends PigScriptParser {
             log.warn("'sh' statement is ignored while processing 'explain -script' or '-check'");
         }
     }
-    
+
     public static int runSQLCommand(String hcatBin, String cmd, boolean mInteractive) throws IOException {
-        String[] tokens = new String[3];
-        tokens[0] = hcatBin;
-        tokens[1] = "-e";
-        tokens[2] = cmd.substring(cmd.indexOf("sql")).substring(4);
-        
+        List<String> tokensList = new ArrayList<String>();
+		if (hcatBin.endsWith(".py")) {
+			tokensList.add("python");
+			tokensList.add(hcatBin);
+		} else {
+			tokensList.add(hcatBin);
+		}
+		cmd = cmd.trim();
+		if (!cmd.substring(0, 3).toLowerCase().equals("sql")) {
+		    // Should never happen
+		    throw new IOException("sql command not start with sql keyword");
+		}
+		cmd = cmd.substring(3).trim();
+		tokensList.add("-e");
+		tokensList.add(cmd.replaceAll("\n", " "));
+		String[] tokens = tokensList.toArray(new String[]{});
+
         // create new environment = environment - HADOOP_CLASSPATH
         // This is because of antlr version conflict between Pig and Hive
         Map<String, String> envs = System.getenv();
@@ -1083,19 +1274,19 @@ public class GruntParser extends PigScriptParser {
                 envSet.add(entry.getKey() + "=" + entry.getValue());
             }
         }
-        
-        log.info("Going to run hcat command: " + tokens[2]);
+
+        log.info("Going to run hcat command: " + tokens[tokens.length-1]);
         Process executor = Runtime.getRuntime().exec(tokens, envSet.toArray(new String[0]));
         StreamPrinter outPrinter = new StreamPrinter(executor.getInputStream(), null, System.out);
         StreamPrinter errPrinter = new StreamPrinter(executor.getErrorStream(), null, System.err);
 
         outPrinter.start();
         errPrinter.start();
-        
+
         int ret;
         try {
             ret = executor.waitFor();
-            
+
             outPrinter.join();
             errPrinter.join();
             if (ret != 0 && !mInteractive) {
@@ -1107,18 +1298,19 @@ public class GruntParser extends PigScriptParser {
         }
         return 0;
     }
-    
+
     @Override
     protected void processSQLCommand(String cmd) throws IOException{
+        cmd = parameterSubstitutionInGrunt(cmd);
         if(mExplain == null) { // process only if not in "explain" mode
             if (!mPigServer.getPigContext().getProperties().get("pig.sql.type").equals("hcat")) {
                 throw new IOException("sql command only support hcat currently");
             }
-            if (mPigServer.getPigContext().getProperties().get("hcat.bin")==null) {
+            String hcatBin = (String)mPigServer.getPigContext().getProperties().get("hcat.bin");
+            if (hcatBin == null) {
                 throw new IOException("hcat.bin is not defined. Define it to be your hcat script (Usually $HCAT_HOME/bin/hcat");
             }
-            String hcatBin = (String)mPigServer.getPigContext().getProperties().get("hcat.bin");
-            if (new File("hcat.bin").exists()) {
+            if (!(new File(hcatBin).exists())) {
                 throw new IOException(hcatBin + " does not exist. Please check your 'hcat.bin' setting in pig.properties.");
             }
             executeBatch();
@@ -1127,44 +1319,60 @@ public class GruntParser extends PigScriptParser {
             log.warn("'sql' statement is ignored while processing 'explain -script' or '-check'");
         }
     }
-    
+
+    @Override
+    protected void processDefault(String key, String value) throws IOException {
+        parameterSubstitutionInGrunt("%default " + key + " " + value);
+    }
+
+    @Override
+    protected void processDeclare(String key, String value) throws IOException {
+        parameterSubstitutionInGrunt("%declare " + key + " " + value);
+    }
+
+    private String parameterSubstitutionInGrunt(String input) throws IOException {
+        if (mInteractive && input != null) {
+            return mPigServer.getPigContext().doParamSubstitution(new BufferedReader(new StringReader(input))).trim();
+        }
+        return input;
+    }
     /**
      * StreamPrinter.
      *
      */
     public static class StreamPrinter extends Thread {
-    	InputStream is;
-	    String type;
-	    PrintStream os;
+        InputStream is;
+        String type;
+        PrintStream os;
 
-	    public StreamPrinter(InputStream is, String type, PrintStream os) {
-	    	this.is = is;
-	    	this.type = type;
-	    	this.os = os;
-	    }
+        public StreamPrinter(InputStream is, String type, PrintStream os) {
+            this.is = is;
+            this.type = type;
+            this.os = os;
+        }
 
-	    @Override
-	    public void run() {
-	        try {
-	        	InputStreamReader isr = new InputStreamReader(is);
-	        	BufferedReader br = new BufferedReader(isr);
-	        	String line = null;
-	        	if (type != null) {
-		            while ((line = br.readLine()) != null) {
-		            	os.println(type + ">" + line);
-		            }
-	        	} else {
-	        		while ((line = br.readLine()) != null) {
-	        			os.println(line);
-	        		}
-	        	}
-	        } catch (IOException ioe) {
-	        	ioe.printStackTrace();
-	        }
-	    }
+        @Override
+        public void run() {
+            try {
+                InputStreamReader isr = new InputStreamReader(is);
+                BufferedReader br = new BufferedReader(isr);
+                String line = null;
+                if (type != null) {
+                    while ((line = br.readLine()) != null) {
+                        os.println(type + ">" + line);
+                    }
+                } else {
+                    while ((line = br.readLine()) != null) {
+                        os.println(line);
+                    }
+                }
+            } catch (IOException ioe) {
+                ioe.printStackTrace();
+            }
+        }
     }
-    
-    private static class ExplainState {
+
+    protected static class ExplainState {
         public long mTime;
         public int mCount;
         public String mAlias;
@@ -1185,13 +1393,12 @@ public class GruntParser extends PigScriptParser {
             mFormat = format;
             mLast = false;
         }
-    }        
+    }
 
     private PigServer mPigServer;
     private DataStorage mDfs;
     private DataStorage mLfs;
     private Properties mConf;
-    private JobConf mJobConf;
     private boolean mDone;
     private boolean mLoadOnly;
     private ExplainState mExplain;
@@ -1199,5 +1406,10 @@ public class GruntParser extends PigScriptParser {
     private int mNumSucceededJobs;
     private FsShell shell;
     private boolean mScriptIllustrate;
-    
+
+    //For Testing Only
+    protected void setExplainState(ExplainState explainState) {
+        this.mExplain = explainState;
+    }
+
 }

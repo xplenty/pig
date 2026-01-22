@@ -51,7 +51,7 @@ public abstract class DefaultAbstractBag implements DataBag {
     // If we grow past 100K, may be worthwhile to register.
     private static final int SPILL_REGISTER_THRESHOLD = 100 * 1024;
 
-    private static PigLogger pigLogger = PhysicalOperator.getPigLogger();
+    private static PigLogger pigLogger;
 
     private static InterSedes sedes = InterSedesFactory.getInterSedesInstance();
     // Container that holds the tuples. Actual object instantiated by
@@ -65,9 +65,13 @@ public abstract class DefaultAbstractBag implements DataBag {
     // to run through the disk when people ask.
     protected long mSize = 0;
 
-    protected int mLastContentsSize = -1;
+    // Number of tuples to sample per bag, to get an estimate of tuple size
+    private static final int SPILL_SAMPLE_SIZE = 100;
+    private static final int SPILL_SAMPLE_FREQUENCY = 10;
 
-    protected long mMemSize = 0;
+    long aggSampleTupleSize = 0;
+
+    int sampled = 0;
 
     private boolean spillableRegistered = false;
 
@@ -77,6 +81,28 @@ public abstract class DefaultAbstractBag implements DataBag {
     @Override
     public long size() {
         return mSize;
+    }
+
+
+    /**
+     * Sample every SPILL_SAMPLE_FREQUENCYth tuple
+     * until we reach a max of SPILL_SAMPLE_SIZE
+     * to get an estimate of the tuple sizes.
+     */
+    protected void sampleContents() {
+        synchronized (mContents) {
+            Iterator<Tuple> iter = mContents.iterator();
+            for (int i = 0; i < sampled * SPILL_SAMPLE_FREQUENCY && iter.hasNext(); i++) {
+                iter.next();
+            }
+            for (int i = sampled; iter.hasNext() && sampled < SPILL_SAMPLE_SIZE; i++) {
+                Tuple t = iter.next();
+                if (t != null && i % SPILL_SAMPLE_FREQUENCY == 0) {
+                    aggSampleTupleSize += t.getMemorySize();
+                    sampled += 1;
+                }
+            }
+        }
     }
 
     /**
@@ -97,9 +123,12 @@ public abstract class DefaultAbstractBag implements DataBag {
      * should call this method after every time they add an element.
      */
     protected void markSpillableIfNecessary() {
-        if (!spillableRegistered && getMemorySize() >= SPILL_REGISTER_THRESHOLD) {
-            SpillableMemoryManager.getInstance().registerSpillable(this);
-            spillableRegistered = true;
+        if (!spillableRegistered) {
+            long estimate = getMemorySize();
+            if ( estimate >= SPILL_REGISTER_THRESHOLD) {
+                SpillableMemoryManager.getInstance().registerSpillable(this);
+                spillableRegistered = true;
+            }
         }
     }
 
@@ -130,76 +159,74 @@ public abstract class DefaultAbstractBag implements DataBag {
      */
     @Override
     public long getMemorySize() {
-        int j;
         int numInMem = 0;
-        long used = 0;
 
         synchronized (mContents) {
-            if (mLastContentsSize == mContents.size()) return mMemSize;
-
-            // I can't afford to talk through all the tuples every time the
-            // memory manager wants to know if it's time to dump.  Just sample
-            // the first 100 and see what we get.  This may not be 100%
-            // accurate, but it's just an estimate anyway.
             numInMem = mContents.size();
-            // Measure only what's in memory, not what's on disk.
-            Iterator<Tuple> i = mContents.iterator();
-            for (j = 0; i.hasNext() && j < 100; j++) { 
-                used += i.next().getMemorySize();
+
+            // If we've already gotten the estimate
+            // and the number of tuples hasn't changed, or was above
+            // the sample size and is still above the sample size, we can
+            // produce a new estimate without sampling the tuples again.
+            if (sampled != 0 && (sampled == numInMem ||
+                    sampled > SPILL_SAMPLE_SIZE && numInMem > SPILL_SAMPLE_SIZE)) {
+                return totalSizeFromAvgTupleSize(aggSampleTupleSize/sampled, numInMem);
             }
-            mLastContentsSize = numInMem;
-        }
+            sampleContents();
+            int avgTupleSize;
+            if (sampled != 0) {
+                avgTupleSize = (int) (aggSampleTupleSize / sampled);
+            } else {
+                avgTupleSize = 0;
+            }
 
-        if (numInMem > 100) {
-            // Estimate the per tuple size.  Do it in integer arithmetic
-            // (even though it will be slightly less accurate) for speed.
-            used /= j;
-            used *= numInMem;
+           return totalSizeFromAvgTupleSize(avgTupleSize, numInMem);
         }
+    }
 
-        // add up the overhead for this object and other object variables
-        int bag_fix_size = 8 /* object header */ 
-        + 4 + 8 + 8 /* mLastContentsSize + mMemSize + mSize */
-        + 8 + 8 /* mContents ref  + mSpillFiles ref*/
-        + 4 /* +4 to round it to eight*/
-        + 36 /* mContents fixed */
-        ;
+    private long totalSizeFromAvgTupleSize(long avgTupleSize, int numInMem) {
+        long used = avgTupleSize * numInMem;
+
         long mFields_size =   roundToEight(4 + numInMem*4); /* mContents fixed + per entry */
         // in java hotspot 32bit vm, there seems to be a minimum bag size of 188 bytes
         // some of the extra bytes is probably from a minimum size of this array list
-        mFields_size = Math.max(40, mFields_size); 
-        
-        used += bag_fix_size + mFields_size;
+        mFields_size = Math.max(40, mFields_size);
+
+        // the fixed overhead for this object and other object variables = 84 bytes
+        // 8 - object header
+        // 4 + 8 + 8 - sampled + aggSampleTupleSize + mSize
+        // 8 + 8 - mContents ref  + mSpillFiles ref
+        // 4 - spillableRegistered +4 instead of 1 to round it to eight
+        // 36 - mContents fixed
+        used += 84 + mFields_size;
 
         // add up overhead for mSpillFiles ArrayList, Object[] inside ArrayList,
         // object variable inside ArrayList and references to spill files
         if (mSpillFiles != null) {
             used += roundToEight(36 /* mSpillFiles fixed overhead*/ + mSpillFiles.size()*4);
-            
+
             if(mSpillFiles.size() > 0){
                 //a rough estimate of memory used by each file entry
                 // the auto generated files are likely to have same length
                 long approx_per_entry_size =
                     roundToEight(mSpillFiles.get(0).toString().length() * 2 + 38);
-                
+
                 used += mSpillFiles.size() * approx_per_entry_size;
             }
         }
-        
-        mMemSize = used;
         return used;
+
     }
 
-    
     /**
      * Memory size of objects are rounded to multiple of 8 bytes
      * @param i
-     * @return i rounded to a equal of higher multiple of 8 
+     * @return i rounded to a equal of higher multiple of 8
      */
     private long roundToEight(long i) {
         return 8 * ((i+7)/8); // integer division rounds the result down
     }
-    
+
     /**
      * Clear out the contents of the bag, both on disk and in memory.
      * Any attempts to read after this is called will produce undefined
@@ -213,11 +240,14 @@ public abstract class DefaultAbstractBag implements DataBag {
                 for (int i = 0; i < mSpillFiles.size(); i++) {
                     boolean res = mSpillFiles.get(i).delete();
                     if (!res)
-                        warn ("DefaultAbstractBag.clear: failed to delete " + mSpillFiles.get(i), PigWarning.DELETE_FAILED, null);  
+                        warn ("DefaultAbstractBag.clear: failed to delete " + mSpillFiles.get(i), PigWarning.DELETE_FAILED, null);
                 }
                 mSpillFiles.clear();
             }
             mSize = 0;
+            aggSampleTupleSize = 0;
+            sampled = 0;
+            // not changing spillableRegistered -- clear doesn't change that.
         }
     }
 
@@ -245,14 +275,14 @@ public abstract class DefaultAbstractBag implements DataBag {
             DataBag thisClone;
             DataBag otherClone;
             BagFactory factory = BagFactory.getInstance();
-            
+
             if (this.isSorted() || this.isDistinct()) {
                 thisClone = this;
             } else {
                 thisClone = factory.newSortedBag(null);
                 Iterator<Tuple> i = iterator();
                 while (i.hasNext()) thisClone.add(i.next());
-                
+
             }
             if (((DataBag) other).isSorted() || ((DataBag)other).isDistinct()) {
                 otherClone = bOther;
@@ -266,11 +296,11 @@ public abstract class DefaultAbstractBag implements DataBag {
             while (thisIt.hasNext() && otherIt.hasNext()) {
                 Tuple thisT = thisIt.next();
                 Tuple otherT = otherIt.next();
-                
+
                 int c = thisT.compareTo(otherT);
                 if (c != 0) return c;
             }
-            
+
             return 0;   // if we got this far, they must be equal
         } else {
             return DataType.compare(this, other);
@@ -291,7 +321,7 @@ public abstract class DefaultAbstractBag implements DataBag {
     public void write(DataOutput out) throws IOException {
         sedes.writeDatum(out, this);
     }
- 
+
     /**
      * Read a bag from disk.
      * @param in DataInput to read data from.
@@ -300,7 +330,7 @@ public abstract class DefaultAbstractBag implements DataBag {
     @Override
     public void readFields(DataInput in) throws IOException {
         long size = in.readLong();
-        
+
         for (long i = 0; i < size; i++) {
             try {
                 Object o = sedes.readDatum(in);
@@ -349,9 +379,9 @@ public abstract class DefaultAbstractBag implements DataBag {
             mSpillFiles = new FileList(1);
         }
 
-        String tmpDirName= System.getProperties().getProperty("java.io.tmpdir") ;                
+        String tmpDirName= System.getProperties().getProperty("java.io.tmpdir") ;
         File tmpDir = new File(tmpDirName);
-  
+
         // if the directory does not exist, create it.
         if (!tmpDir.exists()){
             log.info("Temporary directory doesn't exists. Trying to create: " + tmpDir.getAbsolutePath());
@@ -361,21 +391,21 @@ public abstract class DefaultAbstractBag implements DataBag {
           } else {
               // If execution reaches here, it means that we needed to create the directory but
               // were not successful in doing so.
-              // 
-              // If this directory is created recently then we can simply 
+              //
+              // If this directory is created recently then we can simply
               // skip creation. This is to address a rare issue occuring in a cluster despite the
-              // the fact that spill() makes call to getSpillFile() in a synchronized 
-              // block. 
+              // the fact that spill() makes call to getSpillFile() in a synchronized
+              // block.
               if (tmpDir.exists()) {
                 log.info("Temporary directory already exists: " + tmpDir.getAbsolutePath());
               } else {
                 int errCode = 2111;
                 String msg = "Unable to create temporary directory: " + tmpDir.getAbsolutePath();
-                throw new ExecException(msg, errCode, PigException.BUG);                  
+                throw new ExecException(msg, errCode, PigException.BUG);
               }
           }
         }
-        
+
         File f = File.createTempFile("pigbag", null);
         f.deleteOnExit();
         mSpillFiles.add(f);
@@ -387,21 +417,21 @@ public abstract class DefaultAbstractBag implements DataBag {
      * Report progress to HDFS.
      */
     protected void reportProgress() {
-        if (PhysicalOperator.reporter != null) {
-            PhysicalOperator.reporter.progress();
+        if (PhysicalOperator.getReporter() != null) {
+            PhysicalOperator.getReporter().progress();
         }
     }
 
     @SuppressWarnings("rawtypes")
-    protected void warn(String msg, Enum warningEnum, Exception e) {
-    	pigLogger = PhysicalOperator.getPigLogger();
-    	if(pigLogger != null) {
-    		pigLogger.warn(this, msg, warningEnum);
-    	} else {
-    		log.warn(msg, e);
-    	}    	
+    protected void warn(String msg, Enum warningEnum, Throwable e) {
+        pigLogger = PhysicalOperator.getPigLogger();
+        if(pigLogger != null) {
+            pigLogger.warn(this, msg, warningEnum);
+        } else {
+            log.warn(msg, e);
+        }
     }
-    
+
     @SuppressWarnings("rawtypes")
     protected void incSpillCount(Enum counter) {
         incSpillCount(counter, 1);
@@ -413,20 +443,20 @@ public abstract class DefaultAbstractBag implements DataBag {
         if (reporter != null && reporter.getCounter(counter)!=null) {
             reporter.getCounter(counter).increment(numRecsSpilled);
         } else {
-            PigHadoopLogger.getInstance().warn(this, "Spill counter incremented", counter);
+            PigHadoopLogger.getInstance().warn(mContents, "Spill counter incremented", counter);
         }
     }
-    
+
     public static abstract class BagDelimiterTuple extends DefaultTuple{}
     public static class StartBag extends BagDelimiterTuple{
         private static final long serialVersionUID = 1L;}
-    
+
     public static class EndBag extends BagDelimiterTuple{
         private static final long serialVersionUID = 1L;}
-    
+
     public static final Tuple startBag = new StartBag();
     public static final Tuple endBag = new EndBag();
 
     protected static final int MAX_SPILL_FILES = 100;
- 
+
 }

@@ -20,9 +20,7 @@ package org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOp
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.util.List;
-import java.util.Map;
 
-import org.joda.time.DateTime;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -32,15 +30,12 @@ import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
-import org.apache.pig.data.DataBag;
-import org.apache.pig.data.DataByteArray;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.PigContext;
-import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.NodeIdGenerator;
+import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
-import org.apache.pig.impl.util.IdentityHashSet;
 
 //We intentionally skip type checking in backend for performance reasons
 @SuppressWarnings("unchecked")
@@ -48,13 +43,13 @@ public class POUserComparisonFunc extends ExpressionOperator {
     private final static Log log = LogFactory.getLog(POUserComparisonFunc.class);
 
     /**
-     * 
+     *
      */
     private static final long serialVersionUID = 1L;
     FuncSpec funcSpec;
     Tuple t1, t2;
     transient ComparisonFunc func;
-    
+
     public POUserComparisonFunc(OperatorKey k, int rp, List inp, FuncSpec funcSpec, ComparisonFunc func) {
         super(k, rp);
         super.setInputs(inp);
@@ -63,22 +58,22 @@ public class POUserComparisonFunc extends ExpressionOperator {
         if(func==null)
             instantiateFunc();
     }
-    
+
     public POUserComparisonFunc(OperatorKey k, int rp, List inp, FuncSpec funcSpec) {
         this(k, rp, inp, funcSpec, null);
     }
-    
+
     private void instantiateFunc() {
         this.func = (ComparisonFunc) PigContext.instantiateFuncFromSpec(this.funcSpec);
-        this.func.setReporter(reporter);
+        this.func.setReporter(getReporter());
     }
-    
+
     public ComparisonFunc getComparator() {
         return func;
     }
-    
+
     @Override
-    public Result getNext(Integer i) throws ExecException {
+    public Result getNextInteger() throws ExecException {
         Result result = new Result();
 
         result.result = func.compare(t1, t2);
@@ -88,65 +83,75 @@ public class POUserComparisonFunc extends ExpressionOperator {
         // inputAttached flag to false
         inputAttached = false;
         if (result.returnStatus == POStatus.STATUS_OK)
-            illustratorMarkup(null, result.result, 
+            illustratorMarkup(null, result.result,
                 (Integer) result.result == 0 ? 0 : (Integer) result.result > 0 ? 1 : 2);
         return result;
 
     }
-    
+
     private Result getNext() {
         Result res = null;
         log.error("getNext being called with non-integer");
         return res;
     }
-    
+
     @Override
-    public Result getNext(Boolean b) throws ExecException {
+    public Result getNextBoolean() throws ExecException {
         return getNext();
     }
 
     @Override
-    public Result getNext(DataBag db) throws ExecException {
+    public Result getNextDataBag() throws ExecException {
         return getNext();
     }
 
     @Override
-    public Result getNext(DataByteArray ba) throws ExecException {
+    public Result getNextDataByteArray() throws ExecException {
         return getNext();
     }
 
     @Override
-    public Result getNext(Double d) throws ExecException {
+    public Result getNextDouble() throws ExecException {
         return getNext();
     }
 
     @Override
-    public Result getNext(Float f) throws ExecException {
+    public Result getNextFloat() throws ExecException {
         return getNext();
     }
 
     @Override
-    public Result getNext(Long l) throws ExecException {
+    public Result getNextLong() throws ExecException {
         return getNext();
     }
 
     @Override
-    public Result getNext(DateTime dt) throws ExecException {
+    public Result getNextDateTime() throws ExecException {
         return getNext();
     }
 
     @Override
-    public Result getNext(Map m) throws ExecException {
+    public Result getNextMap() throws ExecException {
         return getNext();
     }
 
     @Override
-    public Result getNext(String s) throws ExecException {
+    public Result getNextString() throws ExecException {
         return getNext();
     }
 
     @Override
-    public Result getNext(Tuple in) throws ExecException {
+    public Result getNextTuple() throws ExecException {
+        return getNext();
+    }
+
+    @Override
+    public Result getNextBigInteger() throws ExecException {
+        return getNext();
+    }
+
+    @Override
+    public Result getNextBigDecimal() throws ExecException {
         return getNext();
     }
 
@@ -156,7 +161,7 @@ public class POUserComparisonFunc extends ExpressionOperator {
         inputAttached = true;
 
     }
-    
+
     private void readObject(ObjectInputStream is) throws IOException, ClassNotFoundException{
         is.defaultReadObject();
         instantiateFunc();
@@ -176,7 +181,7 @@ public class POUserComparisonFunc extends ExpressionOperator {
     public boolean supportsMultipleInputs() {
         return false;
     }
-    
+
     public FuncSpec getFuncSpec() {
         return funcSpec;
     }
@@ -188,7 +193,7 @@ public class POUserComparisonFunc extends ExpressionOperator {
             cloneFs = funcSpec.clone();
         }
         POUserComparisonFunc clone =
-            new POUserComparisonFunc(new OperatorKey(mKey.scope, 
+            new POUserComparisonFunc(new OperatorKey(mKey.scope,
             NodeIdGenerator.getGenerator().getNextNodeId(mKey.scope)),
             requestedParallelism, null, cloneFs);
         clone.cloneHelper(this);

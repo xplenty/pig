@@ -17,14 +17,20 @@
  */
 package org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.math.RoundingMode;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.pig.PigWarning;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
 import org.apache.pig.data.DataType;
-import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.NodeIdGenerator;
+import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
 
 public class Divide extends BinaryExpressionOperator {
@@ -33,6 +39,8 @@ public class Divide extends BinaryExpressionOperator {
      *
      */
     private static final long serialVersionUID = 1L;
+    public static final short BIGDECIMAL_MINIMAL_SCALE = 6;
+    private static final Log LOG = LogFactory.getLog(Divide.class);
 
     public Divide(OperatorKey k) {
         super(k);
@@ -56,27 +64,40 @@ public class Divide extends BinaryExpressionOperator {
      * This method is used to invoke the appropriate method, as Java does not provide generic
      * dispatch for it.
      */
-    @SuppressWarnings("unchecked")
-    protected <T extends Number> T divide(T a, T b, byte dataType) throws ExecException {
+    protected Number divide(Number a, Number b, byte dataType) throws ExecException {
         switch (dataType) {
         case DataType.DOUBLE:
-            return (T) Double.valueOf((Double) a / (Double) b);
+            return Double.valueOf((Double) a / (Double) b);
         case DataType.INTEGER:
-            return (T) Integer.valueOf((Integer) a / (Integer) b);
+            return Integer.valueOf((Integer) a / (Integer) b);
         case DataType.LONG:
-            return (T) Long.valueOf((Long) a / (Long) b);
+            return Long.valueOf((Long) a / (Long) b);
         case DataType.FLOAT:
-            return (T) Float.valueOf((Float) a / (Float) b);
+            return Float.valueOf((Float) a / (Float) b);
+        case DataType.BIGINTEGER:
+            return ((BigInteger) a).divide((BigInteger) b);
+        case DataType.BIGDECIMAL:
+            return bigDecimalDivideWithScale(a, b);
         default:
             throw new ExecException("called on unsupported Number class " + DataType.findTypeName(dataType));
         }
+    }
+
+    private Number bigDecimalDivideWithScale(Number a, Number b) {
+        // Using same result scaling as Hive. See Arithmetic Rules:
+        //   https://cwiki.apache.org/confluence/download/attachments/27362075/Hive_Decimal_Precision_Scale_Support.pdf
+        int resultScale = Math.max(BIGDECIMAL_MINIMAL_SCALE, ((BigDecimal)a).scale() + ((BigDecimal)b).precision() + 1);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("For bigdecimal divide: using " + resultScale + " as result scale.");
+        }
+        return ((BigDecimal)a).divide((BigDecimal)b, resultScale, RoundingMode.HALF_UP);
     }
 
     /*
      * This method is used to invoke the appropriate method, as Java does not provide generic
      * dispatch for it.
      */
-    protected <T extends Number> boolean equalsZero(T a, byte dataType) throws ExecException {
+    protected boolean equalsZero(Number a, byte dataType) throws ExecException {
         switch (dataType) {
         case DataType.DOUBLE:
             return ((Double) a).equals(0.0);
@@ -86,14 +107,17 @@ public class Divide extends BinaryExpressionOperator {
             return ((Long) a).equals(0L);
         case DataType.FLOAT:
             return ((Float) a).equals(0.0f);
+        case DataType.BIGINTEGER:
+            return BigInteger.ZERO.equals((BigInteger) a);
+        case DataType.BIGDECIMAL:
+            return BigDecimal.ZERO.equals((BigDecimal) a);
         default:
             throw new ExecException("Called on unsupported Number class " + DataType.findTypeName(dataType));
         }
     }
 
-    @SuppressWarnings("unchecked")
-    protected <T extends Number> Result genericGetNext(T number, byte dataType) throws ExecException {
-        Result r = accumChild(null, number, dataType);
+    protected Result genericGetNext(byte dataType) throws ExecException {
+        Result r = accumChild(null, dataType);
         if (r != null) {
             return r;
         }
@@ -101,20 +125,19 @@ public class Divide extends BinaryExpressionOperator {
 
         byte status;
         Result res;
-        T left = null, right = null;
-        res = lhs.getNext(left, dataType);
+        res = lhs.getNext(dataType);
         status = res.returnStatus;
         if(status != POStatus.STATUS_OK || res.result == null) {
             return res;
         }
-        left = (T) res.result;
+        Number left = (Number) res.result;
 
-        res = rhs.getNext(right, dataType);
+        res = rhs.getNext(dataType);
         status = res.returnStatus;
         if(status != POStatus.STATUS_OK || res.result == null) {
             return res;
         }
-        right = (T) res.result;
+        Number right = (Number) res.result;
 
         if (equalsZero(right, dataType)) {
             if(pigLogger != null) {
@@ -128,24 +151,34 @@ public class Divide extends BinaryExpressionOperator {
     }
 
     @Override
-    public Result getNext(Double d) throws ExecException {
-        return genericGetNext(d, DataType.DOUBLE);
+    public Result getNextDouble() throws ExecException {
+        return genericGetNext(DataType.DOUBLE);
     }
 
     @Override
-    public Result getNext(Float f) throws ExecException {
-        return genericGetNext(f, DataType.FLOAT);
+    public Result getNextFloat() throws ExecException {
+        return genericGetNext(DataType.FLOAT);
 
     }
 
     @Override
-    public Result getNext(Integer i) throws ExecException {
-        return genericGetNext(i, DataType.INTEGER);
+    public Result getNextInteger() throws ExecException {
+        return genericGetNext(DataType.INTEGER);
     }
 
     @Override
-    public Result getNext(Long l) throws ExecException {
-        return genericGetNext(l, DataType.LONG);
+    public Result getNextLong() throws ExecException {
+        return genericGetNext(DataType.LONG);
+    }
+
+    @Override
+    public Result getNextBigInteger() throws ExecException {
+        return genericGetNext(DataType.BIGINTEGER);
+    }
+
+    @Override
+    public Result getNextBigDecimal() throws ExecException {
+        return genericGetNext(DataType.BIGDECIMAL);
     }
 
     @Override

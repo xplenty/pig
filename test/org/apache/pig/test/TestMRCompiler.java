@@ -17,10 +17,14 @@
  */
 package org.apache.pig.test;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
 import java.io.ByteArrayOutputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -35,6 +39,32 @@ import org.apache.pig.FuncSpec;
 import org.apache.pig.IndexableLoadFunc;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecException;
+import org.apache.pig.backend.hadoop.executionengine.fetch.FetchOptimizer;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.LimitAdjuster;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRCompiler;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRCompilerException;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MapReduceOper;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MergeJoinIndexer;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.plans.MROperPlan;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POProject;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POUserComparisonFunc;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PlanPrinter;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.PODistinct;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POFilter;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POForEach;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POGlobalRearrange;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POLimit;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POLoad;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POLocalRearrange;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POMergeJoin;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POPackage;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POSort;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POSortedDistinct;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POSplit;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POStore;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POUnion;
 import org.apache.pig.builtin.AVG;
 import org.apache.pig.builtin.COUNT;
 import org.apache.pig.builtin.PigStorage;
@@ -43,59 +73,78 @@ import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.impl.PigContext;
 import org.apache.pig.impl.builtin.GFCross;
-import org.apache.pig.impl.plan.OperatorKey;
-import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.LimitAdjuster;
-import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRCompiler;
-import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRCompilerException;
-import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MapReduceOper;
-import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.plans.MROperPlan;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PlanPrinter;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.*;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POProject;
-import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POUserComparisonFunc;
+import org.apache.pig.impl.io.FileLocalizer;
 import org.apache.pig.impl.plan.NodeIdGenerator;
+import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.util.Utils;
+import org.apache.pig.test.junit.OrderedJUnit4Runner;
+import org.apache.pig.test.junit.OrderedJUnit4Runner.TestOrder;
 import org.apache.pig.test.utils.GenPhyOp;
+import org.apache.pig.test.utils.TestHelper;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 
 /**
  * Test cases to test the MRCompiler.
  * VERY IMPORTANT NOTE: The tests here compare results with a
  * "golden" set of outputs. In each testcase here, the operators
- * generated have a random operator key which uses Java's Random 
+ * generated have a random operator key which uses Java's Random
  * class. So if there is a code change which changes the number of
  * operators created in a plan, then not only will the "golden" file
  * for that test case need to be changed, but also for the tests
  * that follow it since the operator keys that will be generated through
  * Random will be different.
  */
-public class TestMRCompiler extends junit.framework.TestCase {
-    static MiniCluster cluster = MiniCluster.buildCluster();
-    
+@RunWith(OrderedJUnit4Runner.class)
+@TestOrder({
+    "testRun1",
+    "testRun2",
+    "testSpl1",
+    "testSpl2",
+    "testSpl3",
+    "testSim1",
+    "testSim2",
+    "testSim3",
+    "testSim4",
+    "testSim5",
+    "testSim6",
+    "testSim7",
+    "testSim8",
+    "testSim9",
+    "testSortUDF1",
+    "testDistinct1",
+    "testLimit",
+    "testMRCompilerErr",
+    "testMRCompilerErr1",
+    "testNumReducersInLimit",
+    "testNumReducersInLimitWithParallel",
+    "testUDFInJoin",
+    "testMergeJoin",
+    "testMergeJoinWithIndexableLoadFunc",
+    "testCastFuncShipped",
+    "testLimitAdjusterFuncShipped",
+    "testSortedDistinctInForeach",
+    "testUDFInMergedCoGroup",
+    "testUDFInMergedJoin",
+    "testSchemaInStoreForDistinctLimit",
+    "testStorerLimit",
+    "testFetchOptimizerSideEffect"})
+public class TestMRCompiler {
+    static MiniCluster cluster;
+
     static PigContext pc;
     static PigContext pcMR;
 
     static final int MAX_SIZE = 100000;
 
     static final long SEED = 1013;
-    
-    static Random r;
-    static{
-        pc = new PigContext(ExecType.LOCAL, new Properties());
-        pcMR = new PigContext(ExecType.MAPREDUCE, cluster.getProperties());
-        try {
-            pc.connect();
-        } catch (ExecException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
-        r = new Random(SEED);
-    }
-    
+
+    static final Random r = new Random(SEED);
+
     PigServer pigServer = null;
     PigServer pigServerMR = null;
 
@@ -106,22 +155,35 @@ public class TestMRCompiler extends junit.framework.TestCase {
     // and are sure of
     private boolean generate = false;
 
-    @Override
+    @BeforeClass
+    public static void setUpBeforeClass() throws Exception {
+        cluster = MiniCluster.buildCluster();
+        pc = new PigContext(ExecType.LOCAL, new Properties());
+        pcMR = new PigContext(ExecType.MAPREDUCE, cluster.getProperties());
+        pc.connect();
+    }
+
+    @AfterClass
+    public static void tearDownAfterClass() throws Exception {
+        cluster.shutDown();
+    }
+
     @Before
     public void setUp() throws ExecException {
         GenPhyOp.setR(r);
-        
         GenPhyOp.setPc(pc);
-        NodeIdGenerator.getGenerator().reset("");
-        pigServer = new PigServer( pc );
-        pigServerMR = new PigServer( pcMR );
+        // Set random seed to generate deterministic temporary paths
+        FileLocalizer.setR(new Random(1331L));
+        NodeIdGenerator.reset("");
+        pigServer = new PigServer(pc);
+        pigServerMR = new PigServer(pcMR);
     }
 
-    @Override
     @After
-    public void tearDown() throws Exception {
+    public void shutdown() {
+        pigServer.shutdown();
     }
-    
+
     @Test
     public void testRun1() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
@@ -231,6 +293,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC10.gld");
     }
 
+    @Test
     public void testRun2() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
@@ -322,6 +385,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC11.gld");
     }
 
+    @Test
     public void testSpl1() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
@@ -361,6 +425,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
 
     }
 
+    @Test
     public void testSpl2() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
@@ -406,9 +471,9 @@ public class TestMRCompiler extends junit.framework.TestCase {
         POStore st = GenPhyOp.topStoreOp();
         php.addAsLeaf(st);
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC13.gld");
-
     }
 
+    @Test
     public void testSpl3() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
@@ -485,11 +550,11 @@ public class TestMRCompiler extends junit.framework.TestCase {
         POStore st = GenPhyOp.topStoreOp();
         php.addAsLeaf(st);
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC14.gld");
-
     }
 
      // Tests Single input case for both blocking and non-blocking
      // with both map and reduce phases
+    @Test
     public void testSim1() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
         POLoad ld = GenPhyOp.topLoadOp();
@@ -517,9 +582,9 @@ public class TestMRCompiler extends junit.framework.TestCase {
 
         php.connect(fl, st);
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC1.gld");
-
     }
 
+    @Test
     public void testSim2() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
@@ -537,9 +602,9 @@ public class TestMRCompiler extends junit.framework.TestCase {
 
         php.connect(un, st);
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC2.gld");
-
     }
 
+    @Test
     public void testSim3() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
@@ -564,7 +629,8 @@ public class TestMRCompiler extends junit.framework.TestCase {
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC3.gld");
     }
 
-    public void intTestSim4() throws Exception {
+    @Test
+    public void testSim4() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
         PhysicalPlan ldGrpChain1 = GenPhyOp.loadedGrpChain();
@@ -592,6 +658,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC4.gld");
     }
 
+    @Test
     public void testSim5() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
         PhysicalPlan ldFil1 = GenPhyOp.loadedFilter();
@@ -609,6 +676,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC5.gld");
     }
 
+    @Test
     public void testSim6() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
@@ -636,6 +704,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
 
     }
 
+    @Test
     public void testSim7() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
@@ -667,6 +736,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC7.gld");
     }
 
+    @Test
     public void testSim8() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
@@ -702,6 +772,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC8.gld");
     }
 
+    @Test
     public void testSim9() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
@@ -724,12 +795,13 @@ public class TestMRCompiler extends junit.framework.TestCase {
         php.addAsLeaf(st);
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC9.gld");
     }
-    
+
+    @Test
     public void testSortUDF1() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
         PhysicalPlan ldFil1 = GenPhyOp.loadedFilter();
         php.merge(ldFil1);
-        
+
         // set up order by *
         String funcName = WeirdComparator.class.getName();
         POUserComparisonFunc comparator = new POUserComparisonFunc(
@@ -743,18 +815,18 @@ public class TestMRCompiler extends junit.framework.TestCase {
         topPrj.setOverloaded(true);
         topPrj.setResultType(DataType.TUPLE);
         nesSortPlan.add(topPrj);
-        
+
         POProject prjStar2 = new POProject(new OperatorKey("", r.nextLong()));
         prjStar2.setResultType(DataType.TUPLE);
         prjStar2.setStar(true);
         nesSortPlan.add(prjStar2);
-        
+
         nesSortPlan.connect(topPrj, prjStar2);
         List<PhysicalPlan> nesSortPlanLst = new ArrayList<PhysicalPlan>();
         nesSortPlanLst.add(nesSortPlan);
-        
+
         sort.setSortPlans(nesSortPlanLst);
-        
+
         php.add(sort);
         php.connect(ldFil1.getLeaves().get(0), sort);
         // have a foreach which takes the sort output
@@ -765,56 +837,57 @@ public class TestMRCompiler extends junit.framework.TestCase {
         POForEach fe3 = GenPhyOp.topForEachOPWithUDF(udfs);
         php.add(fe3);
         php.connect(sort, fe3);
-        
+
         // add a group above the foreach
         PhysicalPlan grpChain1 = GenPhyOp.grpChain();
         php.merge(grpChain1);
         php.connect(fe3,grpChain1.getRoots().get(0));
-        
-        
+
+
         udfs.clear();
         udfs.add(AVG.class.getName());
         POForEach fe4 = GenPhyOp.topForEachOPWithUDF(udfs);
         php.addAsLeaf(fe4);
-        
+
         PhysicalPlan grpChain2 = GenPhyOp.grpChain();
         php.merge(grpChain2);
         php.connect(fe4,grpChain2.getRoots().get(0));
 
         udfs.clear();
-        udfs.add(GFCross.class.getName());
+        udfs.add(GFCross.class.getName() + "('1')");
         POForEach fe5 = GenPhyOp.topForEachOPWithUDF(udfs);
         php.addAsLeaf(fe5);
-        
+
         POStore st = GenPhyOp.topStoreOp();
         php.addAsLeaf(st);
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC15.gld");
     }
-    
+
+    @Test
     public void testDistinct1() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
         PhysicalPlan ldFil1 = GenPhyOp.loadedFilter();
         php.merge(ldFil1);
-        
+
         PODistinct op = new PODistinct(new OperatorKey("", r.nextLong()),
                 -1, null);
-        
+
         php.addAsLeaf(op);
-        
+
         PhysicalPlan grpChain1 = GenPhyOp.grpChain();
         php.merge(grpChain1);
         php.connect(op,grpChain1.getRoots().get(0));
-        
+
         PODistinct op1 = new PODistinct(new OperatorKey("", r.nextLong()),
                 -1, null);
-        
+
         php.addAsLeaf(op1);
         POStore st = GenPhyOp.topStoreOp();
         php.addAsLeaf(st);
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC16.gld");
     }
-    
-    
+
+    @Test
     public void testLimit() throws Exception {
         PhysicalPlan php = new PhysicalPlan();
 
@@ -831,37 +904,37 @@ public class TestMRCompiler extends junit.framework.TestCase {
         php.addAsLeaf(st);
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC17.gld");
     }
-    
-    @Test
+
+    @Test(expected = MRCompilerException.class)
     public void testMRCompilerErr() throws Exception {
     	String query = "a = load 'input';" +
     	"b = filter a by $0 > 5;" +
     	"store b into 'output';";
-    	
+
     	PhysicalPlan pp = Util.buildPp(pigServer, query);
     	pp.remove(pp.getRoots().get(0));
     	try {
     		Util.buildMRPlan(new PhysicalPlan(), pc);
-    		fail("Expected failure.");
     	} catch (MRCompilerException mrce) {
-    		assertTrue(mrce.getErrorCode() == 2053);
+    		assertEquals(2053, mrce.getErrorCode());
+    		throw mrce;
     	}
     }
 
-    @Test
-    public void testMRCompilerErr1() throws Exception {   	
+    @Test(expected = MRCompilerException.class)
+    public void testMRCompilerErr1() throws Exception {
         PhysicalPlan pp = new PhysicalPlan();
         PhysicalPlan ldFil1 = GenPhyOp.loadedFilter();
         pp.merge(ldFil1);
-        
+
         POSplit op = GenPhyOp.topSplitOp();
         pp.addAsLeaf(op);
 
     	try {
     		Util.buildMRPlan(pp, pc);
-    		fail("Expected failure.");
     	} catch (MRCompilerException mrce) {
-    		assertTrue(mrce.getErrorCode() == 2025);
+    		assertEquals(2025, mrce.getErrorCode());
+    		throw mrce;
     	}
     }
 
@@ -877,44 +950,44 @@ public class TestMRCompiler extends junit.framework.TestCase {
     	"b = order a by $0;" +
     	"c = limit b 10;" +
     	"store c into 'output';";
-    	
+
     	PhysicalPlan pp = Util.buildPp(pigServer, query);
     	MROperPlan mrPlan = Util.buildMRPlan(pp, pc);
     	MapReduceOper mrOper = mrPlan.getRoots().get(0);
     	int count = 1;
-    	
+
     	while(mrPlan.getSuccessors(mrOper) != null) {
     		mrOper = mrPlan.getSuccessors(mrOper).get(0);
     		++count;
-    	}        
-    	assertTrue(count == 3);
+    	}
+    	assertEquals(3, count);
     }
-    
+
     /**
      * Test to ensure that the order by with parallel followed by a limit, i.e., top k
      * always produces the correct number of map reduce jobs
      */
     @Test
     public void testNumReducersInLimitWithParallel() throws Exception {
-    	String query = "a = load 'input';" + 
+    	String query = "a = load 'input';" +
     	"b = order a by $0 parallel 2;" +
     	"c = limit b 10;" + "store c into 'output';";
-    	
+
     	PhysicalPlan pp = Util.buildPp(pigServerMR, query);
     	MROperPlan mrPlan = Util.buildMRPlan(pp, pc);
-    	
+
     	LimitAdjuster la = new LimitAdjuster(mrPlan, pc);
         la.visit();
         la.adjust();
 
     	MapReduceOper mrOper = mrPlan.getRoots().get(0);
     	int count = 1;
-    	
+
     	while(mrPlan.getSuccessors(mrOper) != null) {
     		mrOper = mrPlan.getSuccessors(mrOper).get(0);
     		++count;
-    	}        
-    	assertTrue(count == 4);
+    	}
+    	assertEquals(4, count);
     }
 
     @Test
@@ -922,64 +995,97 @@ public class TestMRCompiler extends junit.framework.TestCase {
         String query = "a = load 'input1' using BinStorage();" +
         "b = load 'input2';" +
         "c = join a by $0, b by $0;" + "store c into 'output';";
-        
+
         PhysicalPlan pp = Util.buildPp(pigServer, query);
         MROperPlan mrPlan = Util.buildMRPlan(pp, pc);
         MapReduceOper mrOper = mrPlan.getRoots().get(0);
-        
-        assertTrue(mrOper.UDFs.size()==2);
-        assertTrue(mrOper.UDFs.size()==2);
+
+        assertEquals(2, mrOper.UDFs.size());
+        assertEquals(2, mrOper.UDFs.size());
         assertTrue(mrOper.UDFs.contains("BinStorage"));
         assertTrue(mrOper.UDFs.contains("org.apache.pig.builtin.PigStorage"));
     }
 
     @Test
-    public void testMergeJoin() throws Exception{
+    public void testMergeJoin() throws Exception {
         String query = "a = load '/tmp/input1';" +
         "b = load '/tmp/input2';" +
         "c = join a by $0, b by $0 using 'merge';" +
         "store c into '/tmp/output1';";
-        
-        PhysicalPlan pp = Util.buildPp(pigServer, query);
-        run(pp, "test/org/apache/pig/test/data/GoldenFiles/MRC18.gld");
-    }
-    
-    public static class WeirdComparator extends ComparisonFunc {
 
+        PhysicalPlan pp = Util.buildPp(pigServer, query);
+        MRCompiler comp = new MRCompiler(pp, pc);
+        comp.compile();
+        MROperPlan mrp = comp.getMRPlan();
+        assertTrue(mrp.size()==2);
+
+        MapReduceOper mrOp0 = mrp.getRoots().get(0);
+        assertTrue(mrOp0.mapPlan.size()==2);
+        PhysicalOperator load0 = mrOp0.mapPlan.getRoots().get(0);
+        MergeJoinIndexer func = (MergeJoinIndexer)PigContext.instantiateFuncFromSpec(((POLoad)load0).getLFile().getFuncSpec());
+        Field lrField = MergeJoinIndexer.class.getDeclaredField("lr");
+        lrField.setAccessible(true);
+        POLocalRearrange lr = (POLocalRearrange)lrField.get(func);
+        List<PhysicalPlan> innerPlans = lr.getPlans();
+        PhysicalOperator localrearrange0 = mrOp0.mapPlan.getSuccessors(load0).get(0);
+        assertTrue(localrearrange0 instanceof POLocalRearrange);
+        assertTrue(mrOp0.reducePlan.size()==3);
+        PhysicalOperator pack0 = mrOp0.reducePlan.getRoots().get(0);
+        assertTrue(pack0 instanceof POPackage);
+        PhysicalOperator foreach0 = mrOp0.reducePlan.getSuccessors(pack0).get(0);
+        assertTrue(foreach0 instanceof POForEach);
+        PhysicalOperator store0 = mrOp0.reducePlan.getSuccessors(foreach0).get(0);
+        assertTrue(store0 instanceof POStore);
+
+        assertTrue(innerPlans.size()==1);
+        PhysicalPlan innerPlan = innerPlans.get(0);
+        assertTrue(innerPlan.size()==1);
+        PhysicalOperator project = innerPlan.getRoots().get(0);
+        assertTrue(project instanceof POProject);
+        assertTrue(((POProject)project).getColumn()==0);
+
+        MapReduceOper mrOp1 = mrp.getSuccessors(mrOp0).get(0);
+        assertTrue(mrOp1.mapPlan.size()==3);
+        PhysicalOperator load1 = mrOp1.mapPlan.getRoots().get(0);
+        assertTrue(load1 instanceof POLoad);
+        PhysicalOperator mergejoin1 = mrOp1.mapPlan.getSuccessors(load1).get(0);
+        assertTrue(mergejoin1 instanceof POMergeJoin);
+        PhysicalOperator store1 = mrOp1.mapPlan.getSuccessors(mergejoin1).get(0);
+        assertTrue(store1 instanceof POStore);
+        assertTrue(mrOp1.reducePlan.isEmpty());
+    }
+
+    public static class WeirdComparator extends ComparisonFunc {
         @Override
         public int compare(Tuple t1, Tuple t2) {
-            // TODO Auto-generated method stub
             int result = 0;
             try {
                 int i1 = (Integer) t1.get(1);
                 int i2 = (Integer) t2.get(1);
                 result = (i1 - 50) * (i1 - 50) - (i2 - 50) * (i2 - 50);
             } catch (ExecException e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
+                throw new RuntimeException(e);
             }
             return result;
         }
-
     }
-    
+
     @Test
     public void testMergeJoinWithIndexableLoadFunc() throws Exception{
         String query = "a = load 'input1';" +
         "b = load 'input2' using " +
             TestMergeJoin.DummyIndexableLoader.class.getName() + ";" +
         "c = join a by $0, b by $0 using 'merge';" + "store c into 'output';";
-        
+
         PhysicalPlan pp = Util.buildPp(pigServer, query);
         MROperPlan mp = Util.buildMRPlan(pp, pc);
         assertEquals("Checking number of MR Jobs for merge join with " +
         		"IndexableLoadFunc:", 1, mp.size());
-        
     }
-    
+
     @Test
     public void testCastFuncShipped() throws Exception{
-        String query = "a = load 'input1' using " + PigStorageNoDefCtor.class.getName() + 
+        String query = "a = load 'input1' using " + PigStorageNoDefCtor.class.getName() +
                 "('\t') as (a0, a1, a2);" +
         "b = group a by a0;" +
         "c = foreach b generate flatten(a);" +
@@ -991,34 +1097,34 @@ public class TestMRCompiler extends junit.framework.TestCase {
         MapReduceOper op = mp.getLeaves().get(0);
         assertTrue(op.UDFs.contains(new FuncSpec(PigStorageNoDefCtor.class.getName())+"('\t')"));
     }
-    
+
     @Test
     public void testLimitAdjusterFuncShipped() throws Exception{
-        String query = "a = load 'input';" + 
+        String query = "a = load 'input';" +
         "b = order a by $0 parallel 2;" +
         "c = limit b 7;" + "store c into 'output' using "
                 + PigStorageNoDefCtor.class.getName() + "('\t');";
-         
+
         PhysicalPlan pp = Util.buildPp(pigServerMR, query);
         MROperPlan mrPlan = Util.buildMRPlan(pp, pc);
-        
+
         LimitAdjuster la = new LimitAdjuster(mrPlan, pc);
         la.visit();
         la.adjust();
-        
+
         MapReduceOper mrOper = mrPlan.getRoots().get(0);
         int count = 1;
-        
+
         while(mrPlan.getSuccessors(mrOper) != null) {
             mrOper = mrPlan.getSuccessors(mrOper).get(0);
             ++count;
-        }        
-        assertTrue(count == 4);
+        }
+        assertEquals(4, count);
 
         MapReduceOper op = mrPlan.getLeaves().get(0);
         assertTrue(op.UDFs.contains(new FuncSpec(PigStorageNoDefCtor.class.getName())+"('\t')"));
     }
-    
+
     /**
      * Test that POSortedDistinct gets printed as POSortedDistinct
      * @throws Exception
@@ -1028,7 +1134,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
         PhysicalPlan php = new PhysicalPlan();
         PhysicalPlan grpChain1 = GenPhyOp.loadedGrpChain();
         php.merge(grpChain1);
-        
+
         List<PhysicalPlan> inputs = new LinkedList<PhysicalPlan>();
         PhysicalPlan inplan = new PhysicalPlan();
         PODistinct op1 = new POSortedDistinct(new OperatorKey("", r.nextLong()),
@@ -1037,7 +1143,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
         inputs.add(inplan);
         List<Boolean> toFlattens = new ArrayList<Boolean>();
         toFlattens.add(false);
-        POForEach pofe = new POForEach(new OperatorKey("", r.nextLong()), 1, 
+        POForEach pofe = new POForEach(new OperatorKey("", r.nextLong()), 1,
                 inputs, toFlattens);
 
         php.addAsLeaf(pofe);
@@ -1045,7 +1151,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
         php.addAsLeaf(st);
         run(php, "test/org/apache/pig/test/data/GoldenFiles/MRC19.gld");
     }
-    
+
     private void run(PhysicalPlan pp, String expectedFile) throws Exception {
         String compiledPlan, goldenPlan = null;
         int MAX_SIZE = 100000;
@@ -1058,7 +1164,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
         ppp.print(baos);
         compiledPlan = baos.toString();
 
-        if(generate ){
+        if(generate){
             FileOutputStream fos = new FileOutputStream(expectedFile);
             fos.write(baos.toByteArray());
             return;
@@ -1077,17 +1183,11 @@ public class TestMRCompiler extends junit.framework.TestCase {
         System.out.println("Golden");
         System.out.println("<<<" + goldenPlan + ">>>");
         System.out.println("-------------");
-        assertEquals(removeSignature(goldenPlan), removeSignature(compiledPlan));
-    }
 
-    /**
-     * this removes the signature from the serialized plan
-     * changing the way the unique signature is generated should not break this test
-     * @param plan the plan to canonicalize
-     * @return the cleaned up plan
-     */
-    private String removeSignature(String plan) {
-        return plan.replaceAll("','','[^']*','scope','true'\\)\\)", "','','','scope','true'))");
+        String goldenPlanClean = Util.standardizeNewline(goldenPlan);
+        String compiledPlanClean = Util.standardizeNewline(compiledPlan);
+        assertEquals(TestHelper.sortUDFs(Util.removeSignature(goldenPlanClean)),
+                TestHelper.sortUDFs(Util.removeSignature(compiledPlanClean)));
     }
 
     public static class TestCollectableLoadFunc extends PigStorage implements CollectableLoadFunc {
@@ -1095,7 +1195,7 @@ public class TestMRCompiler extends junit.framework.TestCase {
         public void ensureAllKeyInstancesInSameSplit() throws IOException {
         }
     }
-    
+
     public static class TestIndexableLoadFunc extends PigStorage implements IndexableLoadFunc {
         @Override
         public void initialize(Configuration conf) throws IOException {
@@ -1109,56 +1209,100 @@ public class TestMRCompiler extends junit.framework.TestCase {
         public void close() throws IOException {
         }
     }
-    
+
     @Test
     public void testUDFInMergedCoGroup() throws Exception {
         String query = "a = load 'input1' using " + TestCollectableLoadFunc.class.getName() + "();" +
             "b = load 'input2' using " + TestIndexableLoadFunc.class.getName() + "();" +
             "c = cogroup a by $0, b by $0 using 'merge';" +
             "store c into 'output';";
-        
+
         PhysicalPlan pp = Util.buildPp(pigServer, query);
         MROperPlan mrPlan = Util.buildMRPlan(pp, pc);
         MapReduceOper mrOper = mrPlan.getRoots().get(0);
-        
+
         assertTrue(mrOper.UDFs.contains(TestCollectableLoadFunc.class.getName()));
         mrOper = mrPlan.getSuccessors(mrOper).get(0);
         assertTrue(mrOper.UDFs.contains(TestCollectableLoadFunc.class.getName()));
         assertTrue(mrOper.UDFs.contains(TestIndexableLoadFunc.class.getName()));
     }
-    
+
     @Test
     public void testUDFInMergedJoin() throws Exception {
-        String query = "a = load 'input1';" + 
+        String query = "a = load 'input1';" +
             "b = load 'input2' using " + TestIndexableLoadFunc.class.getName() + "();" +
             "c = join a by $0, b by $0 using 'merge';" +
             "store c into 'output';";
-        
+
         PhysicalPlan pp = Util.buildPp(pigServer, query);
         MROperPlan mrPlan = Util.buildMRPlan(pp, pc);
         MapReduceOper mrOper = mrPlan.getRoots().get(0);
-        
+
         assertTrue(mrOper.UDFs.contains(TestIndexableLoadFunc.class.getName()));
     }
-    
+
     //PIG-2146
     @Test
     public void testSchemaInStoreForDistinctLimit() throws Exception {
         //test if the POStore in the 2nd mr plan (that stores the actual output)
-        // has a schema 
-        String query = "a = load 'input1' as (a : int,b :float ,c : int);" + 
+        // has a schema
+        String query = "a = load 'input1' as (a : int,b :float ,c : int);" +
             "b  = distinct a;" +
             "c = limit b 10;" +
             "store c into 'output';";
-        
+
         PhysicalPlan pp = Util.buildPp(pigServer, query);
         MROperPlan mrPlan = Util.buildMRPlan(pp, pc);
         MapReduceOper secondMrOper = mrPlan.getLeaves().get(0);
         POStore store = (POStore)secondMrOper.reducePlan.getLeaves().get(0);
         assertEquals(
-                "compare load and store schema", 
-                store.getSchema(), 
+                "compare load and store schema",
+                store.getSchema(),
                 Utils.getSchemaFromString("a : int,b :float ,c : int")
         );
     }
+
+    //PIG-2146
+    @Test
+    public void testStorerLimit() throws Exception {
+        // test if the POStore in the 1st mr plan
+        // use the right StoreFunc
+        String query = "a = load 'input1';" +
+            "b = limit a 10;" +
+            "store b into 'output' using " + PigStorageNoDefCtor.class.getName() + "(',');";
+
+        PhysicalPlan pp = Util.buildPp(pigServer, query);
+        MROperPlan mrPlan = Util.buildMRPlan(pp, pc);
+
+        LimitAdjuster la = new LimitAdjuster(mrPlan, pc);
+        la.visit();
+        la.adjust();
+
+        MapReduceOper firstMrOper = mrPlan.getRoots().get(0);
+        POStore store = (POStore)firstMrOper.reducePlan.getLeaves().get(0);
+        assertEquals(store.getStoreFunc().getClass().getName(), "org.apache.pig.impl.io.InterStorage");
+    }
+
+    // See PIG-4538
+    @Test
+    public void testFetchOptimizerSideEffect() throws Exception{
+        String query = "in1 = LOAD 'data.txt' AS (ident:chararray);" +
+            "in2 = LOAD 'data.txt' AS (ident:chararray);" +
+            "in3 = LOAD 'data.txt';" +
+            "joined = JOIN in1 BY ident LEFT OUTER, in2 BY ident;" +
+            "store joined into 'output';";
+        PhysicalPlan pp = Util.buildPp(pigServer, query);
+        MROperPlan mp = Util.buildMRPlan(pp, pc);
+        // isPlanFetchable should not bring side effect:
+        //   set parentPlan for operators
+        FetchOptimizer.isPlanFetchable(pc, pp);
+        MapReduceOper op = mp.getLeaves().get(0);
+        PhysicalOperator store = op.reducePlan.getLeaves().get(0);
+        POForEach foreach = (POForEach)op.reducePlan.getPredecessors(store).get(0);
+        PhysicalOperator project = foreach.getInputPlans().get(0).getRoots().get(0);
+        Field parentPlan = PhysicalOperator.class.getDeclaredField("parentPlan");
+        parentPlan.setAccessible(true);
+        assertTrue(parentPlan.get(project)==null);
+    }
 }
+

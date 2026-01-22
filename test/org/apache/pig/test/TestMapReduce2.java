@@ -18,31 +18,27 @@
 
 package org.apache.pig.test;
 
-import junit.framework.Assert;
-import junit.framework.TestCase;
-
-import org.apache.pig.ExecType;
-import org.apache.pig.PigServer;
-import org.apache.pig.data.Tuple;
-import org.apache.pig.test.utils.TestHelper;
-import org.junit.AfterClass;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import static org.junit.Assert.assertEquals;
 
 import java.io.File;
 import java.io.IOException;
 import java.text.DecimalFormat;
 import java.util.Iterator;
-@RunWith(JUnit4.class)
-public class TestMapReduce2 extends TestCase {
 
-    static MiniCluster cluster = MiniCluster.buildCluster();
+import org.apache.pig.PigServer;
+import org.apache.pig.data.Tuple;
+import org.apache.pig.test.utils.TestHelper;
+import org.junit.AfterClass;
+import org.junit.Test;
+
+public class TestMapReduce2 {
+
+    static MiniGenericCluster cluster = MiniGenericCluster.buildCluster();
 
     private PigServer pig ;
 
     public TestMapReduce2() throws Throwable {
-        pig = new PigServer(ExecType.MAPREDUCE, cluster.getProperties()) ;
+        pig = new PigServer(cluster.getExecType(), cluster.getProperties()) ;
     }
 
     @AfterClass
@@ -61,7 +57,7 @@ public class TestMapReduce2 extends TestCase {
                 + Util.generateURI(tmpFile2.toString(), pig.getPigContext())
                 + "'; ");
         pig.registerQuery("c = union a, b; ") ;
-        
+
         verifyUnion( "c", 30 + 50 );
     }
 
@@ -129,7 +125,7 @@ public class TestMapReduce2 extends TestCase {
             count++ ;
         }
 
-        Assert.assertEquals(count, actualCount);
+        assertEquals(count, actualCount);
     }
 
 
@@ -181,6 +177,4 @@ public class TestMapReduce2 extends TestCase {
         tmpFile.deleteOnExit();
         return tmpFile;
     }
-
-
 }

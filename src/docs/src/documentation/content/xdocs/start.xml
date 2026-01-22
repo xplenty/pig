@@ -26,52 +26,45 @@
 
 <!-- SET UP PIG -->
  <section>
-		<title>Pig Setup</title>
-	
+        <title>Pig Setup</title>
+    
 <!-- ++++++++++++++++++++++++++++++++++ -->
  <section id="req">
  <title>Requirements</title>
  <p><strong>Mandatory</strong></p>
       <p>Unix and Windows users need the following:</p>
-		<ul>
-		  <li> <strong>Hadoop 0.20.2, 020.203, 020.204,  0.20.205, 1.0.0, 1.0.1, or 0.23.0, 0.23.1</strong> - <a href="http://hadoop.apache.org/common/releases.html">http://hadoop.apache.org/common/releases.html</a> (You can run Pig with different versions of Hadoop by setting HADOOP_HOME to point to the directory where you have installed Hadoop. If you do not set HADOOP_HOME, by default Pig will run with the embedded version, currently Hadoop 1.0.0.)</li>
-		  <li> <strong>Java 1.6</strong> - <a href="http://java.sun.com/javase/downloads/index.jsp">http://java.sun.com/javase/downloads/index.jsp</a> (set JAVA_HOME to the root of your Java installation)</li>	
-		</ul>
-		<p></p>
-	<p>Windows users also need to install Cygwin and the Perl package: <a href="http://www.cygwin.com/"> http://www.cygwin.com/</a></p>
-
-<p></p>
+        <ul>
+          <li> <strong>Hadoop 2.X</strong> - <a href="http://hadoop.apache.org/common/releases.html">http://hadoop.apache.org/common/releases.html</a> (You can run Pig with different versions of Hadoop by setting HADOOP_HOME to point to the directory where you have installed Hadoop. If you do not set HADOOP_HOME, by default Pig will run with the embedded version, currently Hadoop 2.7.3.)</li>
+          <li> <strong>Java 1.7</strong> - <a href="http://java.sun.com/javase/downloads/index.jsp">http://java.sun.com/javase/downloads/index.jsp</a> (set JAVA_HOME to the root of your Java installation)</li>    
+        </ul>
+        <p></p>
  <p><strong>Optional</strong></p>
- 		<ul>
-          <li> <strong>Python 2.5</strong> - <a href="http://jython.org/downloads.html">http://jython.org/downloads.html</a> (when using Python UDFs or embedding Pig in Python) </li>
-          <li> <strong>JavaScript 1.7</strong> - <a href="https://developer.mozilla.org/en/Rhino_downloads_archive">https://developer.mozilla.org/en/Rhino_downloads_archive</a> and <a href="http://mirrors.ibiblio.org/pub/mirrors/maven2/rhino/js/">http://mirrors.ibiblio.org/pub/mirrors/maven2/rhino/js/</a>  (when using JavaScript UDFs or embedding Pig in JavaScript) </li>		  
-          <li> <strong>JRuby 1.6.7</strong> - <a href="http://www.jruby.org/download">http://www.jruby.org/download</a> (when using JRuby UDFs) </li>
-          <li> <strong>Groovy (<em>groovy-all</em>) 1.8.6</strong> - <a href="http://groovy.codehaus.org/Download">http://groovy.codehaus.org/Download</a> or directly on a maven repo <a href="http://mirrors.ibiblio.org/pub/mirrors/maven2/org/codehaus/groovy/groovy-all/1.8.6/">http://mirrors.ibiblio.org/pub/mirrors/maven2/org/codehaus/groovy/groovy-all/1.8.6/</a> (when using Groovy UDFs or embedding Pig in Groovy) </li>
-		  <li> <strong>Ant 1.7</strong> - <a href="http://ant.apache.org/">http://ant.apache.org/</a> (for builds) </li>
-		  <li> <strong>JUnit 4.5</strong> - <a href="http://junit.sourceforge.net/">http://junit.sourceforge.net/</a> (for unit tests) </li>
-		</ul>
+         <ul>
+          <li> <strong>Python 2.7</strong> - <a href="http://jython.org/downloads.html">https://www.python.org</a> (when using Streaming Python UDFs) </li>
+          <li> <strong>Ant 1.8</strong> - <a href="http://ant.apache.org/">http://ant.apache.org/</a> (for builds) </li>
+        </ul>
  
   </section>         
    
 <!-- ++++++++++++++++++++++++++++++++++ -->        
  <section id="download">
  <title>Download Pig</title>
-	<p>To get a Pig distribution, do the following:</p>
-	
-	<ol>
-	<li>Download a recent stable release from one of the Apache Download Mirrors 
-	(see <a href="http://hadoop.apache.org/pig/releases.html"> Pig Releases</a>).</li>
-	
+    <p>To get a Pig distribution, do the following:</p>
+    
+    <ol>
+    <li>Download a recent stable release from one of the Apache Download Mirrors 
+    (see <a href="http://hadoop.apache.org/pig/releases.html"> Pig Releases</a>).</li>
+    
     <li>Unpack the downloaded Pig distribution, and then note the following:
-	    <ul>
-	    <li>The Pig script file, pig, is located in the bin directory (/pig-n.n.n/bin/pig). 
-	    The Pig environment variables are described in the Pig script file.</li>
-	    <li>The Pig properties file, pig.properties, is located in the conf directory (/pig-n.n.n/conf/pig.properties). 
-	    You can specify an alternate location using the PIG_CONF_DIR environment variable.</li>
-	</ul>	
-	</li>
-	<li>Add /pig-n.n.n/bin to your path. Use export (bash,sh,ksh) or setenv (tcsh,csh). For example: <br></br>
-	<code>$ export PATH=/&lt;my-path-to-pig&gt;/pig-n.n.n/bin:$PATH</code>
+        <ul>
+        <li>The Pig script file, pig, is located in the bin directory (/pig-n.n.n/bin/pig). 
+        The Pig environment variables are described in the Pig script file.</li>
+        <li>The Pig properties file, pig.properties, is located in the conf directory (/pig-n.n.n/conf/pig.properties). 
+        You can specify an alternate location using the PIG_CONF_DIR environment variable.</li>
+    </ul>    
+    </li>
+    <li>Add /pig-n.n.n/bin to your path. Use export (bash,sh,ksh) or setenv (tcsh,csh). For example: <br></br>
+    <code>$ export PATH=/&lt;my-path-to-pig&gt;/pig-n.n.n/bin:$PATH</code>
 </li>
 <li>
 Test the Pig installation with this simple command: <code>$ pig -help</code>
@@ -85,10 +78,10 @@ Test the Pig installation with this simple command: <code>$ pig -help</code>
 <title>Build Pig</title>
       <p>To build pig, do the following:</p>
      <ol>
-	  <li> Check out the Pig code from SVN: <code>svn co http://svn.apache.org/repos/asf/pig/trunk</code> </li>
-	  <li> Build the code from the top directory: <code>ant</code> <br></br>
-	  If the build is successful, you should see the pig.jar file created in that directory. </li>	
-	  <li> Validate the pig.jar  by running a unit test: <code>ant test</code></li>
+      <li> Check out the Pig code from SVN: <code>svn co http://svn.apache.org/repos/asf/pig/trunk</code> </li>
+      <li> Build the code from the top directory: <code>ant</code> <br></br>
+      If the build is successful, you should see the pig.jar file created in that directory. </li>    
+      <li> Validate the pig.jar  by running a unit test: <code>ant test</code></li>
      </ol>
  </section>
 </section>
@@ -97,34 +90,52 @@ Test the Pig installation with this simple command: <code>$ pig -help</code>
     
    <!-- RUNNING PIG  -->
    <section id="run">
-	<title>Running Pig </title> 
-	<p>You can run Pig (execute Pig Latin statements and Pig commands) using various modes.</p>
-	<table>
-	<tr>
-	<td></td>
+    <title>Running Pig </title>
+    <p>You can run Pig (execute Pig Latin statements and Pig commands) using various modes.</p>
+    <table>
+    <tr>
+    <td></td>
     <td><strong>Local Mode</strong></td>
+    <td><strong>Tez Local Mode</strong></td>
+    <td><strong>Spark Local Mode</strong></td>
     <td><strong>Mapreduce Mode</strong></td>
-	</tr>
-	<tr>
-	<td><strong>Interactive Mode </strong></td>
+    <td><strong>Tez Mode</strong></td>
+    <td><strong>Spark Mode</strong></td>
+    </tr>
+    <tr>
+    <td><strong>Interactive Mode </strong></td>
+    <td>yes</td>
+    <td>experimental</td>
     <td>yes</td>
     <td>yes</td>
-	</tr>
-	<tr>
-	<td><strong>Batch Mode</strong> </td>
+    </tr>
+    <tr>
+    <td><strong>Batch Mode</strong> </td>
+    <td>yes</td>
+    <td>experimental</td>
     <td>yes</td>
     <td>yes</td>
-	</tr>
-	</table>
-	
-	<!-- ++++++++++++++++++++++++++++++++++ -->
-	   <section id="execution-modes">
-	<title>Execution Modes</title> 
-<p>Pig has two execution modes or exectypes: </p>
+    </tr>
+    </table>
+
+    <!-- ++++++++++++++++++++++++++++++++++ -->
+       <section id="execution-modes">
+    <title>Execution Modes</title>
+<p>Pig has six execution modes or exectypes: </p>
 <ul>
-<li><strong>Local Mode</strong> - To run Pig in local mode, you need access to a single machine; all files are installed and run using your local host and file system. Specify local mode using the -x flag (pig -x local). Note that local mode does not support parallel mapper execution with Hadoop 0.20.x and 1.0.0. This is because the LocalJobRunner of these Hadoop versions is not thread-safe.
+<li><strong>Local Mode</strong> - To run Pig in local mode, you need access to a single machine; all files are installed and run using your local host and file system. Specify local mode using the -x flag (pig -x local).
+</li>
+<li><strong>Tez Local Mode</strong> - To run Pig in tez local mode. It is similar to local mode, except internally Pig will invoke tez runtime engine. Specify Tez local mode using the -x flag (pig -x tez_local).
+<p><strong>Note:</strong> Tez local mode is experimental. There are some queries which just error out on bigger data in local mode.</p>
+</li>
+<li><strong>Spark Local Mode</strong> - To run Pig in spark local mode. It is similar to local mode, except internally Pig will invoke spark runtime engine. Specify Spark local mode using the -x flag (pig -x spark_local).
+<p><strong>Note:</strong> Spark local mode is experimental. There are some queries which just error out on bigger data in local mode.</p>
 </li>
 <li><strong>Mapreduce Mode</strong> - To run Pig in mapreduce mode, you need access to a Hadoop cluster and HDFS installation. Mapreduce mode is the default mode; you can, <em>but don't need to</em>, specify it using the -x flag (pig OR pig -x mapreduce).
+</li>
+<li><strong>Tez Mode</strong> - To run Pig in Tez mode, you need access to a Hadoop cluster and HDFS installation. Specify Tez mode using the -x flag (-x tez).
+</li>
+<li><strong>Spark Mode</strong> - To run Pig in Spark mode, you need access to a Spark, Yarn or Mesos cluster and HDFS installation. Specify Spark mode using the -x flag (-x spark). In Spark execution mode, it is necessary to set env::SPARK_MASTER to an appropriate value (local - local mode, yarn-client - yarn-client mode, mesos://host:port - spark on mesos or spark://host:port - spark cluster. For more information refer to spark documentation on Master URLs, <em>yarn-cluster mode is currently not supported</em>). Pig scripts run on Spark can take advantage of the <a href="http://spark.apache.org/docs/latest/job-scheduling.html#dynamic-resource-allocation">dynamic allocation</a> feature. The feature can be enabled by simply enabling <em>spark.dynamicAllocation.enabled</em>. Refer to spark <a href="http://spark.apache.org/docs/latest/configuration.html#dynamic-allocation">configuration</a> for additional configuration details. In general all properties in the pig script prefixed with <em>spark.</em> are copied to the Spark Application Configuration. Please note that Yarn auxillary service need to be enabled on Spark for this to work. See Spark documentation for additional details.
 </li>
 </ul>
 <p></p>
@@ -141,23 +152,22 @@ Test the Pig installation with this simple command: <code>$ pig -help</code>
 /* local mode */
 $ pig -x local ...
  
+/* Tez local mode */
+$ pig -x tez_local ...
  
+/* Spark local mode */
+$ pig -x spark_local ...
+
 /* mapreduce mode */
 $ pig ...
 or
 $ pig -x mapreduce ...
-</source>
 
-<p>This example shows how to run Pig in local and mapreduce mode using the java command.</p>
-<source>
-/* local mode */
-$ java -cp pig.jar org.apache.pig.Main -x local ...
+/* Tez mode */
+$ pig -x tez ...
 
-
-/* mapreduce mode */
-$ java -cp pig.jar org.apache.pig.Main ...
-or
-$ java -cp pig.jar org.apache.pig.Main -x mapreduce ...
+/* Spark mode */
+$ pig -x spark ...
 </source>
 
 </section>
@@ -182,6 +192,20 @@ grunt&gt; dump B;
 <source>
 $ pig -x local
 ... - Connecting to ...
+grunt>
+</source>
+
+<p><strong>Tez Local Mode</strong></p>
+<source>
+$ pig -x tez_local
+... - Connecting to ...
+grunt> 
+</source>
+
+<p><strong>Spark Local Mode</strong></p>
+<source>
+$ pig -x spark_local
+... - Connecting to ...
 grunt> 
 </source>
 
@@ -197,6 +221,21 @@ $ pig
 ... - Connecting to ...
 grunt> 
 </source>
+
+<p><strong>Tez Mode</strong> </p>
+<source>
+$ pig -x tez
+... - Connecting to ...
+grunt> 
+</source>
+
+<p><strong>Spark Mode</strong> </p>
+<source>
+$ pig -x spark
+... - Connecting to ...
+grunt>
+</source>
+
 </section>
 </section>
 
@@ -215,12 +254,20 @@ grunt>
 
 A = load 'passwd' using PigStorage(':');  -- load the passwd file 
 B = foreach A generate $0 as id;  -- extract the user IDs 
-store B into ‘id.out’;  -- write the results to a file name id.out
+store B into 'id.out';  -- write the results to a file name id.out
 </source>
 
 <p><strong>Local Mode</strong></p>
 <source>
 $ pig -x local id.pig
+</source>
+<p><strong>Tez Local Mode</strong></p>
+<source>
+$ pig -x tez_local id.pig
+</source>
+<p><strong>Spark Local Mode</strong></p>
+<source>
+$ pig -x spark_local id.pig
 </source>
 <p><strong>Mapreduce Mode</strong> </p>
 <source>
@@ -228,22 +275,30 @@ $ pig id.pig
 or
 $ pig -x mapreduce id.pig
 </source>
+<p><strong>Tez Mode</strong> </p>
+<source>
+$ pig -x tez id.pig
+</source>
+<p><strong>Spark Mode</strong> </p>
+<source>
+$ pig -x spark id.pig
+</source>
 </section>
 
   <!-- ==================================================================== -->
-    
+
    <!-- PIG SCRIPTS -->
    <section id="pig-scripts">
-	<title>Pig Scripts</title>
-	
-<p>Use Pig scripts to place Pig Latin statements and Pig commands in a single file. While not required, it is good practice to identify the file using the *.pig extension.</p>	
-	
+    <title>Pig Scripts</title>
+
+<p>Use Pig scripts to place Pig Latin statements and Pig commands in a single file. While not required, it is good practice to identify the file using the *.pig extension.</p>
+
 <p>You can run Pig scripts from the command line and from the Grunt shell
 (see the <a href="cmds.html#run">run</a> and <a href="cmds.html#exec">exec</a> commands). </p>
-	
+
 <p>Pig scripts allow you to pass values to parameters using <a href="cont.html#Parameter-Sub">parameter substitution</a>. </p>
 
-<!-- +++++++++++++++++++++++++++++++++++++++++++ -->	
+<!-- +++++++++++++++++++++++++++++++++++++++++++ -->    
    <p id="comments"><strong>Comments in Scripts</strong></p>
    
    <p>You can include comments in Pig scripts:</p>
@@ -265,28 +320,82 @@ A = LOAD 'student' USING PigStorage() AS (name:chararray, age:int, gpa:float); -
 B = FOREACH A GENERATE name;  -- transforming data
 DUMP B;  -- retrieving results
 </source>   
-	
-<!-- +++++++++++++++++++++++++++++++++++++++++++ -->		
+    
+<!-- +++++++++++++++++++++++++++++++++++++++++++ -->        
 
 <p id="dfs"><strong>Scripts and Distributed File Systems</strong></p>
 
-<p>Pig supports running scripts (and Jar files) that are stored in HDFS, Amazon S3, and other distributed file systems. The script's full location URI is required (see <a href="basic.html#REGISTER">REGISTER</a> for information about Jar files). For example, to run a Pig script on HDFS, do the following:</p>
+<p>Pig supports running scripts (and Jar files) that are stored in HDFS, Amazon S3, and other distributed file systems. The script's full location URI is required (see <a href="basic.html#register">REGISTER</a> for information about Jar files). For example, to run a Pig script on HDFS, do the following:</p>
 <source>
 $ pig hdfs://nn.mydomain.com:9020/myscripts/script.pig
 </source> 
-</section>	
+</section>    
 </section>
 </section>
+
+  <!-- ==================================================================== -->
+  <section id="kerberos">
+     <title>Running jobs on a Kerberos secured cluster</title>
+     <p>Kerberos is a authentication system that uses tickets with a limited validity time.<br/>
+        As a consequence running a pig script on a kerberos secured hadoop cluster limits the running time to at most
+        the remaining validity time of these kerberos tickets. When doing really complex analytics this may become a
+        problem as the job may need to run for a longer time than these ticket times allow.</p>
+
+     <section id="kerberos-short">
+     <title>Short lived jobs</title>
+     <p>When running short jobs all you need to do is ensure that the user has been logged in into Kerberos via the
+        normal kinit method.<br/>
+        The Hadoop job will automatically pickup these credentials and the job will run fine.</p>
+     </section>
+
+     <section id="kerberos-long">
+     <title>Long lived jobs</title>
+     <p>A kerberos keytab file is essentially a Kerberos specific form of the password of a user. <br/>
+        It is possible to enable a Hadoop job to request new tickets when they expire by creating a keytab file and
+        make it part of the job that is running in the cluster.
+        This will extend the maximum job duration beyond the maximum renew time of the kerberos tickets.</p>
+     <p>Usage:</p>
+     <ol>
+        <li>Create a keytab file for the required principal.<br/>
+           Using the ktutil tool you can create a keytab using roughly these commands:<br/>
+           <source>addent -password -p niels@EXAMPLE.NL -k 1 -e rc4-hmac
+addent -password -p niels@EXAMPLE.NL -k 1 -e aes256-cts
+wkt niels.keytab</source>
+        </li>
+        <li>Set the following properties (either via the .pigrc file or on the command line via -P file)
+            <ul>
+            <li><em>java.security.krb5.conf</em><br/>
+                The path to the local krb5.conf file.<br/>
+                Usually this is "/etc/krb5.conf"</li>
+            <li><em>hadoop.security.krb5.principal</em><br/>
+                The pricipal you want to login with.<br/>
+                Usually this would look like this "niels@EXAMPLE.NL"</li>
+            <li><em>hadoop.security.krb5.keytab</em><br/>
+                The path to the local keytab file that must be used to authenticate with.<br/>
+                Usually this would look like this "/home/niels/.krb/niels.keytab"</li>
+            </ul></li>
+     </ol>
+     <p><strong>NOTE:</strong>All paths in these variables are local to the client system starting the actual pig script.
+        This can be run without any special access to the cluster nodes.</p>
+
+         <p>Overall you would create a file that looks like this (assume we call it niels.kerberos.properties):</p>
+         <source>java.security.krb5.conf=/etc/krb5.conf
+hadoop.security.krb5.principal=niels@EXAMPLE.NL
+hadoop.security.krb5.keytab=/home/niels/.krb/niels.keytab</source>
+         <p>and start your script like this:</p>
+         <source>pig -P niels.kerberos.properties script.pig</source>
+     </section>
+  </section>
 
   <!-- ==================================================================== -->
     
    <!-- PIG LATIN STATEMENTS -->
    <section id="pl-statements">
-	<title>Pig Latin Statements</title>	
+    <title>Pig Latin Statements</title>    
    <p>Pig Latin statements are the basic constructs you use to process data using Pig. 
    A Pig Latin statement is an operator that takes a <a href="basic.html#relations">relation</a> as input and produces another relation as output. 
    (This definition applies to all Pig Latin operators except LOAD and STORE which read data from and write data to the file system.) 
-   Pig Latin statements may include <a href="basic.html#Expressions">expressions</a> and <a href="basic.html#Schemas">schemas</a>. 
+   Pig Latin statements may include <a href="basic.html#expressions">expressions</a> and <a href="basic.html#schemas">schemas</a>. 
    Pig Latin statements can span multiple lines and must end with a semi-colon ( ; ).  
    By default, Pig Latin statements are processed using <a href="perf.html#multi-query-execution">multi-query execution</a>.  
  </p>
@@ -330,7 +439,7 @@ DUMP B;
    <!-- ++++++++++++++++++++++++++++++++++ -->   
    <section id="data-load">
    <title>Loading Data</title>
-   <p>Use the  <a href="basic.html#LOAD">LOAD</a> operator and the <a href="udf.html#load-store-functions">load/store functions</a> to read data into Pig (PigStorage is the default load function).</p>
+   <p>Use the  <a href="basic.html#load">LOAD</a> operator and the <a href="udf.html#load-store-functions">load/store functions</a> to read data into Pig (PigStorage is the default load function).</p>
    </section>
   
    <!-- ++++++++++++++++++++++++++++++++++ -->   
@@ -339,19 +448,19 @@ DUMP B;
    <p>Pig allows you to transform data in many ways. As a starting point, become familiar with these operators:</p>
    <ul>
       <li>
-         <p>Use the <a href="basic.html#FILTER">FILTER</a> operator to work with tuples or rows of data. 
-         Use the <a href="basic.html#FOREACH">FOREACH</a> operator to work with columns of data.</p>
+         <p>Use the <a href="basic.html#filter">FILTER</a> operator to work with tuples or rows of data. 
+         Use the <a href="basic.html#foreach">FOREACH</a> operator to work with columns of data.</p>
       </li>
       <li>
-         <p>Use the <a href="basic.html#GROUP ">GROUP</a> operator to group data in a single relation. 
-         Use the <a href="basic.html#COGROUP ">COGROUP</a>,
+         <p>Use the <a href="basic.html#group ">GROUP</a> operator to group data in a single relation. 
+         Use the <a href="basic.html#cogroup ">COGROUP</a>,
          <a href="basic.html#join-inner">inner JOIN</a>, and
          <a href="basic.html#join-outer">outer JOIN</a>
          operators  to group or join data in two or more relations.</p>
       </li>
       <li>
-         <p>Use the <a href="basic.html#UNION">UNION</a> operator to merge the contents of two or more relations. 
-         Use the <a href="basic.html#SPLIT">SPLIT</a> operator to partition the contents of a relation into multiple relations.</p>
+         <p>Use the <a href="basic.html#union">UNION</a> operator to merge the contents of two or more relations. 
+         Use the <a href="basic.html#split">SPLIT</a> operator to partition the contents of a relation into multiple relations.</p>
       </li>
    </ul>
    </section>
@@ -368,10 +477,10 @@ DUMP B;
    
     <section id="data-results">
    <title>Storing Final Results</title>
-   <p>Use the  <a href="basic.html#STORE">STORE</a> operator and the <a href="udf.html#load-store-functions">load/store functions</a> 
+   <p>Use the  <a href="basic.html#store">STORE</a> operator and the <a href="udf.html#load-store-functions">load/store functions</a> 
    to write results to the file system (PigStorage is the default store function). </p>
 <p><strong>Note:</strong> During the testing/debugging phase of your implementation, you can use DUMP to display results to your terminal screen. 
-However, in a production environment you always want to use the STORE operator to save your results (see <a href="perf.html#Store-Dump">Store vs. Dump</a>).</p>   
+However, in a production environment you always want to use the STORE operator to save your results (see <a href="perf.html#store-dump">Store vs. Dump</a>).</p>   
    </section> 
 
  <!-- ++++++++++++++++++++++++++++++++++ -->     
@@ -380,17 +489,36 @@ However, in a production environment you always want to use the STORE operator t
    <p>Pig Latin provides operators that can help you debug your Pig Latin statements:</p>
    <ul>
       <li>
-         <p>Use the  <a href="test.html#DUMP">DUMP</a> operator to display results to your terminal screen. </p>
+         <p>Use the  <a href="test.html#dump">DUMP</a> operator to display results to your terminal screen. </p>
       </li>
       <li>
-         <p>Use the  <a href="test.html#DESCRIBE">DESCRIBE</a> operator to review the schema of a relation.</p>
+         <p>Use the  <a href="test.html#describe">DESCRIBE</a> operator to review the schema of a relation.</p>
       </li>
       <li>
-         <p>Use the  <a href="test.html#EXPLAIN">EXPLAIN</a> operator to view the logical, physical, or map reduce execution plans to compute a relation.</p>
+         <p>Use the  <a href="test.html#explain">EXPLAIN</a> operator to view the logical, physical, or map reduce execution plans to compute a relation.</p>
       </li>
       <li>
-         <p>Use the  <a href="test.html#ILLUSTRATE">ILLUSTRATE</a> operator to view the step-by-step execution of a series of statements.</p>
+         <p>Use the  <a href="test.html#illustrate">ILLUSTRATE</a> operator to view the step-by-step execution of a series of statements.</p>
       </li>
+   </ul>
+   <p><strong>Shortcuts for Debugging Operators</strong></p>
+   <p>Pig provides shortcuts for the frequently used debugging operators (DUMP, DESCRIBE, EXPLAIN, ILLUSTRATE). These shortcuts can be used in Grunt shell or within pig scripts. Following are the shortcuts supported by pig</p>
+   <ul>
+    <li>
+        <p> \d alias - shourtcut for <a href="test.html#dump">DUMP</a> operator. If alias is ignored last defined alias will be used.</p>
+    </li>
+    <li>
+        <p> \de alias - shourtcut for <a href="test.html#describe">DESCRIBE</a> operator. If alias is ignored last defined alias will be used.</p>
+    </li>
+    <li>
+        <p> \e alias - shourtcut for <a href="test.html#explain">EXPLAIN</a> operator. If alias is ignored last defined alias will be used.</p>
+    </li>
+    <li>
+        <p> \i alias - shourtcut for <a href="test.html#illustrate">ILLUSTRATE</a> operator. If alias is ignored last defined alias will be used.</p>
+    </li>
+    <li>
+        <p> \q - To quit grunt shell </p>
+    </li>
    </ul>
 </section> 
 </section>  
@@ -404,20 +532,20 @@ However, in a production environment you always want to use the STORE operator t
 <p></p>
 <p id="pig-properties">To specify Pig properties use one of these mechanisms:</p>
 <ul>
-	<li>The pig.properties file (add the directory that contains the pig.properties file to the classpath)</li>
-	<li>The -D command line option and a Pig property (pig -Dpig.tmpfilecompression=true)</li>
-	<li>The -P command line option and a properties file (pig -P mypig.properties)</li>
-	<li>The <a href="cmds.html#set">set</a> command (set pig.exec.nocombiner true)</li>
+    <li>The pig.properties file (add the directory that contains the pig.properties file to the classpath)</li>
+    <li>The -D and a Pig property in PIG_OPTS environment variable (export PIG_OPTS=-Dpig.tmpfilecompression=true)</li>
+    <li>The -P command line option and a properties file (pig -P mypig.properties)</li>
+    <li>The <a href="cmds.html#set">set</a> command (set pig.exec.nocombiner true)</li>
 </ul>
 <p><strong>Note:</strong> The properties file uses standard Java property file format.</p>
 <p>The following precedence order is supported: pig.properties &lt; -D Pig property &lt; -P properties file &lt; set command. This means that if the same property is provided using the –D command line option as well as the –P command line option (properties file), the value of the property in the properties file will take precedence.</p>
 
 <p id="hadoop-properties">To specify Hadoop properties you can use the same mechanisms:</p>
 <ul>
-	<li>Hadoop configuration files (include pig-cluster-hadoop-site.xml)</li>
-	<li>The -D command line option and a Hadoop property (pig –Dmapreduce.task.profile=true) </li>
-	<li>The -P command line option and a property file (pig -P property_file)</li>
-	<li>The <a href="cmds.html#set">set</a> command (set mapred.map.tasks.speculative.execution false)</li>
+    <li>Hadoop configuration files (include pig-cluster-hadoop-site.xml)</li>
+    <li>The -D and a Hadoop property in PIG_OPTS environment variable (export PIG_OPTS=–Dmapreduce.task.profile=true) </li>
+    <li>The -P command line option and a property file (pig -P property_file)</li>
+    <li>The <a href="cmds.html#set">set</a> command (set mapred.map.tasks.speculative.execution false)</li>
 </ul>
 <p></p>
 <p>The same precedence holds: Hadoop configuration files &lt; -D Hadoop property &lt; -P properties_file &lt; set command.</p>
@@ -431,7 +559,7 @@ However, in a production environment you always want to use the STORE operator t
   <section id="tutorial">
 <title>Pig Tutorial </title>
 
-<p>The Pig tutorial shows you how to run Pig scripts using Pig's local mode and mapreduce mode (see <a href="#execution-modes">Execution Modes</a>).</p>
+<p>The Pig tutorial shows you how to run Pig scripts using Pig's local mode, mapreduce mode, Tez mode and Spark mode (see <a href="#execution-modes">Execution Modes</a>).</p>
 
 <p>To get started, do the following preliminary tasks:</p>
 
@@ -439,24 +567,18 @@ However, in a production environment you always want to use the STORE operator t
 <li>Make sure the JAVA_HOME environment variable is set the root of your Java installation.</li>
 <li>Make sure your PATH includes bin/pig (this enables you to run the tutorials using the "pig" command). 
 <source>
-$ export PATH=/&lt;my-path-to-pig&gt;/pig-0.9.0/bin:$PATH 
+$ export PATH=/&lt;my-path-to-pig&gt;/pig-0.17.0/bin:$PATH 
 </source>
 </li>
 <li>Set the PIG_HOME environment variable:
 <source>
-$ export PIG_HOME=/&lt;my-path-to-pig&gt;/pig-0.9.0 
+$ export PIG_HOME=/&lt;my-path-to-pig&gt;/pig-0.17.0 
 </source></li>
 <li>Create the pigtutorial.tar.gz file:
 <ul>
-    <li>Move to the Pig tutorial directory (.../pig-0.9.0/tutorial).</li>
-	<li>Edit the build.xml file in the tutorial directory. 
-<source>
-Change this:   &lt;property name="pigjar" value="../pig.jar" /&gt;
-To this:       &lt;property name="pigjar" value="../pig-0.9.0-core.jar" /&gt;
-</source>
-	</li>
-	<li>Run the "ant" command from the tutorial directory. This will create the pigtutorial.tar.gz file.
-	</li>
+    <li>Move to the Pig tutorial directory (.../pig-0.17.0/tutorial).</li>
+    <li>Run the "ant" command from the tutorial directory. This will create the pigtutorial.tar.gz file.
+    </li>
 </ul>
 
 </li>
@@ -466,7 +588,7 @@ To this:       &lt;property name="pigjar" value="../pig-0.9.0-core.jar" /&gt;
 $ tar -xzf pigtutorial.tar.gz
 </source>
 </li>
-<li>A new directory named pigtmp is created. This directory contains the <a href="#Pig+Tutorial+Files">Pig Tutorial Files</a>. These files work with Hadoop 0.20.2 and include everything you need to run <a href="#pig-script-1">Pig Script 1</a> and <a href="#pig-script-2">Pig Script 2</a>.</li>
+<li>A new directory named pigtmp is created. This directory contains the <a href="#pig-tutorial-files">Pig Tutorial Files</a>. These files work with Hadoop 0.20.2 and include everything you need to run <a href="#pig-script-1">Pig Script 1</a> and <a href="#pig-script-2">Pig Script 2</a>.</li>
 </ol>
 
 
@@ -484,8 +606,16 @@ $ tar -xzf pigtutorial.tar.gz
 <source>
 $ pig -x local script1-local.pig
 </source>
+Or if you are using Tez local mode:
+<source>
+$ pig -x tez_local script1-local.pig
+</source>
+Or if you are using Spark local mode:
+<source>
+$ pig -x spark_local script1-local.pig
+</source>
 </li>
-<li>Review the result files, located in the part-r-00000 directory.
+<li>Review the result files, located in the script1-local-results.txt directory.
 <p>The output may contain a few Hadoop warnings which can be ignored:</p>
 <source>
 2010-04-08 12:55:33,642 [main] INFO  org.apache.hadoop.metrics.jvm.JvmMetrics 
@@ -497,7 +627,7 @@ $ pig -x local script1-local.pig
 
  <!-- ++++++++++++++++++++++++++++++++++ --> 
 <section>
-<title> Running the Pig Scripts in Mapreduce Mode</title>
+<title> Running the Pig Scripts in Mapreduce Mode, Tez Mode or Spark Mode</title>
 
 <p>To run the Pig scripts in mapreduce mode, do the following: </p>
 <ol>
@@ -511,7 +641,14 @@ $ hadoop fs –copyFromLocal excite.log.bz2 .
 <li>Set the PIG_CLASSPATH environment variable to the location of the cluster configuration directory (the directory that contains the core-site.xml, hdfs-site.xml and mapred-site.xml files):
 <source>
 export PIG_CLASSPATH=/mycluster/conf
-</source></li>
+</source>
+<p>If you are using Tez, you will also need to put Tez configuration directory (the directory that contains the tez-site.xml):</p>
+<source>
+export PIG_CLASSPATH=/mycluster/conf:/tez/conf
+</source>
+<p>If you are using Spark, you will also need to specify SPARK_HOME and specify SPARK_JAR which is the hdfs location where you uploaded $SPARK_HOME/lib/spark-assembly*.jar:</p>
+<source>export SPARK_HOME=/mysparkhome/; export SPARK_JAR=hdfs://example.com:8020/spark-assembly*.jar</source>
+<p><strong>Note:</strong> The PIG_CLASSPATH can also be used to add any other 3rd party dependencies or resource files a pig script may require. If there is also a need to make the added entries take the highest precedence in the Pig JVM's classpath order, one may also set the env-var PIG_USER_CLASSPATH_FIRST to any value, such as 'true' (and unset the env-var to disable).</p></li>
 <li>Set the HADOOP_CONF_DIR environment variable to the location of the cluster configuration directory:
 <source>
 export HADOOP_CONF_DIR=/mycluster/conf
@@ -520,6 +657,14 @@ export HADOOP_CONF_DIR=/mycluster/conf
 <li>Execute the following command (using either script1-hadoop.pig or script2-hadoop.pig):
 <source>
 $ pig script1-hadoop.pig
+</source>
+Or if you are using Tez:
+<source>
+$ pig -x tez script1-hadoop.pig
+</source>
+Or if you are using Spark:
+<source>
+$ pig -x spark script1-hadoop.pig
 </source>
 </li>
 
@@ -533,7 +678,7 @@ $ hadoop fs -cat 'script1-hadoop-results/*' | less
 </section>
 
  <!-- ++++++++++++++++++++++++++++++++++ -->   
-<section>
+<section id="pig-tutorial-files">
 <title> Pig Tutorial Files</title>
 
 <p>The contents of the Pig tutorial file (pigtutorial.tar.gz) are described here. </p>

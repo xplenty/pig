@@ -24,7 +24,10 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataInputStream;
@@ -65,7 +68,7 @@ public class TestMapSideCogroup {
     private static final String EMPTY_FILE = "empty.txt";
     private static final String DATA_WITH_NULL_KEYS = "null.txt";
 
-    private static MiniCluster cluster = MiniCluster.buildCluster();
+    private static MiniGenericCluster cluster = MiniGenericCluster.buildCluster();
 
     @Before
     public void setUp() throws Exception {
@@ -145,7 +148,7 @@ public class TestMapSideCogroup {
     @Test
     public void testCompilation(){
         try{
-            PigServer pigServer = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+            PigServer pigServer = new PigServer(cluster.getExecType(), cluster.getProperties());
             String query = "A = LOAD 'data1' using "+ DummyCollectableLoader.class.getName() +"() as (id, name, grade);" + 
             "B = LOAD 'data2' using "+ DummyIndexableLoader.class.getName() +"() as (id, name, grade);" +
             "D = LOAD 'data2' using "+ DummyIndexableLoader.class.getName() +"() as (id, name, grade);" +
@@ -168,13 +171,17 @@ public class TestMapSideCogroup {
             assertEquals(2,mrPlan.size());
 
             Iterator<MapReduceOper> itr = mrPlan.iterator();
-            MapReduceOper oper = itr.next();
-            assertTrue(oper.reducePlan.isEmpty());
-            assertFalse(oper.mapPlan.isEmpty());
-
-            oper = itr.next();
-            assertFalse(oper.reducePlan.isEmpty());
-            assertFalse(oper.mapPlan.isEmpty());
+            List<MapReduceOper> opers = new ArrayList<MapReduceOper>();
+            opers.add(itr.next());
+            opers.add(itr.next());
+            //Order of entrySet is not guaranteed with jdk1.7
+            Collections.sort(opers);
+            
+            assertTrue(opers.get(0).reducePlan.isEmpty());
+            assertFalse(opers.get(0).mapPlan.isEmpty());
+            
+            assertFalse(opers.get(1).reducePlan.isEmpty());
+            assertFalse(opers.get(1).mapPlan.isEmpty());
         } catch(Exception e){
             e.printStackTrace();
             fail("Compilation of merged cogroup failed.");
@@ -211,7 +218,7 @@ public class TestMapSideCogroup {
     
     @Test
     public void testFailure2() throws Exception{
-        PigServer pigServer = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer pigServer = new PigServer(cluster.getExecType(), cluster.getProperties());
         String query = "A = LOAD 'data1' using "+ DummyCollectableLoader.class.getName() +"() as (id, name, grade);" +
         "B = LOAD 'data2' using "+ DummyIndexableLoader.class.getName() +"() as (id, name, grade);" +
         "D = LOAD 'data2' using "+ DummyIndexableLoader.class.getName() +"() as (id, name, grade);" +
@@ -227,7 +234,7 @@ public class TestMapSideCogroup {
         boolean exceptionCaught = false;
         try{
             Util.buildPp(pigServer, query);   
-        }catch (java.lang.reflect.InvocationTargetException e){
+        }catch (FrontendException e){
             exceptionCaught = true;
         }
         assertTrue(exceptionCaught);
@@ -236,7 +243,7 @@ public class TestMapSideCogroup {
     @Test
     public void testSimple() throws Exception{
 
-        PigServer pigServer = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer pigServer = new PigServer(cluster.getExecType(), cluster.getProperties());
         pigServer.registerQuery("A = LOAD '" + INPUT_FILE1 + "' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray,c2:int);");
         pigServer.registerQuery("B = LOAD '" + INPUT_FILE2 + "' using "+ DummyIndexableLoader.class.getName()   +"() as (c1:chararray,c2:int);");
 
@@ -266,7 +273,7 @@ public class TestMapSideCogroup {
     @Test
     public void test3Way() throws Exception{
 
-        PigServer pigServer = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer pigServer = new PigServer(cluster.getExecType(), cluster.getProperties());
         pigServer.registerQuery("A = LOAD '" + INPUT_FILE1 + "' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray,c2:int);");
         pigServer.registerQuery("B = LOAD '" + INPUT_FILE2 + "' using "+ DummyIndexableLoader.class.getName()   +"() as (c1:chararray,c2:int);");
         pigServer.registerQuery("E = LOAD '" + INPUT_FILE3 + "' using "+ DummyIndexableLoader.class.getName()   +"() as (c1:chararray,c2:int);");
@@ -300,15 +307,14 @@ public class TestMapSideCogroup {
     @Test
     public void testMultiSplits() throws Exception{
 
-        PigServer pigServer = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer pigServer = new PigServer(cluster.getExecType(), cluster.getProperties());
         pigServer.registerQuery("A = LOAD '" + INPUT_FILE1 + "," + INPUT_FILE4 + "' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray,c2:int);");
         pigServer.registerQuery("B = LOAD '" + INPUT_FILE5 + "' using "+ DummyIndexableLoader.class.getName()   +"() as (c1:chararray,c2:int);");
 
-        DataBag dbMergeCogrp = BagFactory.getInstance().newDefaultBag();
+        List<Tuple> dbMergeCogrp = new ArrayList<Tuple>();
 
         pigServer.registerQuery("C = cogroup A by c1, B by c1 using 'merge';");
         Iterator<Tuple> iter = pigServer.openIterator("C");
-
 
         while(iter.hasNext()) {
             Tuple t = iter.next();
@@ -328,18 +334,35 @@ public class TestMapSideCogroup {
                 "(3,{(3,3),(3,2),(3,1)},{(3,1),(3,2),(3,3)})"
         };
 
-        assertEquals(9, dbMergeCogrp.size());
-        Iterator<Tuple> itr = dbMergeCogrp.iterator();
-        for(int i=0; i<9; i++){
-            assertEquals(itr.next().toString(), results[i]);   
+        List<Tuple> expected = Util.getTuplesFromConstantTupleStrings(results);
+
+        //We need sort dbMergeCogrp because the result is different in sequence between spark and other mode when
+        //multiple files are loaded(LOAD INPUT_FILE1,INPUT_FILE4...)
+        for (Tuple t : dbMergeCogrp) {
+            Util.convertBagToSortedBag(t);
         }
-        assertFalse(itr.hasNext());
+        for (Tuple t : expected) {
+            Util.convertBagToSortedBag(t);
+        }
+
+        Collections.sort(dbMergeCogrp);
+        Collections.sort(expected);
+        assertEquals(dbMergeCogrp.size(), expected.size());
+
+        //Since TestMapSideCogroup.DummyIndexableLoader.getNext() does not
+        //apply schema for each input tuple,Util#checkQueryOutputsAfterSortRecursive fails to assert.
+        // The schema for C is (int,{(chararray,int),(chararray,int),(chararray,int)},{(chararray,int),(chararray,int),(chararray,int)}).
+        //But the schema for result "dbMergeCogrp" is (int,{(chararray,int),(chararray,int),(chararray,int)},{(chararray,chararray),(chararray,chararray),(chararray,chararray)})
+        Iterator<Tuple> itr = dbMergeCogrp.iterator();
+        for (int i = 0; i < dbMergeCogrp.size(); i++) {
+            assertEquals(itr.next().toString(), expected.get(i).toString());
+        }
     }
 
     @Test
     public void testCogrpOnMultiKeys() throws Exception{
 
-        PigServer pigServer = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer pigServer = new PigServer(cluster.getExecType(), cluster.getProperties());
         pigServer.registerQuery("A = LOAD '" + INPUT_FILE1 + "' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray,c2:chararray);");
         pigServer.registerQuery("B = LOAD '" + INPUT_FILE2 + "' using "+ DummyIndexableLoader.class.getName()   +"() as (c1:chararray,c2:chararray);");
 
@@ -375,7 +398,7 @@ public class TestMapSideCogroup {
     @Test
     public void testEmptyDeltaFile() throws Exception{
 
-        PigServer pigServer = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer pigServer = new PigServer(cluster.getExecType(), cluster.getProperties());
         pigServer.registerQuery("A = LOAD '" + INPUT_FILE1 + "' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray,c2:int);");
         pigServer.registerQuery("B = LOAD '" + EMPTY_FILE + "' using "+ DummyIndexableLoader.class.getName()   +"() as (c1:chararray,c2:int);");
 
@@ -406,7 +429,7 @@ public class TestMapSideCogroup {
     @Test
     public void testDataWithNullKeys() throws Exception{
 
-        PigServer pigServer = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+        PigServer pigServer = new PigServer(cluster.getExecType(), cluster.getProperties());
         pigServer.registerQuery("A = LOAD '" + DATA_WITH_NULL_KEYS + "' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray,c2:int);");
         pigServer.registerQuery("B = LOAD '" + DATA_WITH_NULL_KEYS + "' using "+ DummyIndexableLoader.class.getName()   +"() as (c1:chararray,c2:int);");
 
@@ -472,7 +495,7 @@ public class TestMapSideCogroup {
 
         @Override
         public void initialize(Configuration conf) throws IOException {
-            is = FileSystem.get(conf).open(new Path(loc));
+            is = FileSystem.get(new Path(loc).toUri(), conf).open(new Path(loc));
         }
 
         @Override

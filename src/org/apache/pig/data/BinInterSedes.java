@@ -23,6 +23,8 @@ import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -53,7 +55,7 @@ import org.joda.time.DateTimeZone;
 @InterfaceAudience.Private
 @InterfaceStability.Stable
 public class BinInterSedes implements InterSedes {
-    
+
     private static final int ONE_MINUTE = 60000;
 
     public static final byte BOOLEAN_TRUE = 0;
@@ -107,8 +109,6 @@ public class BinInterSedes implements InterSedes {
     public static final byte LONG_0 = 34;
     public static final byte LONG_1 = 35;
 
-    public static final byte DATETIME = 50;
-
     public static final byte TUPLE_0 = 36;
     public static final byte TUPLE_1 = 37;
     public static final byte TUPLE_2 = 38;
@@ -119,6 +119,11 @@ public class BinInterSedes implements InterSedes {
     public static final byte TUPLE_7 = 43;
     public static final byte TUPLE_8 = 44;
     public static final byte TUPLE_9 = 45;
+
+    public static final byte BIGINTEGER = 46;
+    public static final byte BIGDECIMAL = 47;
+
+    public static final byte DATETIME = 48;
 
     private static TupleFactory mTupleFactory = TupleFactory.getInstance();
     private static BagFactory mBagFactory = BagFactory.getInstance();
@@ -303,7 +308,7 @@ public class BinInterSedes implements InterSedes {
 
     /*
      * (non-Javadoc)
-     * 
+     *
      * @see org.apache.pig.data.InterSedes#readDatum(java.io.DataInput)
      */
     @Override
@@ -322,7 +327,7 @@ public class BinInterSedes implements InterSedes {
     /**
      * Expects binInterSedes data types (NOT DataType types!)
      * <p>
-     * 
+     *
      * @see org.apache.pig.data.InterSedes#readDatum(java.io.DataInput, byte)
      */
     @Override
@@ -389,6 +394,12 @@ public class BinInterSedes implements InterSedes {
         case DOUBLE:
             return Double.valueOf(in.readDouble());
 
+        case BIGINTEGER:
+            return readBigInteger(in);
+
+        case BIGDECIMAL:
+            return readBigDecimal(in);
+
         case BOOLEAN_TRUE:
             return Boolean.valueOf(true);
 
@@ -423,9 +434,25 @@ public class BinInterSedes implements InterSedes {
         }
     }
 
+    private Object readBigDecimal(DataInput in) throws IOException {
+        return  new BigDecimal((String)readDatum(in));
+    }
+
+    private Object readBigInteger(DataInput in) throws IOException {
+        return new BigInteger((String)readDatum(in));
+    }
+
+    private void writeBigInteger(DataOutput out, BigInteger bi) throws IOException {
+        writeDatum(out, bi.toString());
+    }
+
+    private void writeBigDecimal(DataOutput out, BigDecimal bd) throws IOException {
+        writeDatum(out, bd.toString());
+    }
+
     /*
      * (non-Javadoc)
-     * 
+     *
      * @see org.apache.pig.data.InterSedes#writeDatum(java.io.DataOutput, java.lang.Object)
      */
     @Override
@@ -509,10 +536,20 @@ public class BinInterSedes implements InterSedes {
             out.writeLong(((DateTime) val).getMillis());
             out.writeShort(((DateTime) val).getZone().getOffset((DateTime) val) / ONE_MINUTE);
             break;
-            
+
         case DataType.FLOAT:
             out.writeByte(FLOAT);
             out.writeFloat((Float) val);
+            break;
+
+        case DataType.BIGINTEGER:
+            out.writeByte(BIGINTEGER);
+            writeBigInteger(out, (BigInteger)val);
+            break;
+
+        case DataType.BIGDECIMAL:
+            out.writeByte(BIGDECIMAL);
+            writeBigDecimal(out, (BigDecimal)val);
             break;
 
         case DataType.DOUBLE:
@@ -616,7 +653,7 @@ public class BinInterSedes implements InterSedes {
 
     /*
      * (non-Javadoc)
-     * 
+     *
      * @see org.apache.pig.data.InterSedes#addColsToTuple(java.io.DataInput, org.apache.pig.data.Tuple)
      */
     @Override
@@ -627,7 +664,7 @@ public class BinInterSedes implements InterSedes {
             t.append(readDatum(in));
         }
     }
-    
+
     public static class BinInterSedesTupleRawComparator extends WritableComparator implements TupleRawComparator {
 
         private final Log mLog = LogFactory.getLog(getClass());
@@ -651,10 +688,6 @@ public class BinInterSedes implements InterSedes {
 
         @Override
         public void setConf(Configuration conf) {
-            if (!(conf instanceof JobConf)) {
-                mLog.warn("Expected jobconf in setConf, got " + conf.getClass().getName());
-                return;
-            }
             try {
                 mAsc = (boolean[]) ObjectSerializer.deserialize(conf.get("pig.sortOrder"));
                 mSecondaryAsc = (boolean[]) ObjectSerializer.deserialize(conf.get("pig.secondarySortOrder"));
@@ -702,7 +735,7 @@ public class BinInterSedes implements InterSedes {
 
         /**
          * Compare two BinSedesTuples as raw bytes. We deal with sort ordering in this method.
-         * 
+         *
          * @throws IOException
          */
         private int compareBinSedesTuple(ByteBuffer bb1, ByteBuffer bb2) throws IOException {
@@ -854,6 +887,54 @@ public class BinInterSedes implements InterSedes {
                 }
                 break;
             }
+            case BinInterSedes.BIGINTEGER: {
+                type1 = DataType.BIGINTEGER;
+                type2 = getGeneralizedDataType(dt2);
+                if (type1 == type2) {
+                    int sz1 = readSize(bb1, bb1.get());
+                    int sz2 = readSize(bb2, bb2.get());
+                    byte[] ca1 = new byte[sz1];
+                    byte[] ca2 = new byte[sz2];
+                    bb1.get(ca1);
+                    bb2.get(ca2);
+                    String str1 = null, str2 = null;
+                    try {
+                        str1 = new String(ca1, BinInterSedes.UTF8);
+                        str2 = new String(ca2, BinInterSedes.UTF8);
+                    } catch (UnsupportedEncodingException uee) {
+                        mLog.warn("Unsupported string encoding", uee);
+                        uee.printStackTrace();
+                    }
+                    if (str1 != null && str2 != null) {
+                        rc = new BigInteger(str1).compareTo(new BigInteger(str2));
+                    }
+                }
+                break;
+            }
+            case BinInterSedes.BIGDECIMAL: {
+                type1 = DataType.BIGDECIMAL;
+                type2 = getGeneralizedDataType(dt2);
+                if (type1 == type2) {
+                    int sz1 = readSize(bb1, bb1.get());
+                    int sz2 = readSize(bb2, bb2.get());
+                    byte[] ca1 = new byte[sz1];
+                    byte[] ca2 = new byte[sz2];
+                    bb1.get(ca1);
+                    bb2.get(ca2);
+                    String str1 = null, str2 = null;
+                    try {
+                        str1 = new String(ca1, BinInterSedes.UTF8);
+                        str2 = new String(ca2, BinInterSedes.UTF8);
+                    } catch (UnsupportedEncodingException uee) {
+                        mLog.warn("Unsupported string encoding", uee);
+                        uee.printStackTrace();
+                    }
+                    if (str1 != null && str2 != null) {
+                        rc = new BigDecimal(str1).compareTo(new BigDecimal(str2));
+                    }
+                }
+                break;
+            }
             case BinInterSedes.TINYBYTEARRAY:
             case BinInterSedes.SMALLBYTEARRAY:
             case BinInterSedes.BYTEARRAY: {
@@ -862,11 +943,11 @@ public class BinInterSedes implements InterSedes {
                 if (type1 == type2) {
                     int basz1 = readSize(bb1, dt1);
                     int basz2 = readSize(bb2, dt2);
-                    byte[] ba1 = new byte[basz1];
-                    byte[] ba2 = new byte[basz2];
-                    bb1.get(ba1);
-                    bb2.get(ba2);
-                    rc = DataByteArray.compare(ba1, ba2);
+                    rc = WritableComparator.compareBytes(
+                          bb1.array(), bb1.position(), basz1,
+                          bb2.array(), bb2.position(), basz2);
+                    bb1.position(bb1.position() + basz1);
+                    bb2.position(bb2.position() + basz2);
                 }
                 break;
             }
@@ -877,17 +958,16 @@ public class BinInterSedes implements InterSedes {
                 if (type1 == type2) {
                     int casz1 = readSize(bb1, dt1);
                     int casz2 = readSize(bb2, dt2);
-                    byte[] ca1 = new byte[casz1];
-                    byte[] ca2 = new byte[casz2];
-                    bb1.get(ca1);
-                    bb2.get(ca2);
                     String str1 = null, str2 = null;
                     try {
-                        str1 = new String(ca1, BinInterSedes.UTF8);
-                        str2 = new String(ca2, BinInterSedes.UTF8);
+                        str1 = new String(bb1.array(), bb1.position(), casz1, BinInterSedes.UTF8);
+                        str2 = new String(bb2.array(), bb2.position(), casz2, BinInterSedes.UTF8);
                     } catch (UnsupportedEncodingException uee) {
                         mLog.warn("Unsupported string encoding", uee);
                         uee.printStackTrace();
+                    } finally {
+                        bb1.position(bb1.position() + casz1);
+                        bb2.position(bb2.position() + casz2);
                     }
                     if (str1 != null && str2 != null)
                         rc = str1.compareTo(str2);
@@ -992,7 +1072,7 @@ public class BinInterSedes implements InterSedes {
                         // we have a compound tuple key (main_key, secondary_key). Each key has its own sort order, so
                         // we have to deal with them separately. We delegate it to the first invocation of
                         // compareDatum()
-                        assert (tsz1 == 3); // main_key, secondary_key, value
+                        assert (tsz1 == 2); // main_key, secondary_key
                         result = compareDatum(t1.get(0), t2.get(0), mAsc);
                         if (result == 0)
                             result = compareDatum(t1.get(1), t2.get(1), mSecondaryAsc);
@@ -1139,6 +1219,10 @@ public class BinInterSedes implements InterSedes {
                 return DataType.FLOAT;
             case BinInterSedes.DOUBLE:
                 return DataType.DOUBLE;
+            case BinInterSedes.BIGINTEGER:
+                return DataType.BIGINTEGER;
+            case BinInterSedes.BIGDECIMAL:
+                return DataType.BIGDECIMAL;
             case BinInterSedes.TINYBYTEARRAY:
             case BinInterSedes.SMALLBYTEARRAY:
             case BinInterSedes.BYTEARRAY:
@@ -1207,7 +1291,7 @@ public class BinInterSedes implements InterSedes {
                 throw new RuntimeException("Unexpected data type " + type + " found in stream.");
             }
         }
-        
+
         /**
          * @param bb ByteBuffer having serialized object, including the type information
          * @param type serialized type information

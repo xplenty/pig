@@ -27,10 +27,13 @@ import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.GnuParser;
 import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.compress.BZip2Codec;
@@ -41,8 +44,8 @@ import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.OutputFormat;
 import org.apache.hadoop.mapreduce.RecordReader;
 import org.apache.hadoop.mapreduce.RecordWriter;
-import org.apache.hadoop.mapreduce.lib.input.FileSplit;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.input.FileSplit;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.pig.Expression;
 import org.apache.pig.FileInputLoadFunc;
@@ -50,6 +53,8 @@ import org.apache.pig.LoadCaster;
 import org.apache.pig.LoadFunc;
 import org.apache.pig.LoadMetadata;
 import org.apache.pig.LoadPushDown;
+import org.apache.pig.OverwritableStoreFunc;
+import org.apache.pig.PigConfiguration;
 import org.apache.pig.PigException;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
@@ -58,9 +63,11 @@ import org.apache.pig.StoreFunc;
 import org.apache.pig.StoreFuncInterface;
 import org.apache.pig.StoreMetadata;
 import org.apache.pig.backend.executionengine.ExecException;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRConfiguration;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigSplit;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigTextInputFormat;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigTextOutputFormat;
+import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POStore;
 import org.apache.pig.bzip2r.Bzip2TextInputFormat;
 import org.apache.pig.data.DataByteArray;
 import org.apache.pig.data.Tuple;
@@ -81,10 +88,11 @@ import org.apache.pig.parser.ParserException;
  * An optional second constructor argument is provided that allows one to customize
  * advanced behaviors. A list of available options is below:
  * <ul>
- * <li><code>-schema</code> Reads/Stores the schema of the relation using a 
+ * <li><code>-schema</code> Reads/Stores the schema of the relation using a
  *  hidden JSON file.
  * <li><code>-noschema</code> Ignores a stored schema during loading.
- * <li><code>-tagsource</code> Appends input source file path to beginning of each tuple.
+ * <li><code>-tagFile</code> Appends input source file name to beginning of each tuple.
+ * <li><code>-tagPath</code> Appends input source file path to beginning of each tuple.
  * </ul>
  * <p>
  * <h3>Schemas</h3>
@@ -93,7 +101,7 @@ import org.apache.pig.parser.ParserException;
  * field names and types of the data without the need for a user to explicitly provide the schema in an
  * <code>as</code> clause, unless <code>-noschema</code> is specified. No attempt to merge conflicting
  * schemas is made during loading. The first schema encountered during a file system scan is used.
- * If the schema file is not present while '-schema' option is used during loading, 
+ * If the schema file is not present while '-schema' option is used during loading,
  * it results in an error.
  * <p>
  * In addition, using <code>-schema</code> drops a ".pig_headers" file in the output directory.
@@ -101,9 +109,12 @@ import org.apache.pig.parser.ParserException;
  * files with header lines easier (just cat the header to your data).
  * <p>
  * <h3>Source tagging</h3>
- * If<code>-tagsource</code> is specified, PigStorage will prepend input split path to each Tuple/row.
- * Usage: A = LOAD 'input' using PigStorage(',','-tagsource'); B = foreach A generate $0;
- * The first field (0th index) in each Tuple will contain input path 
+ * If<code>-tagFile</code> is specified, PigStorage will prepend input split name to each Tuple/row.
+ * Usage: A = LOAD 'input' using PigStorage(',','-tagFile'); B = foreach A generate $0;
+ * The first field (0th index) in each Tuple will contain input file name.
+ * If<code>-tagPath</code> is specified, PigStorage will prepend input split path to each Tuple/row.
+ * Usage: A = LOAD 'input' using PigStorage(',','-tagPath'); B = foreach A generate $0;
+ * The first field (0th index) in each Tuple will contain input file path
  * <p>
  * Note that regardless of whether or not you store the schema, you <b>always</b> need to specify
  * the correct delimiter to read your data. If you store reading delimiter "#" and then load using
@@ -121,7 +132,7 @@ import org.apache.pig.parser.ParserException;
  */
 @SuppressWarnings("unchecked")
 public class PigStorage extends FileInputLoadFunc implements StoreFuncInterface,
-LoadPushDown, LoadMetadata, StoreMetadata {
+LoadPushDown, LoadMetadata, StoreMetadata, OverwritableStoreFunc {
     protected RecordReader in = null;
     protected RecordWriter writer = null;
     protected final Log mLog = LogFactory.getLog(getClass());
@@ -134,25 +145,39 @@ LoadPushDown, LoadMetadata, StoreMetadata {
 
     boolean isSchemaOn = false;
     boolean dontLoadSchema = false;
+    boolean overwriteOutput = false;
     protected ResourceSchema schema;
     protected LoadCaster caster;
 
-    private final CommandLine configuredOptions;
-    private final Options validOptions = new Options();
-    private final static CommandLineParser parser = new GnuParser();
-
     protected boolean[] mRequiredColumns = null;
     private boolean mRequiredColumnsInitialized = false;
-    
-    //Indicates whether the input file path should be read.
-    private boolean tagSource = false;
-    private static final String TAG_SOURCE_PATH = "tagsource";
+
+    // Indicates whether the input file name/path should be read.
+    private boolean tagFile = false;
+    private static final String TAG_SOURCE_FILE = "tagFile";
+    private boolean tagPath = false;
+    private static final String TAG_SOURCE_PATH = "tagPath";
     private Path sourcePath = null;
 
-    private void populateValidOptions() {
+    // it determines whether to depend on pig's own Bzip2TextInputFormat or
+    // to simply depend on hadoop for handling bzip2 inputs
+    private boolean bzipinput_usehadoops ;
+
+    private Options populateValidOptions() {
+        Options validOptions = new Options();
         validOptions.addOption("schema", false, "Loads / Stores the schema of the relation using a hidden JSON file.");
         validOptions.addOption("noschema", false, "Disable attempting to load data schema from the filesystem.");
-        validOptions.addOption(TAG_SOURCE_PATH, false, "Appends input source file path to beginning of each tuple. ");
+        validOptions.addOption(TAG_SOURCE_FILE, false, "Appends input source file name to beginning of each tuple.");
+        validOptions.addOption(TAG_SOURCE_PATH, false, "Appends input source file path to beginning of each tuple.");
+        validOptions.addOption("tagsource", false, "Appends input source file name to beginning of each tuple.");
+        Option overwrite = new Option("overwrite", "Overwrites the destination.");
+        overwrite.setLongOpt("overwrite");
+        overwrite.setOptionalArg(true);
+        overwrite.setArgs(1);
+        overwrite.setArgName("overwrite");
+        validOptions.addOption(overwrite);
+
+        return validOptions;
     }
 
     public PigStorage() {
@@ -178,21 +203,36 @@ LoadPushDown, LoadMetadata, StoreMetadata {
      * <ul>
      * <li><code>-schema</code> Loads / Stores the schema of the relation using a hidden JSON file.
      * <li><code>-noschema</code> Ignores a stored schema during loading.
-     * <li><code>-tagsource</code> Appends input source file path to beginning of each tuple.
+     * <li><code>-tagFile</code> Appends input source file name to beginning of each tuple.
+     * <li><code>-tagPath</code> Appends input source file path to beginning of each tuple.
      * </ul>
      * @param delimiter the single byte character that is used to separate fields.
      * @param options a list of options that can be used to modify PigStorage behavior
      * @throws ParseException
      */
     public PigStorage(String delimiter, String options) {
-        populateValidOptions();
         fieldDel = StorageUtil.parseFieldDel(delimiter);
+        Options validOptions = populateValidOptions();
         String[] optsArr = options.split(" ");
         try {
-            configuredOptions = parser.parse(validOptions, optsArr);
+            CommandLineParser parser = new GnuParser();
+            CommandLine configuredOptions = parser.parse(validOptions, optsArr);
             isSchemaOn = configuredOptions.hasOption("schema");
+            if (configuredOptions.hasOption("overwrite")) {
+                String value = configuredOptions.getOptionValue("overwrite");
+                if ("true".equalsIgnoreCase(value)) {
+                    overwriteOutput = true;
+                }
+            }
             dontLoadSchema = configuredOptions.hasOption("noschema");
-            tagSource = configuredOptions.hasOption(TAG_SOURCE_PATH);
+            tagFile = configuredOptions.hasOption(TAG_SOURCE_FILE);
+            tagPath = configuredOptions.hasOption(TAG_SOURCE_PATH);
+            // TODO: Remove -tagsource in 0.13. For backward compatibility, we
+            // need tagsource to be supported until at least 0.12
+            if (configuredOptions.hasOption("tagsource")) {
+                mLog.warn("'-tagsource' is deprecated. Use '-tagFile' instead.");
+                tagFile = true;
+            }
         } catch (ParseException e) {
             HelpFormatter formatter = new HelpFormatter();
             formatter.printHelp( "PigStorage(',', '[options]')", validOptions);
@@ -212,9 +252,11 @@ LoadPushDown, LoadMetadata, StoreMetadata {
             }
             mRequiredColumnsInitialized = true;
         }
-        //Prepend input source path if source tagging is enabled
-        if(tagSource) {
-        	mProtoTuple.add(new DataByteArray(sourcePath.getName()));
+        // Prepend input source path if source tagging is enabled
+        if (tagFile && (mRequiredColumns == null || mRequiredColumns[0])) {
+            mProtoTuple.add(new DataByteArray(sourcePath.getName()));
+        } else if (tagPath && (mRequiredColumns == null || mRequiredColumns[0])) {
+            mProtoTuple.add(new DataByteArray(sourcePath.toString()));
         }
 
         try {
@@ -226,18 +268,20 @@ LoadPushDown, LoadMetadata, StoreMetadata {
             byte[] buf = value.getBytes();
             int len = value.getLength();
             int start = 0;
-            int fieldID = 0;
+            // If tagging is enabled, mRequiredColumns is created based on the
+            // schema that includes tagfile/path as first index(0)
+            int fieldID = tagFile || tagPath ? 1 : 0;
             for (int i = 0; i < len; i++) {
                 if (buf[i] == fieldDel) {
                     if (mRequiredColumns==null || (mRequiredColumns.length>fieldID && mRequiredColumns[fieldID]))
-                        readField(buf, start, i);
+                        addTupleValue(mProtoTuple, buf, start, i);
                     start = i + 1;
                     fieldID++;
                 }
             }
             // pick up the last field
             if (start <= len && (mRequiredColumns==null || (mRequiredColumns.length>fieldID && mRequiredColumns[fieldID]))) {
-                readField(buf, start, len);
+                addTupleValue(mProtoTuple, buf, start, len);
             }
             Tuple t =  mTupleFactory.newTupleNoCopy(mProtoTuple);
 
@@ -263,11 +307,13 @@ LoadPushDown, LoadMetadata, StoreMetadata {
                 schema = new ResourceSchema(Utils.getSchemaFromString(serializedSchema));
             } catch (ParserException e) {
                 mLog.error("Unable to parse serialized schema " + serializedSchema, e);
+                // all bets are off - there's no guarantee that we'll return
+                // either the fields in the data or the fields in the schema
+                // the user specified (or required)
             }
         }
 
         if (schema != null) {
-
             ResourceFieldSchema[] fieldSchemas = schema.getFields();
             int tupleIdx = 0;
             // If some fields have been projected out, the tuple
@@ -276,15 +322,31 @@ LoadPushDown, LoadMetadata, StoreMetadata {
             // and cast those.
             for (int i = 0; i < fieldSchemas.length; i++) {
                 if (mRequiredColumns == null || (mRequiredColumns.length>i && mRequiredColumns[i])) {
+                    if (tupleIdx >= tup.size()) {
+                        tup.append(null);
+                    }
+
                     Object val = null;
                     if(tup.get(tupleIdx) != null){
                         byte[] bytes = ((DataByteArray) tup.get(tupleIdx)).get();
                         val = CastUtils.convertToType(caster, bytes,
                                 fieldSchemas[i], fieldSchemas[i].getType());
+                        tup.set(tupleIdx, val);
                     }
-                    tup.set(tupleIdx, val);
                     tupleIdx++;
                 }
+            }
+            // If input record somehow has more fields than the provided schema
+            // drop the extra fields
+            if( tup.size() > fieldSchemas.length ) {
+                int lastindex = tup.size() - 1;
+                List<Object> list = tup.getAll();
+                for(int i = lastindex; i >= fieldSchemas.length ; i--) {
+                    list.remove(i);
+                }
+                // Tuple.getAll() may not return reference to the interal List
+                // so creating a new Tuple.
+                tup =  mTupleFactory.newTupleNoCopy(list);
             }
         }
         return tup;
@@ -299,12 +361,22 @@ LoadPushDown, LoadMetadata, StoreMetadata {
         }
     }
 
-    private void readField(byte[] buf, int start, int end) {
+    private void addTupleValue(ArrayList<Object> tuple, byte[] buf, int start, int end) {
+        tuple.add(readField(buf, start, end));
+    }
+
+    /**
+     * Read the bytes between start and end into a DataByteArray for inclusion in the return tuple.
+     * @param bytes byte array to copy data from
+     * @param start starting point to copy from
+     * @param end ending point to copy to, exclusive.
+     * @return
+     */
+    protected DataByteArray readField(byte[] bytes, int start, int end) {
         if (start == end) {
-            // NULL value
-            mProtoTuple.add(null);
+            return null;
         } else {
-            mProtoTuple.add(new DataByteArray(buf, start, end));
+            return new DataByteArray(bytes, start, end);
         }
     }
 
@@ -352,9 +424,12 @@ LoadPushDown, LoadMetadata, StoreMetadata {
 
     @Override
     public InputFormat getInputFormat() {
-        if(loadLocation.endsWith(".bz2") || loadLocation.endsWith(".bz")) {
+        if((loadLocation.endsWith(".bz2") || loadLocation.endsWith(".bz"))
+           && (!bzipinput_usehadoops) ) {
+            mLog.info("Using Bzip2TextInputFormat");
             return new Bzip2TextInputFormat();
         } else {
+            mLog.info("Using PigTextInputFormat");
             return new PigTextInputFormat();
         }
     }
@@ -362,8 +437,8 @@ LoadPushDown, LoadMetadata, StoreMetadata {
     @Override
     public void prepareToRead(RecordReader reader, PigSplit split) {
         in = reader;
-        if(tagSource) {
-        	sourcePath = ((FileSplit)split.getWrappedSplit()).getPath();
+        if (tagFile || tagPath) {
+            sourcePath = ((FileSplit)split.getWrappedSplit()).getPath();
         }
     }
 
@@ -372,6 +447,9 @@ LoadPushDown, LoadMetadata, StoreMetadata {
     throws IOException {
         loadLocation = location;
         FileInputFormat.setInputPaths(job, location);
+        bzipinput_usehadoops = job.getConfiguration().getBoolean(
+                                  PigConfiguration.PIG_BZIP_USE_HADOOP_INPUTFORMAT,
+                                  true );
     }
 
     @Override
@@ -386,7 +464,7 @@ LoadPushDown, LoadMetadata, StoreMetadata {
 
     @Override
     public void setStoreLocation(String location, Job job) throws IOException {
-        job.getConfiguration().set("mapred.textoutputformat.separator", "");
+        job.getConfiguration().set(MRConfiguration.TEXTOUTPUTFORMAT_SEPARATOR, "");
         FileOutputFormat.setOutputPath(job, new Path(location));
 
         if( "true".equals( job.getConfiguration().get( "output.compression.enabled" ) ) ) {
@@ -471,8 +549,10 @@ LoadPushDown, LoadMetadata, StoreMetadata {
             schema = (new JsonMetadata()).getSchema(location, job, isSchemaOn);
 
             if (signature != null && schema != null) {
-                if(tagSource) {
-                    schema = Utils.getSchemaWithInputSourceTag(schema);
+                if(tagFile) {
+                    schema = Utils.getSchemaWithInputSourceTag(schema, "INPUT_FILE_NAME");
+                } else if(tagPath) {
+                    schema = Utils.getSchemaWithInputSourceTag(schema, "INPUT_FILE_PATH");
                 }
                 Properties p = UDFContext.getUDFContext().getUDFProperties(this.getClass(),
                         new String[] {signature});
@@ -518,5 +598,25 @@ LoadPushDown, LoadMetadata, StoreMetadata {
     public void storeStatistics(ResourceStatistics stats, String location,
             Job job) throws IOException {
 
+    }
+
+    @Override
+    public boolean shouldOverwrite() {
+        return this.overwriteOutput;
+    }
+
+    @Override
+    public void cleanupOutput(POStore store, Job job) throws IOException {
+        Configuration conf = job.getConfiguration();
+        String output = conf.get(MRConfiguration.OUTPUT_DIR);
+        Path outputPath = null;
+        if (output != null)
+            outputPath = new Path(output);
+        FileSystem fs = outputPath.getFileSystem(conf);
+        try {
+            fs.delete(outputPath, true);
+        } catch (Exception e) {
+            mLog.warn("Could not delete output " + output);
+        }
     }
 }

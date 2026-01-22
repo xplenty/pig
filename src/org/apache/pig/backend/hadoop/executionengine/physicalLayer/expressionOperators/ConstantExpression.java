@@ -18,21 +18,17 @@
 package org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators;
 
 import java.util.List;
-import java.util.Map;
 
-import org.joda.time.DateTime;
 
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
-import org.apache.pig.data.DataBag;
-import org.apache.pig.data.DataByteArray;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
-import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.NodeIdGenerator;
+import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
 
 
@@ -98,7 +94,7 @@ public class ConstantExpression extends ExpressionOperator {
         attachInput(dummyTuple);
     }
 
-    protected Result genericGetNext(Object obj, byte dataType) throws ExecException {
+    private Result genericGetNext(byte dataType) throws ExecException {
         res = processInput();
         if(res.returnStatus != POStatus.STATUS_OK) {
             return res;
@@ -108,65 +104,74 @@ public class ConstantExpression extends ExpressionOperator {
     }
 
     @Override
-    public Result getNext(DataBag db) throws ExecException {
-        return genericGetNext(db, DataType.BAG);
+    public Result getNextDataBag() throws ExecException {
+        return genericGetNext(DataType.BAG);
     }
 
     @Override
-    public Result getNext(DataByteArray ba) throws ExecException {
-        return genericGetNext(ba, DataType.BYTEARRAY);
+    public Result getNextDataByteArray() throws ExecException {
+        return genericGetNext(DataType.BYTEARRAY);
     }
 
     @Override
-    public Result getNext(Double d) throws ExecException {
-        return genericGetNext(d, DataType.DOUBLE);
+    public Result getNextDouble() throws ExecException {
+        return genericGetNext(DataType.DOUBLE);
     }
 
     @Override
-    public Result getNext(Float f) throws ExecException {
-        return genericGetNext(f, DataType.FLOAT);
-
-    }
-
-    @Override
-    public Result getNext(Integer i) throws ExecException {
-        return genericGetNext(i, DataType.INTEGER);
+    public Result getNextFloat() throws ExecException {
+        return genericGetNext(DataType.FLOAT);
 
     }
 
     @Override
-    public Result getNext(Long l) throws ExecException {
-        return genericGetNext(l, DataType.LONG);
+    public Result getNextInteger() throws ExecException {
+        return genericGetNext(DataType.INTEGER);
 
     }
 
     @Override
-    public Result getNext(DateTime dt) throws ExecException {
-        return genericGetNext(dt, DataType.DATETIME);
+    public Result getNextLong() throws ExecException {
+        return genericGetNext(DataType.LONG);
 
     }
 
     @Override
-    public Result getNext(String s) throws ExecException {
-        return genericGetNext(s, DataType.CHARARRAY);
+    public Result getNextDateTime() throws ExecException {
+        return genericGetNext(DataType.DATETIME);
 
     }
 
     @Override
-    public Result getNext(Tuple t) throws ExecException {
-        return genericGetNext(t, DataType.TUPLE);
+    public Result getNextString() throws ExecException {
+        return genericGetNext(DataType.CHARARRAY);
 
     }
 
     @Override
-    public Result getNext(Boolean b) throws ExecException {
-        return genericGetNext(b, DataType.BOOLEAN);
+    public Result getNextTuple() throws ExecException {
+        return genericGetNext(DataType.TUPLE);
     }
 
     @Override
-    public Result getNext(Map m) throws ExecException {
-        return genericGetNext(m, DataType.MAP);
+    public Result getNextBoolean() throws ExecException {
+        return genericGetNext(DataType.BOOLEAN);
+    }
 
+    @Override
+    public Result getNextMap() throws ExecException {
+        return genericGetNext(DataType.MAP);
+
+    }
+
+    @Override
+    public Result getNextBigInteger() throws ExecException {
+        return genericGetNext(DataType.BIGINTEGER);
+    }
+
+    @Override
+    public Result getNextBigDecimal() throws ExecException {
+        return genericGetNext(DataType.BIGDECIMAL);
     }
 
     @Override
@@ -186,7 +191,7 @@ public class ConstantExpression extends ExpressionOperator {
     public List<ExpressionOperator> getChildExpressions() {
         return null;
     }
-    
+
     @Override
     public Tuple illustratorMarkup(Object in, Object out, int eqClassIndex) {
         return (Tuple) out;

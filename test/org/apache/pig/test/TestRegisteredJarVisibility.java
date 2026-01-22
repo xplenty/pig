@@ -26,6 +26,7 @@ import java.io.InputStream;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.jar.JarOutputStream;
 import java.util.zip.ZipEntry;
 
@@ -34,21 +35,19 @@ import javax.tools.JavaFileObject;
 import javax.tools.StandardJavaFileManager;
 import javax.tools.ToolProvider;
 
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.io.ByteStreams;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.fs.Path;
-import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
-import org.junit.After;
+import org.apache.pig.impl.util.JarManager;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.google.common.io.ByteStreams;
 
 /**
  * Ensure classes from a registered jar are available in the UDFContext.
@@ -61,18 +60,17 @@ public class TestRegisteredJarVisibility {
     // Actual data is not important. Reusing an existing input file.
     private static final File INPUT_FILE = new File("test/data/pigunit/top_queries_input_data.txt");
 
-    private static MiniCluster cluster;
+    private static MiniGenericCluster cluster;
     private static File jarFile;
+    private static File testDataDir;
 
     @BeforeClass()
     public static void setUp() throws IOException {
 
         String testResourcesDir =  "test/resources/" + PACKAGE_NAME.replace(".", "/");
 
-        String testBuildDataDir = "build/test/data";
         // Create the test data directory if needed
-        File testDataDir = new File(testBuildDataDir,
-                TestRegisteredJarVisibility.class.getCanonicalName());
+        testDataDir = new File(Util.getTestDirectory(TestRegisteredJarVisibility.class));
         testDataDir.mkdirs();
 
         jarFile = new File(testDataDir, JAR_FILE_NAME);
@@ -94,12 +92,19 @@ public class TestRegisteredJarVisibility {
 
         jar(filesToJar);
 
-        cluster = MiniCluster.buildCluster();
+        cluster = MiniGenericCluster.buildCluster();
+        Util.copyFromLocalToCluster(cluster, INPUT_FILE.getPath(), INPUT_FILE.getName());
     }
 
     @AfterClass()
     public static void tearDown() {
         cluster.shutDown();
+        Util.deleteDirectory(testDataDir);
+    }
+
+    @Before
+    public void setup() {
+        Util.resetStateForExecModeSwitch();
     }
 
     @Test()
@@ -113,14 +118,21 @@ public class TestRegisteredJarVisibility {
         Assert.assertTrue(exceptionThrown);
     }
 
-    @Test()
-    public void testRegisteredJarVisibility() throws IOException {
-        cluster.getFileSystem().copyFromLocalFile(
-                new Path("file://" + INPUT_FILE.getAbsolutePath()), new Path(INPUT_FILE.getName()));
-        PigServer pigServer = new PigServer(ExecType.MAPREDUCE, cluster.getProperties());
+    @Test
+    public void testRegisterJarVisibilityMR() throws IOException {
+        PigServer pigServer = new PigServer(cluster.getExecType(), cluster.getProperties());
+        testRegisteredJarVisibility(pigServer, INPUT_FILE.getAbsolutePath());
+    }
 
+    @Test
+    public void testRegisteredJarVisibilityLocal() throws Exception {
+        PigServer pigServer = new PigServer(Util.getLocalTestMode(), new Properties());
+        testRegisteredJarVisibility(pigServer, INPUT_FILE.getAbsolutePath());
+    }
+
+    public void testRegisteredJarVisibility(PigServer pigServer, String inputPath) throws IOException {
         String query = "register " + jarFile.getAbsolutePath() + ";\n"
-                + "a = load '" + INPUT_FILE.getName()
+                + "a = load '" + Util.generateURI(inputPath, pigServer.getPigContext())
                 + "' using org.apache.pig.test.RegisteredJarVisibilityLoader();\n"
                 // register again to test classloader consistency
                 + "register " +  jarFile.getAbsolutePath() + ";\n"
@@ -132,6 +144,22 @@ public class TestRegisteredJarVisibility {
 
         pigServer.openIterator("a");
         pigServer.shutdown();
+    }
+
+    // See PIG-3039
+    @Test
+    public void testRegisterJarOverridePigJarPackages() throws Exception {
+        // When jackson jar is not registered, jackson-core from the first jar in
+        // classpath (pig.jar) should be picked up (version 1.8.8 in this case).
+        String jacksonJar = JarManager.findContainingJar(org.codehaus.jackson.JsonParser.class);
+        Assert.assertTrue(new File(jacksonJar).getName().contains("1.9.13"));
+
+        PigServer pigServer = new PigServer(Util.getLocalTestMode(), new Properties());
+        pigServer.registerJar("test/resources/jackson-core-asl-1.9.9.jar");
+        pigServer.registerJar("test/resources/jackson-mapper-asl-1.9.9.jar");
+        jacksonJar = JarManager.findContainingJar(org.codehaus.jackson.JsonParser.class);
+        Assert.assertTrue(new File(jacksonJar).getName().contains("1.9.9"));
+
     }
 
     private static List<File> compile(File[] javaFiles) {

@@ -19,9 +19,7 @@ package org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOp
 
 import java.io.IOException;
 import java.util.List;
-import java.util.LinkedList;
 
-import org.apache.hadoop.mapreduce.Counter;
 import org.apache.pig.PigException;
 import org.apache.pig.SortInfo;
 import org.apache.pig.StoreFuncInterface;
@@ -37,9 +35,9 @@ import org.apache.pig.impl.io.FileSpec;
 import org.apache.pig.impl.logicalLayer.schema.Schema;
 import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
-import org.apache.pig.impl.util.IdentityHashSet;
 import org.apache.pig.pen.util.ExampleTuple;
 import org.apache.pig.pen.util.LineageTracer;
+import org.apache.pig.tools.pigstats.PigStatsUtil;
 
 /**
  * The store operator which is used in two ways:
@@ -52,38 +50,40 @@ import org.apache.pig.pen.util.LineageTracer;
 public class POStore extends PhysicalOperator {
 
     private static final long serialVersionUID = 1L;
-    private static Result empty = new Result(POStatus.STATUS_NULL, null);
-    transient private StoreFuncInterface storer;    
+    transient private StoreFuncInterface storer;
+    transient private StoreFuncDecorator sDecorator;
     transient private POStoreImpl impl;
+    transient private String counterName = null;
     private FileSpec sFile;
     private Schema schema;
-    
-    transient private Counter outputRecordCounter = null;
 
     // flag to distinguish user stores from MRCompiler stores.
     private boolean isTmpStore;
-    
+
     // flag to distinguish single store from multiquery store.
     private boolean isMultiStore;
-    
+
     // flag to indicate if the custom counter should be disabled.
     private boolean disableCounter = false;
-    
+
     // the index of multiquery store to track counters
     private int index;
-    
+
     // If we know how to reload the store, here's how. The lFile
     // FileSpec is set in PigServer.postProcess. It can be used to
     // reload this store, if the optimizer has the need.
     private FileSpec lFile;
-    
+
     // if the predecessor of store is Sort (order by)
-    // then sortInfo will have information of the sort 
+    // then sortInfo will have information of the sort
     // column names and the asc/dsc info
     private SortInfo sortInfo;
-    
+
     private String signature;
-    
+
+    private transient List<String> cacheFiles = null;
+    private transient List<String> shipFiles = null;
+
     public POStore(OperatorKey k) {
         this(k, -1, null);
     }
@@ -91,11 +91,24 @@ public class POStore extends PhysicalOperator {
     public POStore(OperatorKey k, int rp) {
         this(k, rp, null);
     }
-    
+
     public POStore(OperatorKey k, int rp, List<PhysicalOperator> inp) {
         super(k, rp, inp);
     }
-    
+
+    public POStore(POStore copy) {
+        super(copy);
+        this.sFile = copy.sFile;
+        this.schema = copy.schema;
+        this.isTmpStore = copy.isTmpStore;
+        this.isMultiStore = copy.isMultiStore;
+        this.disableCounter = copy.disableCounter;
+        this.index = copy.index;
+        this.lFile = copy.lFile;
+        this.sortInfo = copy.sortInfo;
+        this.signature = copy.signature;
+    }
+
     /**
      * Set up the storer
      * @throws IOException
@@ -105,17 +118,22 @@ public class POStore extends PhysicalOperator {
             try{
                 storer = impl.createStoreFunc(this);
                 if (!isTmpStore && !disableCounter && impl instanceof MapReducePOStoreImpl) {
-                    outputRecordCounter = 
-                        ((MapReducePOStoreImpl) impl).createRecordCounter(this);
+                    counterName = PigStatsUtil.getMultiStoreCounterName(this);
+                    if (counterName != null) {
+                        // Create the counter. This is needed because
+                        // incrCounter() may never be called in case of empty
+                        // file.
+                        ((MapReducePOStoreImpl) impl).incrRecordCounter(counterName, 0);
+                    }
                 }
             }catch (IOException ioe) {
                 int errCode = 2081;
-                String msg = "Unable to setup the store function.";            
+                String msg = "Unable to setup the store function.";
                 throw new ExecException(msg, errCode, PigException.BUG, ioe);
             }
         }
     }
-    
+
     /**
      * Called at the end of processing for clean up.
      * @throws IOException
@@ -125,7 +143,7 @@ public class POStore extends PhysicalOperator {
             impl.tearDown();
         }
    }
-    
+
     /**
      * To perform cleanup when there is an error.
      * @throws IOException
@@ -135,21 +153,21 @@ public class POStore extends PhysicalOperator {
             impl.cleanUp();
         }
     }
-    
+
     @Override
-    public Result getNext(Tuple t) throws ExecException {
+    public Result getNextTuple() throws ExecException {
         Result res = processInput();
         try {
             switch (res.returnStatus) {
             case POStatus.STATUS_OK:
                 if (illustrator == null) {
-                    storer.putNext((Tuple)res.result);
+                    sDecorator.putNext((Tuple) res.result);
                 } else
                     illustratorMarkup(res.result, res.result, 0);
-                res = empty;
+                res = RESULT_EMPTY;
 
-                if (outputRecordCounter != null) {
-                    outputRecordCounter.increment(1);
+                if (counterName != null) {
+                    ((MapReducePOStoreImpl) impl).incrRecordCounter(counterName, 1);
                 }
                 break;
             case POStatus.STATUS_EOP:
@@ -196,6 +214,7 @@ public class POStore extends PhysicalOperator {
 
     public void setSFile(FileSpec sFile) {
         this.sFile = sFile;
+        storer = null;
     }
 
     public void setInputSpec(FileSpec lFile) {
@@ -205,11 +224,11 @@ public class POStore extends PhysicalOperator {
     public FileSpec getInputSpec() {
         return lFile;
     }
-    
+
     public void setIsTmpStore(boolean tmp) {
         isTmpStore = tmp;
     }
-    
+
     public boolean isTmpStore() {
         return isTmpStore;
     }
@@ -221,20 +240,36 @@ public class POStore extends PhysicalOperator {
     public void setSchema(Schema schema) {
         this.schema = schema;
     }
-    
+
     public Schema getSchema() {
         return schema;
     }
-    
-    
+
+
     public StoreFuncInterface getStoreFunc() {
-        if(storer == null){
-            storer = (StoreFuncInterface)PigContext.instantiateFuncFromSpec(sFile.getFuncSpec());
+        if (storer == null) {
+            storer = (StoreFuncInterface) PigContext.instantiateFuncFromSpec(sFile.getFuncSpec());
             storer.setStoreFuncUDFContextSignature(signature);
+        }
+        if (sDecorator == null) {
+            // Init the Decorator we use for writing Tuples
+            setStoreFuncDecorator(new StoreFuncDecorator(storer, signature));
         }
         return storer;
     }
-    
+
+    void setStoreFuncDecorator(StoreFuncDecorator sDecorator) {
+        this.sDecorator = sDecorator;
+    }
+
+    /**
+     *
+     * @return The {@link StoreFuncDecorator} used to write Tuples
+     */
+    public StoreFuncDecorator getStoreFuncDecorator() {
+        return sDecorator;
+    }
+
     /**
      * @param sortInfo the sortInfo to set
      */
@@ -248,11 +283,11 @@ public class POStore extends PhysicalOperator {
     public SortInfo getSortInfo() {
         return sortInfo;
     }
-    
+
     public String getSignature() {
         return signature;
     }
-    
+
     public void setSignature(String signature) {
         this.signature = signature;
     }
@@ -264,7 +299,7 @@ public class POStore extends PhysicalOperator {
     public boolean isMultiStore() {
         return isMultiStore;
     }
-    
+
     @Override
     public Tuple illustratorMarkup(Object in, Object out, int eqClassIndex) {
         if(illustrator != null) {
@@ -296,5 +331,21 @@ public class POStore extends PhysicalOperator {
 
     public void setStoreFunc(StoreFuncInterface storeFunc) {
         this.storer = storeFunc;
+    }
+
+    public List<String> getCacheFiles() {
+        return cacheFiles;
+    }
+
+    public void setCacheFiles(List<String> cf) {
+        cacheFiles = cf;
+    }
+
+    public List<String> getShipFiles() {
+        return shipFiles;
+    }
+
+    public void setShipFiles(List<String> sf) {
+        shipFiles = sf;
     }
 }

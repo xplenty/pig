@@ -1,7 +1,30 @@
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.pig;
 
+import org.apache.pig.classification.InterfaceAudience;
+
+@InterfaceAudience.Public
 public class PigConstants {
-    private PigConstants() {}
+    private PigConstants() {
+        throw new IllegalStateException();
+    }
 
     /**
      * This key is used in the job conf to let the various jobs know what code was
@@ -17,4 +40,23 @@ public class PigConstants {
 
     // This makes it easy to turn SchemaTuple on globally.
     public static final boolean SCHEMA_TUPLE_ON_BY_DEFAULT = false;
+
+    /**
+     * {@value} is a comma-separated list of optimizer rules to disable;
+     * by default, all rules are enabled.
+     */
+    public static final String PIG_OPTIMIZER_RULES_DISABLED_KEY = "pig.optimizer.rules.disabled";
+
+    /**
+     * Prefix used by pig to configure local mode configuration
+     */
+    public static final String PIG_LOCAL_CONF_PREFIX = "pig.local.";
+
+    /**
+     * Counter names used by pig.udf.profile
+     */
+    public static final String TIME_UDFS_INVOCATION_COUNTER = "approx_invocations";
+    public static final String TIME_UDFS_ELAPSED_TIME_COUNTER = "approx_microsecs";
+
+    public static final String TASK_INDEX = "mapreduce.task.index";
 }

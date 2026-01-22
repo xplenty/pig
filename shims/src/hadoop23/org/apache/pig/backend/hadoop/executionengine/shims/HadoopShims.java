@@ -22,7 +22,10 @@ import java.io.IOException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.mapred.Counters;
 import org.apache.hadoop.mapred.JobConf;
+import org.apache.hadoop.mapred.TIPStatus;
+import org.apache.hadoop.mapred.TaskReport;
 import org.apache.hadoop.mapred.jobcontrol.Job;
 import org.apache.hadoop.mapred.jobcontrol.JobControl;
 import org.apache.hadoop.mapreduce.ContextFactory;
@@ -36,7 +39,6 @@ import org.apache.hadoop.mapreduce.task.JobContextImpl;
 import org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.relationalOperators.POStore;
 import org.apache.pig.backend.hadoop23.PigJobControl;
-import org.apache.pig.impl.PigContext;
 
 public class HadoopShims {
     static public JobContext cloneJobContext(JobContext original) throws IOException, InterruptedException {
@@ -104,5 +106,13 @@ public class HadoopShims {
     
     public static long getDefaultBlockSize(FileSystem fs, Path path) {
         return fs.getDefaultBlockSize(path);
+    }
+
+    public static Counters getCounters(Job job) throws IOException, InterruptedException {
+        return new Counters(job.getJob().getCounters());
+    }
+    
+    public static boolean isJobFailed(TaskReport report) {
+        return report.getCurrentStatus()==TIPStatus.FAILED;
     }
 }

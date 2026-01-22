@@ -25,6 +25,7 @@ import java.util.List;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.pig.PigConfiguration;
 import org.apache.pig.PigException;
 import org.apache.pig.backend.executionengine.ExecException;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.PigMapReduce;
@@ -35,12 +36,10 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOpe
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.POUserComparisonFunc;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlanVisitor;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
-import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.InternalSortedBag;
 import org.apache.pig.data.Tuple;
-import org.apache.pig.impl.plan.NodeIdGenerator;
 import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
 
@@ -73,11 +72,14 @@ public class POSort extends PhysicalOperator {
 	private POUserComparisonFunc mSortFunc;
 	private Comparator<Tuple> mComparator;
 
-	private boolean inputsAccumulated = false;
 	private long limit;
 	public boolean isUDFComparatorUsed = false;
-	private DataBag sortedBag;
-	transient Iterator<Tuple> it;
+
+	private transient boolean inputsAccumulated = false;
+	private transient DataBag sortedBag;
+    private transient Iterator<Tuple> it;
+    private transient boolean initialized;
+    private transient boolean useDefaultBag;
 
 	public POSort(
             OperatorKey k,
@@ -91,22 +93,22 @@ public class POSort extends PhysicalOperator {
 		this.sortPlans = sortPlans;
 		this.mAscCols = mAscCols;
         this.limit = -1;
-		this.mSortFunc = mSortFunc;
-		if (mSortFunc == null) {
-            mComparator = new SortComparator();
-			/*sortedBag = BagFactory.getInstance().newSortedBag(
-					new SortComparator());*/
-			ExprOutputTypes = new ArrayList<Byte>(sortPlans.size());
+        setSortFunc(mSortFunc);
+	}
 
-			for(PhysicalPlan plan : sortPlans) {
-				ExprOutputTypes.add(plan.getLeaves().get(0).getResultType());
-			}
-		} else {
-			/*sortedBag = BagFactory.getInstance().newSortedBag(
-					new UDFSortComparator());*/
+	private void setSortFunc(POUserComparisonFunc mSortFunc) {
+	    this.mSortFunc = mSortFunc;
+        if (mSortFunc == null) {
+            mComparator = new SortComparator();
+            ExprOutputTypes = new ArrayList<Byte>(sortPlans.size());
+
+            for(PhysicalPlan plan : sortPlans) {
+                ExprOutputTypes.add(plan.getLeaves().get(0).getResultType());
+            }
+        } else {
             mComparator = new UDFSortComparator();
-			isUDFComparatorUsed = true;
-		}
+            isUDFComparatorUsed = true;
+        }
 	}
 
 	public POSort(OperatorKey k, int rp, List inp) {
@@ -188,9 +190,11 @@ public class POSort extends PhysicalOperator {
             case DataType.BOOLEAN:
             case DataType.INTEGER:
             case DataType.LONG:
+            case DataType.BIGINTEGER:
+            case DataType.BIGDECIMAL:
             case DataType.DATETIME:
             case DataType.TUPLE:
-                res = Op.getNext(getDummy(resultType), resultType);
+                res = Op.getNext(resultType);
                 break;
 
             default: {
@@ -219,7 +223,7 @@ public class POSort extends PhysicalOperator {
 			Integer i = null;
 			Result res = null;
 			try {
-				res = mSortFunc.getNext(i);
+				res = mSortFunc.getNextInteger();
 			} catch (ExecException e) {
 
 				log.error("Input not ready. Error on reading from input. "
@@ -249,42 +253,49 @@ public class POSort extends PhysicalOperator {
 	}
 
 	@Override
-	public Result getNext(Tuple t) throws ExecException {
-		Result res = new Result();
+	public Result getNextTuple() throws ExecException {
+		Result inp;
 
 		if (!inputsAccumulated) {
-			res = processInput();
-			// by default, we create InternalSortedBag, unless user configures
-			// explicitly to use old bag
-			String bagType = null;
-	        if (PigMapReduce.sJobConfInternal.get() != null) {
-	   			bagType = PigMapReduce.sJobConfInternal.get().get("pig.cachedbag.sort.type");
-	   	    }
-            if (bagType != null && bagType.equalsIgnoreCase("default")) {
-            	sortedBag = BagFactory.getInstance().newSortedBag(mComparator);
-       	    } else {
-    	    	sortedBag = new InternalSortedBag(3, mComparator);
-    	    }
+			inp = processInput();
+            if (!initialized) {
+                initialized = true;
+                if (PigMapReduce.sJobConfInternal.get() != null) {
+                    String bagType = PigMapReduce.sJobConfInternal.get().get(PigConfiguration.PIG_CACHEDBAG_SORT_TYPE);
+                    if (bagType != null && bagType.equalsIgnoreCase("default")) {
+                        useDefaultBag = true;
+                    }
+                }
+            }
 
-			while (res.returnStatus != POStatus.STATUS_EOP) {
-				if (res.returnStatus == POStatus.STATUS_ERR) {
+            if (isLimited()) {
+                sortedBag = mBagFactory.newLimitedSortedBag(mComparator, limit);
+            } else {
+                // by default, we create InternalSortedBag, unless user configures
+                // explicitly to use old bag
+	            sortedBag = useDefaultBag ? mBagFactory.newSortedBag(mComparator)
+	                    : new InternalSortedBag(3, mComparator);
+            }
+
+            while (inp.returnStatus != POStatus.STATUS_EOP) {
+				if (inp.returnStatus == POStatus.STATUS_ERR) {
 					log.error("Error in reading from the inputs");
-					return res;
-					//continue;
-				} else if (res.returnStatus == POStatus.STATUS_NULL) {
-                    // ignore the null, read the next tuple.
-                    res = processInput();
-					continue;
-				}
-				sortedBag.add((Tuple) res.result);
-				res = processInput();
-
-			}
+					return inp;
+                } else if (inp.returnStatus == POStatus.STATUS_NULL) {
+                    // Ignore and read the next tuple.
+                    inp = processInput();
+                    continue;
+                }
+				sortedBag.add((Tuple) inp.result);
+				inp = processInput();
+            }
 
 			inputsAccumulated = true;
 
 		}
-		if (it == null) {
+
+        Result res = new Result();
+        if (it == null) {
             it = sortedBag.iterator();
         }
         if (it.hasNext()) {
@@ -295,7 +306,7 @@ public class POSort extends PhysicalOperator {
             res.returnStatus = POStatus.STATUS_EOP;
             reset();
         }
-		return res;
+        return res;
 	}
 
 	@Override
@@ -336,6 +347,10 @@ public class POSort extends PhysicalOperator {
         mSortFunc = sortFunc;
     }
 
+    public Comparator<Tuple> getMComparator() {
+        return mComparator;
+    }
+
     public List<Boolean> getMAscCols() {
         return mAscCols;
     }
@@ -357,26 +372,23 @@ public class POSort extends PhysicalOperator {
 
     @Override
     public POSort clone() throws CloneNotSupportedException {
-        List<PhysicalPlan> clonePlans = new
-            ArrayList<PhysicalPlan>(sortPlans.size());
-        for (PhysicalPlan plan : sortPlans) {
-            clonePlans.add(plan.clone());
+        POSort clone = (POSort) super.clone();
+        clone.sortPlans = clonePlans(sortPlans);
+        if (mSortFunc == null) {
+            setSortFunc(null);
+        } else {
+            setSortFunc(mSortFunc.clone());
         }
         List<Boolean> cloneAsc = new ArrayList<Boolean>(mAscCols.size());
         for (Boolean b : mAscCols) {
             cloneAsc.add(b);
         }
-        POUserComparisonFunc cloneFunc = null;
-        if (mSortFunc != null) {
-            cloneFunc = mSortFunc.clone();
-        }
-        // Don't set inputs as PhysicalPlan.clone will take care of that
-        return new POSort(new OperatorKey(mKey.scope,
-            NodeIdGenerator.getGenerator().getNextNodeId(mKey.scope)),
-            requestedParallelism, null, clonePlans, cloneAsc, cloneFunc);
+        clone.mAscCols = cloneAsc;
+        return clone;
     }
 
-   
+
+    @Override
     public Tuple illustratorMarkup(Object in, Object out, int eqClassIndex) {
         if(illustrator != null) {
           illustrator.getEquivalenceClasses().get(eqClassIndex).add((Tuple) in);

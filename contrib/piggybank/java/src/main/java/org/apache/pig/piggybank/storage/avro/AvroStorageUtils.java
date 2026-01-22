@@ -17,11 +17,10 @@
 
 package org.apache.pig.piggybank.storage.avro;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -29,22 +28,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
-import java.net.URI;
 import org.apache.avro.Schema;
 import org.apache.avro.Schema.Field;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.file.DataFileStream;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
-import org.apache.hadoop.mapreduce.Job;
-import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.pig.LoadFunc;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
 import org.apache.pig.data.DataType;
-import org.apache.pig.piggybank.storage.avro.AvroStorageLog;
-
-
+import org.codehaus.jackson.JsonNode;
 /**
  * This is utility class for this package
  */
@@ -96,42 +93,60 @@ public class AvroStorageUtils {
     }
 
     /**
-     * get input paths to job config
-     */
-    public static boolean addInputPaths(String pathString, Job job) throws IOException {
-      Configuration conf = job.getConfiguration();
-      FileSystem fs = FileSystem.get(conf);
-      HashSet<Path> paths = new  HashSet<Path>();
-      if (getAllSubDirs(new Path(pathString), conf, paths)) {
-        paths.addAll(Arrays.asList(FileInputFormat.getInputPaths(job)));
-        FileInputFormat.setInputPaths(job, paths.toArray(new Path[0]));
-        return true;
-      }
-      return false;
-    }
-
-    /**
-     * Adds all non-hidden directories and subdirectories to set param
+     * Gets the list of paths from the pathString specified which may contain
+     * comma-separated paths and glob style path
      *
      * @throws IOException
      */
-    public static boolean getAllSubDirs(Path path, Configuration conf, Set<Path> paths) throws IOException {
-        FileSystem fs = FileSystem.get(path.toUri(), conf);
-        FileStatus[] matchedFiles = fs.globStatus(path, PATH_FILTER);
-        if (matchedFiles == null || matchedFiles.length == 0) {
-            return false;
-        }
-        for (FileStatus file : matchedFiles) {
-            if (file.isDir()) {
-                for (FileStatus sub : fs.listStatus(file.getPath())) {
-                    getAllSubDirs(sub.getPath(), conf, paths);
+    public static Set<Path> getPaths(String pathString, Configuration conf, boolean failIfNotFound)
+            throws IOException {
+        Set<Path> paths = new HashSet<Path>();
+        String[] pathStrs = LoadFunc.getPathStrings(pathString);
+        for (String pathStr : pathStrs) {
+            FileSystem fs = FileSystem.get(new Path(pathStr).toUri(), conf);
+            FileStatus[] matchedFiles = fs.globStatus(new Path(pathStr), PATH_FILTER);
+            if (matchedFiles == null || matchedFiles.length == 0) {
+                if (failIfNotFound) {
+                    throw new IOException("Input Pattern " + pathStr + " matches 0 files");
+                } else {
+                    continue;
                 }
-            } else {
-                AvroStorageLog.details("Add input file:" + file);
+            }
+            for (FileStatus file : matchedFiles) {
                 paths.add(file.getPath());
             }
         }
-        return true;
+        return paths;
+    }
+
+    /**
+     * Returns all non-hidden files recursively inside the base paths given
+     *
+     * @throws IOException
+     */
+    public static Set<Path> getAllFilesRecursively(Set<Path> basePaths, Configuration conf) throws IOException {
+        Set<Path> paths = new HashSet<Path>();
+        for (Path path : basePaths) {
+            FileSystem fs = FileSystem.get(path.toUri(), conf);
+            FileStatus f = fs.getFileStatus(path);
+            if (f.isDir()) {
+                getAllFilesInternal(f, conf, paths, fs);
+            } else {
+                paths.add(path);
+            }
+        }
+        return paths;
+    }
+
+    private static void getAllFilesInternal(FileStatus file, Configuration conf,
+            Set<Path> paths, FileSystem fs) throws IOException {
+        for (FileStatus f : fs.listStatus(file.getPath(), PATH_FILTER)) {
+            if (f.isDir()) {
+                getAllFilesInternal(f, conf, paths, fs);
+            } else {
+                paths.add(f.getPath());
+            }
+        }
     }
 
     /** check whether there is NO directory in the input file (status) list*/
@@ -146,22 +161,24 @@ public class AvroStorageUtils {
     /** get last file of a hdfs path if it is  a directory;
      *   or return the file itself if path is a file
      */
-    public static Path getLast(String path, FileSystem fs) throws IOException {
-        return getLast(new Path(path), fs);
-    }
-
-    /** get last file of a hdfs path if it is  a directory;
-     *   or return the file itself if path is a file
-     */
     public static Path getLast(Path path, FileSystem fs) throws IOException {
 
+        FileStatus status = fs.getFileStatus(path);
+        if (!status.isDir()) {
+            return path;
+        }
         FileStatus[] statuses = fs.listStatus(path, PATH_FILTER);
 
         if (statuses.length == 0) {
-            return path;
+            return null;
         } else {
             Arrays.sort(statuses);
-            return statuses[statuses.length - 1].getPath();
+            for (int i = statuses.length - 1; i >= 0; i--) {
+                if (!statuses[i].isDir()) {
+                    return statuses[i].getPath();
+                }
+            }
+            return null;
         }
     }
 
@@ -291,12 +308,15 @@ public class AvroStorageUtils {
                 List<Schema.Field> yFields = y.getFields();
 
                 // LinkedHashMap is used to keep fields in insertion order.
-                // It's convenient for testing to have determinitic behaviors.
+                // It's convenient for testing to have deterministic behaviors.
                 Map<String, Schema> fieldName2Schema =
                         new LinkedHashMap<String, Schema>(xFields.size() + yFields.size());
+                Map<String, JsonNode> fieldName2Default =
+                        new LinkedHashMap<String, JsonNode>(xFields.size() + yFields.size());
 
                 for (Schema.Field xField : xFields) {
                     fieldName2Schema.put(xField.name(), xField.schema());
+                    fieldName2Default.put(xField.name(),xField.defaultValue());
                 }
                 for (Schema.Field yField : yFields) {
                     String name = yField.name();
@@ -304,14 +324,28 @@ public class AvroStorageUtils {
                     Schema prevSchema = fieldName2Schema.get(name);
                     if (prevSchema == null) {
                         fieldName2Schema.put(name, currSchema);
+                        fieldName2Default.put(name, yField.defaultValue());
                     } else {
                         fieldName2Schema.put(name, mergeSchema(prevSchema, currSchema));
+                        //during merging of schemas for records it to okay to have one field with a default
+                        // and another null so the one with the default will be considered
+                        JsonNode xDefaultValue = fieldName2Default.get(name);
+                        JsonNode yDefaultValue = yField.defaultValue();
+                        if (xDefaultValue != null) {
+                            // need to check if the default values in the schemas are the same
+                            if (yDefaultValue != null && !xDefaultValue.equals(yDefaultValue)) {
+                                throw new IOException(
+                                     "Cannot merge schema's which have different default values - " + xDefaultValue +
+                                     " and " + yDefaultValue);
+                            }
+                        } else {
+                            fieldName2Default.put(name, yDefaultValue);
+                        }
                     }
                 }
-
                 List<Schema.Field> mergedFields = new ArrayList<Schema.Field>(fieldName2Schema.size());
                 for (Entry<String, Schema> entry : fieldName2Schema.entrySet()) {
-                    mergedFields.add(new Schema.Field(entry.getKey(), entry.getValue(), "auto-gen", null));
+                    mergedFields.add(new Schema.Field(entry.getKey(), entry.getValue(), "auto-gen", fieldName2Default.get(entry.getKey())));
                 }
                 Schema result = Schema.createRecord(
                         "merged", null, "merged schema (generated by AvroStorage)", false);
@@ -659,6 +693,33 @@ public class AvroStorageUtils {
         default:
             return null;
         }
+    }
+
+    /**
+     * This method is called by {@link #getAvroSchema}. The default implementation
+     * returns the schema of an avro file; or the schema of the last file in a first-level
+     * directory (it does not contain sub-directories).
+     *
+     * @param path  path of a file or first level directory
+     * @param fs  file system
+     * @return avro schema
+     * @throws IOException
+     */
+    public static Schema getSchema(Path path, FileSystem fs) throws IOException {
+        /* get path of the last file */
+        Path lastFile = AvroStorageUtils.getLast(path, fs);
+        if (lastFile == null) {
+            return null;
+        }
+
+        /* read in file and obtain schema */
+        GenericDatumReader<Object> avroReader = new GenericDatumReader<Object>();
+        InputStream hdfsInputStream = fs.open(lastFile);
+        DataFileStream<Object> avroDataStream = new DataFileStream<Object>(hdfsInputStream, avroReader);
+        Schema ret = avroDataStream.getSchema();
+        avroDataStream.close();
+
+        return ret;
     }
 
 }

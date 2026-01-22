@@ -22,6 +22,8 @@ use TestDeployer;
 use strict;
 use English;
 
+use Util;
+
 our @ISA = "TestDeployer";
 
 ###########################################################################
@@ -68,15 +70,15 @@ sub checkPrerequisites
     # They must have declared the conf directory for their Hadoop installation
     if (! defined $cfg->{'hadoopconfdir'} || $cfg->{'hadoopconfdir'} eq "") {
         print $log "You must set the key 'hadoopconfdir' to your Hadoop conf directory "
-            . "in existing.conf\n";
-        die "hadoopconfdir is not set in existing.conf\n";
+            . "in existing_deployer.conf\n";
+        die "hadoopconfdir is not set in existing_deployer.conf\n";
     }
     
     # They must have declared the executable path for their Hadoop installation
     if (! defined $cfg->{'hadoopbin'} || $cfg->{'hadoopbin'} eq "") {
         print $log "You must set the key 'hadoopbin' to your Hadoop bin path"
-            . "in existing.conf\n";
-        die "hadoopbin is not set in existing.conf\n";
+            . "in existing_deployer.conf\n";
+        die "hadoopbin is not set in existing_deployer.conf\n";
     }
 
     # Run a quick and easy Hadoop command to make sure we can
@@ -229,25 +231,30 @@ sub generateData
             'rows' => 5000,
             'hdfs' => "types/numbers.txt",
         }, {
-            'name' => "biggish",
-            'filetype' => "biggish",
-            'rows' => 1000000,
-            'hdfs' => "singlefile/biggish",
-        }, {
             'name' => "prerank",
             'filetype' => "ranking",
             'rows' => 30,
             'hdfs' => "singlefile/prerank",
+        }, {
+            'name' => "utf8Voter",
+            'filetype' => "utf8Voter",
+            'rows' => 30,
+            'hdfs' => "utf8Data/选民/utf8Voter",
+        }, {
+            'name' => "utf8Student",
+            'filetype' => "utf8Student",
+            'rows' => 300,
+            'hdfs' => "utf8Data/学生/utf8Student",
         }
     );
 
 	# Create the HDFS directories
-	$self->runPigCmd($cfg, $log, "fs -mkdir $cfg->{'inpathbase'}");
+	$self->runPigCmd($cfg, $log, "fs -mkdir -p $cfg->{'inpathbase'}");
 
     foreach my $table (@tables) {
 		print "Generating data for $table->{'name'}\n";
 		# Generate the data
-        my @cmd = ($cfg->{'gentool'}, $table->{'filetype'}, $table->{'rows'},
+        my @cmd = ("perl", $cfg->{'gentool'}, $table->{'filetype'}, $table->{'rows'},
             $table->{'name'});
 		$self->runCmd($log, \@cmd);
 
@@ -340,7 +347,7 @@ sub undeploy
 #
 sub confirmUndeployment
 {
-    die "$0 INFO : confirmUndeployment is a virtual function!";
+    # TODO: implement a correct confirmation, but let's not die there.
 }
 
 # TODO
@@ -352,7 +359,20 @@ sub runPigCmd($$$$)
 {
     my ($self, $cfg, $log, $c) = @_;
 
-    my @pigCmd = ("$cfg->{'pigpath'}/bin/pig");
+    my @pigCmd = "";
+
+	my $pigbin = "";
+    if ($cfg->{'usePython'} eq "true") {
+      $pigbin = "$cfg->{'pigpath'}/bin/pig.py";
+    } elsif (Util::isCygwin()) {
+      $pigbin = "$cfg->{'pigpath'}/bin/pig.cmd";
+      $pigbin =~ s/\\/\//g;
+      $pigbin = `cygpath -u $pigbin`;
+      chomp($pigbin);
+    } else {
+      $pigbin = "$cfg->{'pigpath'}/bin/pig";
+    }
+	@pigCmd = ($pigbin);
     push(@pigCmd, '-e');
     push(@pigCmd, split(' ', $c));
 

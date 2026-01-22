@@ -20,8 +20,6 @@ package org.apache.pig.builtin;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -34,9 +32,9 @@ import org.apache.pig.Expression;
 import org.apache.pig.LoadFunc;
 import org.apache.pig.LoadMetadata;
 import org.apache.pig.PigException;
-import org.apache.pig.StoreMetadata;
 import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceStatistics;
+import org.apache.pig.StoreMetadata;
 import org.apache.pig.backend.datastorage.ContainerDescriptor;
 import org.apache.pig.backend.datastorage.DataStorage;
 import org.apache.pig.backend.datastorage.ElementDescriptor;
@@ -62,10 +60,9 @@ public class JsonMetadata implements LoadMetadata, StoreMetadata {
 
     private static final Log log = LogFactory.getLog(JsonMetadata.class);
 
-    // These are not static+final because we may want to make these adjustable by users.
-    private String schemaFileName = ".pig_schema";
-    private String headerFileName = ".pig_header";
-    private String statFileName = ".pig_stats";
+    private final String schemaFileName;
+    private final String headerFileName;
+    private final String statFileName;
 
     private boolean printHeaders = true;
 
@@ -75,7 +72,13 @@ public class JsonMetadata implements LoadMetadata, StoreMetadata {
     private transient LRUMap<ElementDescriptor, Boolean> lookupCache = new LRUMap<ElementDescriptor, Boolean>(100, 1000);
 
     public JsonMetadata() {
+        this(".pig_schema", ".pig_header", ".pig_stats");
+    }
 
+    public JsonMetadata(String schemaFileName, String headerFileName, String statFileName) {
+        this.schemaFileName = schemaFileName;
+        this.headerFileName = headerFileName;
+        this.statFileName = statFileName;
     }
 
     /**.
@@ -102,9 +105,9 @@ public class JsonMetadata implements LoadMetadata, StoreMetadata {
         String[] locations = LoadFunc.getPathStrings(path);
         for (String loc : locations) {
             DataStorage storage;
-            
+
             storage = new HDataStorage(new Path(loc).toUri(), ConfigurationUtil.toProperties(conf));
-            
+
             String fullPath = FileLocalizer.fullPath(loc, storage);
 
             if(storage.isContainer(fullPath)) {
@@ -116,12 +119,10 @@ public class JsonMetadata implements LoadMetadata, StoreMetadata {
                 ElementDescriptor[] descriptors = storage.asCollection(loc);
                 for(ElementDescriptor descriptor : descriptors) {
                     ContainerDescriptor container = null;
-                    
+
                     if (descriptor instanceof HFile) {
                         Path descriptorPath = ((HPath) descriptor).getPath();
-                        String fileName = descriptorPath.getName();
                         Path parent = descriptorPath.getParent();
-                        String parentName = parent.toString();
                         container = new HDirectory((HDataStorage)storage,parent);
                     } else { // descriptor instanceof HDirectory
                         container = (HDirectory)descriptor;
@@ -272,7 +273,8 @@ public class JsonMetadata implements LoadMetadata, StoreMetadata {
     @Override
     public void storeStatistics(ResourceStatistics stats, String location, Job job) throws IOException {
         Configuration conf = job.getConfiguration();
-        DataStorage storage = new HDataStorage(ConfigurationUtil.toProperties(conf));
+        DataStorage storage = new HDataStorage(new Path(location).toUri(),
+                ConfigurationUtil.toProperties(conf));
         ElementDescriptor statFilePath = storage.asElement(location, statFileName);
         if(!statFilePath.exists() && stats != null) {
             try {
@@ -290,7 +292,8 @@ public class JsonMetadata implements LoadMetadata, StoreMetadata {
     @Override
     public void storeSchema(ResourceSchema schema, String location, Job job) throws IOException {
         Configuration conf = job.getConfiguration();
-        DataStorage storage = new HDataStorage(ConfigurationUtil.toProperties(conf));
+        DataStorage storage = new HDataStorage(new Path(location).toUri(),
+                ConfigurationUtil.toProperties(conf));
         ElementDescriptor schemaFilePath = storage.asElement(location, schemaFileName);
         if(!schemaFilePath.exists() && schema != null) {
             try {
@@ -309,10 +312,11 @@ public class JsonMetadata implements LoadMetadata, StoreMetadata {
                 OutputStream os = headerFilePath.create();
                 try {
                     String[] names = schema.fieldNames();
-
+                    String fn;
                     for (int i=0; i < names.length; i++) {
-                        os.write(names[i].getBytes("UTF-8"));
-                        if (i <names.length-1) {
+                        fn = ( (names[i] == null) ? ("$"+i) : names[i] );
+                        os.write(fn.getBytes("UTF-8"));
+                        if (i < names.length-1) {
                             os.write(fieldDel);
                         } else {
                             os.write(recordDel);

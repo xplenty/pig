@@ -21,20 +21,18 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PushbackInputStream;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 
-import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.pig.LoadStoreCaster;
 import org.apache.pig.PigWarning;
-import org.apache.pig.ResourceSchema;
 import org.apache.pig.ResourceSchema.ResourceFieldSchema;
 import org.apache.pig.data.BagFactory;
 import org.apache.pig.data.DataBag;
@@ -44,11 +42,12 @@ import org.apache.pig.data.DefaultBagFactory;
 import org.apache.pig.data.Tuple;
 import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.util.LogUtils;
+import org.joda.time.DateTime;
 
 /**
  * This abstract class provides standard conversions between utf8 encoded data
  * and pig data types.  It is intended to be extended by load and store
- * functions (such as {@link PigStorage}). 
+ * functions (such as {@link PigStorage}).
  */
 public class Utf8StorageConverter implements LoadStoreCaster {
 
@@ -61,7 +60,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
     private static final Long mMaxLong = Long.valueOf(Long.MAX_VALUE);
     private static final Long mMinLong = Long.valueOf(Long.MIN_VALUE);
     private static final int BUFFER_SIZE = 1024;
-        
+
     public Utf8StorageConverter() {
     }
 
@@ -73,7 +72,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         default: throw new IOException("Unknown start character");
         }
     }
-    
+
     private DataBag consumeBag(PushbackInputStream in, ResourceFieldSchema fieldSchema) throws IOException {
         if (fieldSchema==null) {
             throw new IOException("Schema is null");
@@ -104,14 +103,14 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         }
         return db;
     }
-    
+
     private Tuple consumeTuple(PushbackInputStream in, ResourceFieldSchema fieldSchema) throws IOException {
         if (fieldSchema==null) {
             throw new IOException("Schema is null");
         }
         int buf;
         ByteArrayOutputStream mOut;
-        
+
         while ((buf=in.read())!='('||buf=='}') {
             if (buf==-1) {
                 throw new IOException("Unexpect end of tuple");
@@ -131,7 +130,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
                 int delimit = ',';
                 if (i==fss.length-1)
                     delimit = ')';
-                
+
                 if (DataType.isComplex(fs.getType())) {
                     field = consumeComplexType(in, fs);
                     while ((buf=in.read())!=delimit) {
@@ -194,10 +193,11 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         }
         return t;
     }
-    
+
     private Map<String, Object> consumeMap(PushbackInputStream in, ResourceFieldSchema fieldSchema) throws IOException {
         int buf;
-        
+        boolean emptyMap = true;
+
         while ((buf=in.read())!='[') {
             if (buf==-1) {
                 throw new IOException("Unexpect end of map");
@@ -208,15 +208,20 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         while (true) {
             // Read key (assume key can not contains special character such as #, (, [, {, }, ], )
             while ((buf=in.read())!='#') {
+                // end of map
+                if (emptyMap && buf==']') {
+                    return m;
+                }
                 if (buf==-1) {
                     throw new IOException("Unexpect end of map");
                 }
+                emptyMap = false;
                 mOut.write(buf);
             }
             String key = bytesToCharArray(mOut.toByteArray());
             if (key.length()==0)
                 throw new IOException("Map key can not be null");
-            
+
             // Read value
             mOut.reset();
             Deque<Character> level = new LinkedList<Character>(); // keep track of nested tuple/bag/map. We do not interpret, save them as bytearray
@@ -234,7 +239,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
                 {
                 	if (level.isEmpty())
                 		throw new IOException("Malformed map");
-                	
+
                     if (level.peek()==findStartChar((char)buf))
                         level.pop();
                 } else if (buf==','&&level.isEmpty()) { // Current map item complete
@@ -255,7 +260,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         }
         return m;
     }
-    
+
     private Object bytesToObject(byte[] b, ResourceFieldSchema fs) throws IOException {
         Object field;
         if (DataType.isComplex(fs.getType())) {
@@ -268,7 +273,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         }
         return field;
     }
-    
+
     private Object consumeComplexType(PushbackInputStream in, ResourceFieldSchema complexFieldSchema) throws IOException {
         Object field;
         switch (complexFieldSchema.getType()) {
@@ -286,7 +291,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         }
         return field;
     }
-    
+
     private Object parseSimpleType(byte[] b, ResourceFieldSchema simpleFieldSchema) throws IOException {
         Object field;
         switch (simpleFieldSchema.getType()) {
@@ -311,6 +316,12 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         case DataType.BOOLEAN:
             field = bytesToBoolean(b);
             break;
+        case DataType.BIGINTEGER:
+            field = bytesToBigInteger(b);
+            break;
+        case DataType.BIGDECIMAL:
+            field = bytesToBigDecimal(b);
+            break;
         case DataType.DATETIME:
             field = bytesToDateTime(b);
             break;
@@ -332,7 +343,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         } catch (IOException e) {
             LogUtils.warn(this, "Unable to interpret value " + Arrays.toString(b) + " in field being " +
                     "converted to type bag, caught ParseException <" +
-                    e.getMessage() + "> field discarded", 
+                    e.getMessage() + "> field discarded",
                     PigWarning.FIELD_DISCARDED_TYPE_CONVERSION_FAILED, mLog);
             return null;
         }
@@ -348,23 +359,27 @@ public class Utf8StorageConverter implements LoadStoreCaster {
 
     @Override
     public Double bytesToDouble(byte[] b) {
-        if(b == null)
+        if(b == null || b.length == 0) {
             return null;
+        }
+        
         try {
             return Double.valueOf(new String(b));
         } catch (NumberFormatException nfe) {
             LogUtils.warn(this, "Unable to interpret value " + Arrays.toString(b) + " in field being " +
                     "converted to double, caught NumberFormatException <" +
-                    nfe.getMessage() + "> field discarded", 
+                    nfe.getMessage() + "> field discarded",
                     PigWarning.FIELD_DISCARDED_TYPE_CONVERSION_FAILED, mLog);
             return null;
         }
     }
-    
+
     @Override
     public Float bytesToFloat(byte[] b) throws IOException {
-        if(b == null)
+        if(b == null || b.length == 0) {
             return null;
+        }
+        
         String s;
         if (b.length > 0 && (b[b.length - 1] == 'F' || b[b.length - 1] == 'f')) {
             s = new String(b, 0, b.length - 1);
@@ -377,12 +392,12 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         } catch (NumberFormatException nfe) {
             LogUtils.warn(this, "Unable to interpret value " + Arrays.toString(b) + " in field being " +
                     "converted to float, caught NumberFormatException <" +
-                    nfe.getMessage() + "> field discarded", 
+                    nfe.getMessage() + "> field discarded",
                     PigWarning.FIELD_DISCARDED_TYPE_CONVERSION_FAILED, mLog);
             return null;
         }
     }
-    
+
 
     @Override
     public Boolean bytesToBoolean(byte[] b) throws IOException {
@@ -397,9 +412,9 @@ public class Utf8StorageConverter implements LoadStoreCaster {
             return null;
         }
     }
-    
+
     /**
-     * Sanity check of whether this number is a valid integer or long. 
+     * Sanity check of whether this number is a valid integer or long.
      * @param number the number to check
      * @return true if it doesn't contain any invalid characters, i.e. only contains digits and '-'
      */
@@ -418,11 +433,14 @@ public class Utf8StorageConverter implements LoadStoreCaster {
 
     @Override
     public Integer bytesToInteger(byte[] b) throws IOException {
-        if(b == null)
+        if(b == null || b.length == 0) {
             return null;
-        String s = new String(b);
-        Integer ret = null;
+        }
         
+        String s = new String(b);
+        s = s.trim();
+        Integer ret = null;
+
         // See PIG-2835. Using exception handling to check if it's a double is very expensive.
         // So we write our sanity check.
         if (sanityCheckIntegerLong(s)){
@@ -441,7 +459,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
                 // Need to check for an overflow error
                 if (Double.compare(d.doubleValue(), mMaxInt.doubleValue() + 1) >= 0 ||
                         Double.compare(d.doubleValue(), mMinInt.doubleValue() - 1) <= 0) {
-                    LogUtils.warn(this, "Value " + d + " too large for integer", 
+                    LogUtils.warn(this, "Value " + d + " too large for integer",
                             PigWarning.TOO_LARGE_FOR_INT, mLog);
                     return null;
                 }
@@ -449,25 +467,25 @@ public class Utf8StorageConverter implements LoadStoreCaster {
             } catch (NumberFormatException nfe2) {
                 LogUtils.warn(this, "Unable to interpret value " + Arrays.toString(b) + " in field being " +
                         "converted to int, caught NumberFormatException <" +
-                        nfe2.getMessage() + "> field discarded", 
+                        nfe2.getMessage() + "> field discarded",
                         PigWarning.FIELD_DISCARDED_TYPE_CONVERSION_FAILED, mLog);
                 return null;
             }
         }
         return ret;
     }
-    
+
     @Override
     public Long bytesToLong(byte[] b) throws IOException {
-        if (b == null)
+        if (b == null || b.length == 0) {
             return null;
-        String s;
-        if (b.length > 0 && (b[b.length - 1] == 'L' || b[b.length - 1] == 'l')) {
-            s = new String(b, 0, b.length - 1);
-        } else {
-            s = new String(b);
         }
         
+        String s = new String(b).trim();
+        if(s.endsWith("l") || s.endsWith("L")) {
+            s = s.substring(0, s.length()-1);
+        }
+
         // See PIG-2835. Using exception handling to check if it's a double is very expensive.
         // So we write our sanity check.
         Long ret = null;
@@ -477,7 +495,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
             } catch (NumberFormatException nfe) {
             }
         }
-        
+
         if (ret == null) {
             // It's possible that this field can be interpreted as a double.
             // Unfortunately Java doesn't handle this in Long.valueOf.  So
@@ -488,7 +506,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
                 // Need to check for an overflow error
                 if (Double.compare(d.doubleValue(), mMaxLong.doubleValue() + 1) > 0 ||
                         Double.compare(d.doubleValue(), mMinLong.doubleValue() - 1) < 0) {
-                	LogUtils.warn(this, "Value " + d + " too large for long", 
+                	LogUtils.warn(this, "Value " + d + " too large for long",
                 	            PigWarning.TOO_LARGE_FOR_INT, mLog);
                     return null;
                 }
@@ -496,7 +514,7 @@ public class Utf8StorageConverter implements LoadStoreCaster {
             } catch (NumberFormatException nfe2) {
                 LogUtils.warn(this, "Unable to interpret value " + Arrays.toString(b) + " in field being " +
                             "converted to long, caught NumberFormatException <" +
-                            nfe2.getMessage() + "> field discarded", 
+                            nfe2.getMessage() + "> field discarded",
                             PigWarning.FIELD_DISCARDED_TYPE_CONVERSION_FAILED, mLog);
                 return null;
             }
@@ -511,23 +529,17 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         }
         try {
             String dtStr = new String(b);
-            DateTimeZone dtz = ToDate.extractDateTimeZone(dtStr);
-            if (dtz == null) {
-                return new DateTime(dtStr);
-            } else {
-                return new DateTime(dtStr, dtz);
-            }
+            return ToDate.extractDateTime(dtStr);
         } catch (IllegalArgumentException e) {
             LogUtils.warn(this, "Unable to interpret value " + Arrays.toString(b) + " in field being " +
                     "converted to datetime, caught IllegalArgumentException <" +
-                    e.getMessage() + "> field discarded", 
+                    e.getMessage() + "> field discarded",
                     PigWarning.FIELD_DISCARDED_TYPE_CONVERSION_FAILED, mLog);
             return null;
         }
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Map<String, Object> bytesToMap(byte[] b, ResourceFieldSchema fieldSchema) throws IOException {
         if(b == null)
             return null;
@@ -540,16 +552,11 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         catch (IOException e) {
             LogUtils.warn(this, "Unable to interpret value " + Arrays.toString(b) + " in field being " +
                     "converted to type map, caught ParseException <" +
-                    e.getMessage() + "> field discarded", 
+                    e.getMessage() + "> field discarded",
                     PigWarning.FIELD_DISCARDED_TYPE_CONVERSION_FAILED, mLog);
-            return null;       
+            return null;
         }
         return map;
-    }
-    
-    @Override
-    public Map<String, Object> bytesToMap(byte[] b) throws IOException {
-        return bytesToMap(b, null);
     }
 
     @Override
@@ -557,21 +564,37 @@ public class Utf8StorageConverter implements LoadStoreCaster {
         if(b == null)
             return null;
         Tuple t;
-        
+
         try {
             ByteArrayInputStream bis = new ByteArrayInputStream(b);
             PushbackInputStream in = new PushbackInputStream(bis);
             t = consumeTuple(in, fieldSchema);
-        } 
+        }
         catch (IOException e) {
             LogUtils.warn(this, "Unable to interpret value " + Arrays.toString(b) + " in field being " +
                     "converted to type tuple, caught ParseException <" +
-                    e.getMessage() + "> field discarded", 
+                    e.getMessage() + "> field discarded",
                     PigWarning.FIELD_DISCARDED_TYPE_CONVERSION_FAILED, mLog);
-            return null;       
+            return null;
         }
 
         return t;
+    }
+
+    @Override
+    public BigInteger bytesToBigInteger(byte[] b) throws IOException {
+        if (b == null || b.length == 0) {
+            return null;
+        }
+        return new BigInteger(new String(b));
+    }
+
+    @Override
+    public BigDecimal bytesToBigDecimal(byte[] b) throws IOException {
+        if (b == null || b.length == 0) {
+            return null;
+        }
+        return new BigDecimal(new String(b));
     }
 
     @Override
@@ -627,6 +650,16 @@ public class Utf8StorageConverter implements LoadStoreCaster {
     @Override
     public byte[] toBytes(DataByteArray a) throws IOException {
         return a.get();
+    }
+
+    @Override
+    public byte[] toBytes(BigInteger bi) throws IOException {
+        return bi.toString().getBytes();
+    }
+
+    @Override
+    public byte[] toBytes(BigDecimal bd) throws IOException {
+        return bd.toString().getBytes();
     }
 
 }

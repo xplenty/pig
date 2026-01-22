@@ -1,14 +1,12 @@
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
+ * or more contributor license agreements. See the NOTICE file
  * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
+ * regarding copyright ownership. The ASF licenses this file
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
+ * with the License. You may obtain a copy of the License at
+ * http://www.apache.org/licenses/LICENSE-2.0
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,38 +15,22 @@
  */
 package org.apache.pig.test;
 
-import java.util.Map;
-import java.util.Random;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
-import org.joda.time.DateTime;
-
-import org.apache.pig.backend.executionengine.ExecException;
-import org.apache.pig.data.DataBag;
-import org.apache.pig.data.DataByteArray;
-import org.apache.pig.data.DataType;
-import org.apache.pig.data.Tuple;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.POStatus;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.Result;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.ConstantExpression;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.expressionOperators.GTOrEqualToExpr;
+import org.apache.pig.data.DataByteArray;
+import org.apache.pig.data.DataType;
 import org.apache.pig.test.utils.GenPhyOp;
-import org.apache.pig.test.utils.GenRandomData;
-import org.junit.After;
-import org.junit.Before;
+import org.joda.time.DateTime;
 import org.junit.Test;
 
-import static org.junit.Assert.*;
-
-public class TestGTOrEqual extends junit.framework.TestCase {
-
-    @Before
-    public void setUp() throws Exception {
-    }
-
-    @After
-    public void tearDown() throws Exception {
-    }
-
+public class TestGTOrEqual {
     @Test
     public void testIntegerGt() throws Exception {
         ConstantExpression lt = GenPhyOp.exprConst();
@@ -59,7 +41,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.INTEGER);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
@@ -74,7 +56,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.INTEGER);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertFalse((Boolean)r.result);
     }
@@ -89,17 +71,17 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.INTEGER);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
 
     @Test
     public void testIntegerAndNullValues() throws Exception {
-    	
-    	checkNullValues( DataType.INTEGER,  new Integer(1) );
+
+        checkNullValues(DataType.INTEGER, new Integer(1));
     }
-    
+
     @Test
     public void testLongGt() throws Exception {
         ConstantExpression lt = GenPhyOp.exprConst();
@@ -110,12 +92,11 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.LONG);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
 
-    
     @Test
     public void testLongLt() throws Exception {
         ConstantExpression lt = GenPhyOp.exprConst();
@@ -126,7 +107,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.LONG);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertFalse((Boolean)r.result);
     }
@@ -141,15 +122,15 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.LONG);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
 
     @Test
     public void testLongAndNullValues() throws Exception {
-    	
-    	checkNullValues( DataType.LONG,  new Long(1L) );
+
+        checkNullValues(DataType.LONG, new Long(1L));
     }
 
     @Test
@@ -162,7 +143,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.FLOAT);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
@@ -177,7 +158,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.FLOAT);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertFalse((Boolean)r.result);
     }
@@ -192,18 +173,17 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.FLOAT);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
 
     @Test
     public void testFloatAndNullValues() throws Exception {
-    	
-    	checkNullValues( DataType.FLOAT,  new Float(1.0f) );
+
+        checkNullValues(DataType.FLOAT, new Float(1.0f));
     }
 
-    
     @Test
     public void testDoubleGt() throws Exception {
         ConstantExpression lt = GenPhyOp.exprConst();
@@ -214,7 +194,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.DOUBLE);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
@@ -229,7 +209,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.DOUBLE);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertFalse((Boolean)r.result);
     }
@@ -244,15 +224,15 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.DOUBLE);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
 
     @Test
     public void testDoubleAndNullValues() throws Exception {
-    	
-    	checkNullValues( DataType.DOUBLE,  new Double(1.0) );
+
+        checkNullValues(DataType.DOUBLE, new Double(1.0));
     }
 
     @Test
@@ -265,7 +245,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.DATETIME);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
@@ -280,7 +260,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.DATETIME);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertFalse((Boolean)r.result);
     }
@@ -295,15 +275,15 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.DATETIME);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
 
     @Test
     public void testDateTimeAndNullValues() throws Exception {
-        
-        checkNullValues( DataType.DATETIME,  new DateTime(1L) );
+
+        checkNullValues(DataType.DATETIME, new DateTime(1L));
     }
 
     @Test
@@ -316,7 +296,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.CHARARRAY);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
@@ -331,7 +311,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.CHARARRAY);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertFalse((Boolean)r.result);
     }
@@ -346,15 +326,15 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.CHARARRAY);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
 
     @Test
     public void testStringAndNullValues() throws Exception {
-    	
-    	checkNullValues( DataType.CHARARRAY,  new String("b") );
+
+        checkNullValues(DataType.CHARARRAY, new String("b"));
     }
 
     @Test
@@ -367,7 +347,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.BYTEARRAY);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
@@ -382,7 +362,7 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.BYTEARRAY);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertFalse((Boolean)r.result);
     }
@@ -397,20 +377,17 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         g.setLhs(lt);
         g.setRhs(rt);
         g.setOperandType(DataType.BYTEARRAY);
-        Result r = g.getNext(new Boolean(true));
+        Result r = g.getNextBoolean();
         assertEquals(POStatus.STATUS_OK, r.returnStatus);
         assertTrue((Boolean)r.result);
     }
 
     @Test
     public void testDataByteArrayAndNullValues() throws Exception {
-    	
-    	checkNullValues( DataType.BYTEARRAY,  new DataByteArray("b") );
+        checkNullValues(DataType.BYTEARRAY, new DataByteArray("b"));
     }
 
-
-	public <U> void checkNullValues( byte operandType, U value ) throws Exception {
-		
+    public <U> void checkNullValues(byte operandType, U value) throws Exception {
         ConstantExpression lt = GenPhyOp.exprConst();
         ConstantExpression rt = GenPhyOp.exprConst();
         GTOrEqualToExpr g = GenPhyOp.compGTOrEqualToExpr();
@@ -418,44 +395,34 @@ public class TestGTOrEqual extends junit.framework.TestCase {
         // test with null in lhs
         g.setOperandType(operandType);
         lt.setValue(null);
-        rt.setValue( value );
+        rt.setValue(value);
         g.setLhs(lt);
         g.setRhs(rt);
-       
-        Result r = g.getNext(new Boolean(true));
-        assertEquals(POStatus.STATUS_NULL, r.returnStatus);
-        assertEquals(null, (Boolean)r.result);
-        
+
+        Result r = g.getNextBoolean();
+        assertEquals(POStatus.STATUS_OK, r.returnStatus);
+        assertNull(r.result);
+
         // test with null in rhs
         g.setOperandType(operandType);
-        lt.setValue( value );
+        lt.setValue(value);
         rt.setValue(null);
         g.setLhs(lt);
         g.setRhs(rt);
-       
-        r = g.getNext(new Boolean(true));
-        assertEquals(POStatus.STATUS_NULL, r.returnStatus);
-        assertEquals(null, (Boolean)r.result);
-   
-        
+
+        r = g.getNextBoolean();
+        assertEquals(POStatus.STATUS_OK, r.returnStatus);
+        assertNull(r.result);
+
         // test with null in lhs and rhs
         g.setOperandType(operandType);
         lt.setValue(null);
         rt.setValue(null);
         g.setLhs(lt);
         g.setRhs(rt);
-       
-        r = g.getNext(new Boolean(true));
-        assertEquals(POStatus.STATUS_NULL, r.returnStatus);
-        assertEquals(null, (Boolean)r.result);
- 
 
+        r = g.getNextBoolean();
+        assertEquals(POStatus.STATUS_OK, r.returnStatus);
+        assertNull(r.result);
     }
-
-
-
-
-
-
-
 }

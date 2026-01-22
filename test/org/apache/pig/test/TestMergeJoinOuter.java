@@ -24,12 +24,16 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Properties;
 
 import org.apache.pig.ExecType;
 import org.apache.pig.PigServer;
 import org.apache.pig.backend.executionengine.ExecException;
+import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MRConfiguration;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.MapReduceOper;
 import org.apache.pig.backend.hadoop.executionengine.mapReduceLayer.plans.MROperPlan;
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.PhysicalOperator;
@@ -56,14 +60,14 @@ public class TestMergeJoinOuter {
     private static final String INPUT_FILE1 = "testMergeJoinInput.txt";
     private static final String INPUT_FILE2 = "testMergeJoinInput2.txt";
     private PigServer pigServer;
-    private static MiniCluster cluster = MiniCluster.buildCluster();
+    private static MiniGenericCluster cluster = MiniGenericCluster.buildCluster();
     
     public TestMergeJoinOuter() throws ExecException{
         
         Properties props = cluster.getProperties();
-        props.setProperty("mapred.map.max.attempts", "1");
-        props.setProperty("mapred.reduce.max.attempts", "1");
-        pigServer = new PigServer(ExecType.MAPREDUCE, props);
+        props.setProperty(MRConfiguration.MAP_MAX_ATTEMPTS, "1");
+        props.setProperty(MRConfiguration.REDUCE_MAX_ATTEMPTS, "1");
+        pigServer = new PigServer(cluster.getExecType(), props);
     }
     
     @Before
@@ -118,13 +122,17 @@ public class TestMergeJoinOuter {
             assertEquals(2,mrPlan.size());
 
             Iterator<MapReduceOper> itr = mrPlan.iterator();
-            MapReduceOper oper = itr.next();
-            assertTrue(oper.reducePlan.isEmpty());
-            assertFalse(oper.mapPlan.isEmpty());
-
-            oper = itr.next();
-            assertFalse(oper.reducePlan.isEmpty());
-            assertFalse(oper.mapPlan.isEmpty());
+            List<MapReduceOper> opers = new ArrayList<MapReduceOper>();
+            opers.add(itr.next());
+            opers.add(itr.next());
+            //Order of entrySet is not guaranteed with jdk1.7
+            Collections.sort(opers);
+            
+            assertTrue(opers.get(0).reducePlan.isEmpty());
+            assertFalse(opers.get(0).mapPlan.isEmpty());
+            
+            assertFalse(opers.get(1).reducePlan.isEmpty());
+            assertFalse(opers.get(1).mapPlan.isEmpty());
 
 
         } catch(Exception e){
@@ -151,9 +159,8 @@ public class TestMergeJoinOuter {
         boolean exceptionCaught = false;
         try{
             Util.buildPp(pigServer, query);   
-        }catch (java.lang.reflect.InvocationTargetException e){
-        	FrontendException ex = (FrontendException)e.getTargetException();
-            assertEquals(1103,ex.getErrorCode());
+        }catch (FrontendException e){
+            assertEquals(1103,e.getErrorCode());
             exceptionCaught = true;
         }
         assertTrue(exceptionCaught);
@@ -161,7 +168,7 @@ public class TestMergeJoinOuter {
     
     @Test
     public void testLeftOuter() throws IOException {
-        
+
         pigServer.registerQuery("A = LOAD '"+INPUT_FILE1+"' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
         pigServer.registerQuery("B = LOAD '"+INPUT_FILE2+"' using "+ DummyIndexableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
 
@@ -190,7 +197,7 @@ public class TestMergeJoinOuter {
     
     @Test
     public void testRightOuter() throws IOException{
-        
+
         pigServer.registerQuery("A = LOAD '"+INPUT_FILE1+"' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
         pigServer.registerQuery("B = LOAD '"+INPUT_FILE2+"' using "+ DummyIndexableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
         pigServer.registerQuery("C = join A by c1 right, B by c1 using 'merge';");
@@ -217,7 +224,7 @@ public class TestMergeJoinOuter {
     
     @Test
     public void testFullOuter() throws IOException{
-        
+
         pigServer.registerQuery("A = LOAD '"+INPUT_FILE1+"' using "+ DummyCollectableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
         pigServer.registerQuery("B = LOAD '"+INPUT_FILE2+"' using "+ DummyIndexableLoader.class.getName() +"() as (c1:chararray, c2:chararray);");
         pigServer.registerQuery("C = join A by c1 full, B by c1 using 'merge';");

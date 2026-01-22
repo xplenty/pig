@@ -32,7 +32,6 @@ import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhyPlan
 import org.apache.pig.backend.hadoop.executionengine.physicalLayer.plans.PhysicalPlan;
 import org.apache.pig.data.DataType;
 import org.apache.pig.data.Tuple;
-import org.apache.pig.data.TupleFactory;
 import org.apache.pig.impl.plan.OperatorKey;
 import org.apache.pig.impl.plan.VisitorException;
 import org.apache.pig.pen.util.ExampleTuple;
@@ -54,8 +53,6 @@ public class PORank extends PhysicalOperator {
     private List<PhysicalPlan> rankPlans;
     private List<Boolean> mAscCols;
     private List<Byte> ExprOutputTypes;
-
-    protected static final TupleFactory mTupleFactory = TupleFactory.getInstance();
 
     /**
      * Unique identifier that links POCounter and PORank,
@@ -83,6 +80,13 @@ public class PORank extends PhysicalOperator {
 
     public PORank(OperatorKey k, int rp, List<PhysicalOperator> inp) {
         super(k, rp, inp);
+    }
+
+    public PORank(PORank copy) {
+        super(copy);
+        this.rankPlans = copy.rankPlans;
+        this.mAscCols = copy.mAscCols;
+        this.ExprOutputTypes = copy.ExprOutputTypes;
     }
 
     @SuppressWarnings({ "rawtypes", "unchecked" })
@@ -119,7 +123,7 @@ public class PORank extends PhysicalOperator {
     }
 
     @Override
-    public Result getNext(Tuple t) throws ExecException {
+    public Result getNextTuple() throws ExecException {
         Result inp = null;
 
         while (true) {
@@ -142,41 +146,41 @@ public class PORank extends PhysicalOperator {
      * Here is read the task identifier in order to get the corresponding cumulative sum,
      * and the local counter at the tuple. These values are summed and prepended to the tuple.
      * @param input processed by POCounter
-     * @result tuple with the prepend rank value.
+     * @return input as Result. The input.result tuple owns the prepend rank value
      **/
     public Result addRank(Result input) throws ExecException {
-        int i = 1;
         Tuple in = (Tuple) input.result;
-        Tuple out = mTupleFactory.newTuple(in.getAll().size() - 1);
 
-        Long taskId = Long.valueOf(in.get(0).toString());
-        Long localCounter = (Long) in.get(1);
+        Long localCounter = (Long) in.get(0);
+        Integer taskId = (Integer) in.getAll().remove(in.getAll().size() - 1);
 
-        String nameCounter = JobControlCompiler.PIG_MAP_COUNTER + getOperationID() + JobControlCompiler.PIG_MAP_SEPARATOR + String.valueOf(taskId);
+        Long rank = getRankCounterOffset(taskId);
 
-        Long rank = PigMapReduce.sJobConfInternal.get().getLong( nameCounter , -1L );
-        
-        if(rank == -1) {
-            log.error("Error on reading counter "+ nameCounter);
-            throw new RuntimeException("Unable to read counter "+ nameCounter);
-        }
-
-        out.set(0, rank + localCounter);
-
-        //Add the content of the tuple
-        List<Object> sub = in.getAll().subList(2, in.getAll().size());
-
-        for (Object o : sub)
-            out.set(i++, o);
+        in.set(0, rank + localCounter);
 
         if(localCountIllustrator > 2)
             localCountIllustrator = 0;
 
-        input.result = illustratorMarkup(in, out, localCountIllustrator);
+        input.result = illustratorMarkup(in, in, localCountIllustrator);
 
         localCountIllustrator++;
 
         return input;
+    }
+
+    protected Long getRankCounterOffset(Integer taskId) {
+        String nameCounter = JobControlCompiler.PIG_MAP_COUNTER + getOperationID() + JobControlCompiler.PIG_MAP_SEPARATOR + String.valueOf(taskId);
+        Long rank = PigMapReduce.sJobConfInternal.get().getLong( nameCounter , -1L );
+
+        if(illustrator != null) {
+            rank = 0L;
+        }
+
+        if(rank == -1) {
+            log.error("Error on reading counter "+ nameCounter);
+            throw new RuntimeException("Unable to read counter "+ nameCounter);
+        }
+        return rank;
     }
 
     @Override
@@ -222,5 +226,12 @@ public class PORank extends PhysicalOperator {
 
     public String getOperationID() {
         return operationID;
+    }
+
+    @Override
+    public PORank clone() throws CloneNotSupportedException {
+        PORank clone = (PORank)super.clone();
+        // rankPlans, mAscCols, ExprOutputTypes are unused. Not cloning them
+        return clone;
     }
 }

@@ -74,7 +74,7 @@ public class GetMinute extends EvalFunc<Integer> {
 
     @Override
     public Integer exec(Tuple input) throws IOException {
-        if (input == null || input.size() < 1) {
+        if (input == null || input.size() < 1 || input.get(0) == null) {
             return null;
         }
 
@@ -92,5 +92,10 @@ public class GetMinute extends EvalFunc<Integer> {
         funcList.add(new FuncSpec(this.getClass().getName(), new Schema(new Schema.FieldSchema(null, DataType.DATETIME))));
 
         return funcList;
+    }
+
+    @Override
+    public boolean allowCompileTimeCalculation() {
+        return true;
     }
 }
