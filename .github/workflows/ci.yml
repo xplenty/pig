@@ -89,29 +89,62 @@ jobs:
           export JRE_HOME=${JAVA_HOME}
           ant jar -Dhadoopversion=2 -Dhbaseversion=1
 
+      - name: Generate POM file
+        run: |
+          cat > build/pig-23-withouthadoop-${PIG_VERSION}.pom << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <project xmlns="http://maven.apache.org/POM/4.0.0" 
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+            <modelVersion>4.0.0</modelVersion>
+            <groupId>common</groupId>
+            <artifactId>pig-23-withouthadoop</artifactId>
+            <version>${PIG_VERSION}</version>
+            <packaging>jar</packaging>
+            <name>Apache Pig (Hadoop 2.3, without Hadoop)</name>
+            <description>Apache Pig built for Hadoop 2.3 without bundled Hadoop libraries</description>
+          </project>
+          EOF
+          echo "Generated POM file:"
+          cat build/pig-23-withouthadoop-${PIG_VERSION}.pom
+
       - name: Setup JFrog CLI
         uses: jfrog/setup-jfrog-cli@v4
 
       - name: Deploy to staging
         if: github.ref == 'refs/heads/staging'
         run: |
-          # Upload the pig JAR to the correct path structure
+          # Upload the pig JAR
           jf rt upload \
-            "build/pig-23-withouthadoop-*.jar" \
-            "sharelib-stg/common/pig-23-withouthadoop/${PIG_VERSION}/" \
+            "build/pig-23-withouthadoop-${PIG_VERSION}.jar" \
+            "sharelib-stg/common/pig-23-withouthadoop/${PIG_VERSION}/pig-23-withouthadoop-${PIG_VERSION}.jar" \
             --url=https://xplenty.jfrog.io/artifactory \
             --user=${{ secrets.JFROG_USERNAME }} \
-            --password=${{ secrets.JFROG_PASSWORD }} \
-            --flat=true
+            --password=${{ secrets.JFROG_PASSWORD }}
+          
+          # Upload the POM file
+          jf rt upload \
+            "build/pig-23-withouthadoop-${PIG_VERSION}.pom" \
+            "sharelib-stg/common/pig-23-withouthadoop/${PIG_VERSION}/pig-23-withouthadoop-${PIG_VERSION}.pom" \
+            --url=https://xplenty.jfrog.io/artifactory \
+            --user=${{ secrets.JFROG_USERNAME }} \
+            --password=${{ secrets.JFROG_PASSWORD }}
 
       - name: Deploy to production
         if: github.ref == 'refs/heads/master'
         run: |
-          # Upload the pig JAR to the correct path structure
+          # Upload the pig JAR
           jf rt upload \
-            "build/pig-23-withouthadoop-*.jar" \
-            "sharelib/common/pig-23-withouthadoop/${PIG_VERSION}/" \
+            "build/pig-23-withouthadoop-${PIG_VERSION}.jar" \
+            "sharelib/common/pig-23-withouthadoop/${PIG_VERSION}/pig-23-withouthadoop-${PIG_VERSION}.jar" \
             --url=https://xplenty.jfrog.io/artifactory \
             --user=${{ secrets.JFROG_USERNAME }} \
-            --password=${{ secrets.JFROG_PASSWORD }} \
-            --flat=true
+            --password=${{ secrets.JFROG_PASSWORD }}
+          
+          # Upload the POM file
+          jf rt upload \
+            "build/pig-23-withouthadoop-${PIG_VERSION}.pom" \
+            "sharelib/common/pig-23-withouthadoop/${PIG_VERSION}/pig-23-withouthadoop-${PIG_VERSION}.pom" \
+            --url=https://xplenty.jfrog.io/artifactory \
+            --user=${{ secrets.JFROG_USERNAME }} \
+            --password=${{ secrets.JFROG_PASSWORD }}
