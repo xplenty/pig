@@ -137,7 +137,7 @@ public abstract class ExpressionOperator extends PhysicalOperator {
 
         return null;
         } catch (RuntimeException e) {
-            throw new ExecException("Exception while executing " + this.toString() + ": " + e.toString(), e);
+            throw new ExecException("Exception while executing " + this.toString() + xplentySourceTag() + ": " + e.toString(), e);
     }
     }
 

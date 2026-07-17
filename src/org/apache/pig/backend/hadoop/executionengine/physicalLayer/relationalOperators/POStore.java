@@ -128,7 +128,7 @@ public class POStore extends PhysicalOperator {
                 }
             }catch (IOException ioe) {
                 int errCode = 2081;
-                String msg = "Unable to setup the store function.";
+                String msg = "Unable to setup the store function" + xplentySourceTag() + ".";
                 throw new ExecException(msg, errCode, PigException.BUG, ioe);
             }
         }
@@ -179,7 +179,7 @@ public class POStore extends PhysicalOperator {
             }
         } catch (IOException ioe) {
             int errCode = 2135;
-            String msg = "Received error from store function." + ioe.getMessage();
+            String msg = "Received error from store function" + xplentySourceTag() + "." + ioe.getMessage();
             throw new ExecException(msg, errCode, ioe);
         }
         return res;

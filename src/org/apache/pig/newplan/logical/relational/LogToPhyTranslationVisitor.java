@@ -878,6 +878,23 @@ public class LogToPhyTranslationVisitor extends LogicalRelationalNodesVisitor {
         POForEach poFE = new POForEach(new OperatorKey(scope, nodeGen
                 .getNextNodeId(scope)), foreach.getRequestedParallelism(), innerPlans, flattenList, schema);
         poFE.addOriginalLocation(foreach.getAlias(), foreach.getLocation());
+        // XPLENTY: stamp the enclosing FOREACH's alias onto every inner
+        // expression operator that has no identity of its own, so runtime
+        // errors (UDF failures, casts, arithmetic) name their true source
+        // alias instead of the fused pipeline's tail operator. Location-only
+        // (xplentyStampLocation) — NOT addOriginalLocation, which would also
+        // overwrite each operator's alias field and change EXPLAIN output.
+        if (foreach.getAlias() != null) {
+            for (PhysicalPlan xpInner : innerPlans) {
+                java.util.Iterator<PhysicalOperator> xpIt = xpInner.iterator();
+                while (xpIt.hasNext()) {
+                    PhysicalOperator xpOp = xpIt.next();
+                    if (xpOp.getOriginalLocations().isEmpty()) {
+                        xpOp.xplentyStampLocation(foreach.getAlias(), foreach.getLocation());
+                    }
+                }
+            }
+        }
         poFE.setResultType(DataType.BAG);
         logToPhyMap.put(foreach, poFE);
         currentPlan.add(poFE);

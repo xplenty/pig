@@ -340,7 +340,7 @@ public class POUserFunc extends ExpressionOperator {
             throw ee;
         } catch (IOException ioe) {
             int errCode = 2078;
-            String msg = "Caught error from UDF: " + funcSpec.getClassName();
+            String msg = "Caught error from UDF: " + funcSpec.getClassName() + xplentySourceTag();
             String footer = " [" + ioe.getMessage() + "]";
 
             if(ioe instanceof PigException) {
@@ -359,7 +359,7 @@ public class POUserFunc extends ExpressionOperator {
         } catch (IndexOutOfBoundsException ie) {
             int errCode = 2078;
             String msg = "Caught error from UDF: " + funcSpec.getClassName() +
-                    ", Out of bounds access [" + ie.getMessage() + "]";
+                    xplentySourceTag() + ", Out of bounds access [" + ie.getMessage() + "]";
             throw new ExecException(msg, errCode, PigException.BUG, ie);
         }
     }
