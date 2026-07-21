@@ -205,6 +205,37 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
         return Collections.unmodifiableList(originalLocations);
     }
 
+    /**
+     * XPLENTY: location-only stamping. Unlike addOriginalLocation, this does
+     * NOT overwrite this.alias — the alias field feeds name()/toString()
+     * (EXPLAIN, plan printing, alias-to-job attribution), so renaming inner
+     * operators there would change behavior beyond error text. Used by
+     * LogToPhyTranslationVisitor to stamp a FOREACH's inner expression
+     * operators so runtime errors can name the true source alias.
+     */
+    public void xplentyStampLocation(String alias, SourceLocation sourceLocation) {
+        this.originalLocations.add(new OriginalLocation(alias, sourceLocation.line(), sourceLocation.offset()));
+    }
+
+    /**
+     * XPLENTY: renders this operator's stamped source identity as
+     * " (at alias[line,offset])" for inclusion in runtime error messages, so
+     * a failure names its true component instead of the fused tail operator.
+     * Empty string when no identity was stamped — messages then stay
+     * byte-for-byte identical to stock Pig.
+     */
+    protected String xplentySourceTag() {
+        if (originalLocations.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(" (at ");
+        for (int i = 0; i < originalLocations.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(originalLocations.get(i).toString());
+        }
+        return sb.append(")").toString();
+    }
+
     public void setAccumulative() {
         accum = true;
     }
@@ -312,7 +343,7 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
             }
         } catch (ExecException e) {
             throw new ExecException("Exception while executing "
-                    + this.toString() + ": " + e.toString(), e);
+                    + this.toString() + xplentySourceTag() + ": " + e.toString(), e);
         }
     }
 
@@ -361,7 +392,7 @@ public abstract class PhysicalOperator extends Operator<PhyPlanVisitor> implemen
                 throw new ExecException("Unsupported type for getNext: " + DataType.findTypeName(dataType));
             }
         } catch (RuntimeException e) {
-            throw new ExecException("Exception while executing " + this.toString() + ": " + e.toString(), e);
+            throw new ExecException("Exception while executing " + this.toString() + xplentySourceTag() + ": " + e.toString(), e);
         }
     }
 
